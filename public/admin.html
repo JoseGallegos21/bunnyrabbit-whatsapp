@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin — WhatsApp Sistema</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Arial,sans-serif}
+body{background:#f0f2f5;min-height:100vh}
+.topbar{background:#075e54;color:white;padding:12px 24px;display:flex;align-items:center;justify-content:space-between}
+.topbar h1{font-size:16px;font-weight:bold}
+.topbar-links{display:flex;gap:16px;align-items:center}
+.topbar a{color:rgba(255,255,255,0.8);font-size:13px;cursor:pointer;text-decoration:none}
+.topbar a:hover{color:white}
+.tabs{background:white;border-bottom:1px solid #e0e0e0;display:flex;padding:0 24px}
+.tab{padding:14px 20px;font-size:14px;cursor:pointer;border-bottom:2px solid transparent;color:#667781}
+.tab.active{color:#075e54;border-bottom-color:#075e54;font-weight:500}
+.content{max-width:1100px;margin:24px auto;padding:0 24px}
+.card{background:white;border-radius:12px;padding:24px;margin-bottom:20px;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+.card h2{font-size:16px;font-weight:500;margin-bottom:16px;color:#111}
+.section{display:none}.section.active{display:block}
+.form-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.form-group{display:flex;flex-direction:column;gap:4px;flex:1;min-width:180px}
+.form-group label{font-size:12px;color:#667781;font-weight:500}
+.form-group input,.form-group select,.form-group textarea{padding:9px 12px;border:1px solid #ddd;border-radius:8px;font-size:13px;resize:none;width:100%}
+.form-group textarea{min-height:80px}
+.btn{padding:9px 18px;border:none;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500}
+.btn-primary{background:#075e54;color:white}.btn-primary:hover{background:#064d45}
+.btn-danger{background:#fee2e2;color:#dc2626}.btn-danger:hover{background:#fecaca}
+.btn-edit{background:#e0f2fe;color:#0369a1}.btn-edit:hover{background:#bae6fd}
+.btn-sm{padding:5px 10px;font-size:12px}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:12px;color:#667781;font-weight:500;padding:8px 12px;border-bottom:1px solid #f0f0f0;background:#fafafa}
+td{padding:10px 12px;font-size:13px;border-bottom:1px solid #f9f9f9;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:500}
+.badge-supervisor{background:#e0f2fe;color:#0369a1}
+.badge-recepcionista{background:#e8f5e9;color:#2e7d32}
+.etapa-pill{font-size:11px;padding:2px 8px;border-radius:8px;font-weight:500}
+.etapa-Nuevo{background:#e3f2fd;color:#1565c0}
+.etapa-Seguimiento{background:#fff3e0;color:#e65100}
+.etapa-Propuesta{background:#f3e5f5;color:#6a1b9a}
+.etapa-Cerrado{background:#e8f5e9;color:#2e7d32}
+.modal-overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:100;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:white;border-radius:12px;padding:24px;width:480px;max-width:95vw}
+.modal h3{font-size:16px;margin-bottom:16px}
+.modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.stat-card{background:#f8fffe;border:1px solid #e0f2f1;border-radius:10px;padding:16px;text-align:center}
+.stat-card .num{font-size:28px;font-weight:bold;color:#075e54}
+.stat-card .lbl{font-size:12px;color:#667781;margin-top:4px}
+.bar-chart{display:flex;flex-direction:column;gap:8px}
+.bar-row{display:flex;align-items:center;gap:10px;font-size:12px}
+.bar-label{width:80px;color:#667781;text-align:right;flex-shrink:0}
+.bar-track{flex:1;background:#f0f2f5;border-radius:4px;height:20px;overflow:hidden}
+.bar-fill{height:100%;background:#075e54;border-radius:4px;transition:width 0.4s}
+.bar-val{width:40px;color:#111;font-weight:500}
+.alert{padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:12px}
+.alert-success{background:#e8f5e9;color:#2e7d32}
+.alert-error{background:#fee2e2;color:#dc2626}
+.difusion-estado-enviando{color:#e65100}
+.difusion-estado-completado{color:#2e7d32}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <h1>WhatsApp Sistema — Admin</h1>
+  <div class="topbar-links">
+    <span id="adminUser" style="font-size:13px;opacity:0.8"></span>
+    <a href="/">Ir al chat</a>
+    <a onclick="logout()">Salir</a>
+  </div>
+</div>
+
+<div id="loginWrap" style="display:flex;align-items:center;justify-content:center;min-height:80vh">
+  <div style="background:white;padding:40px;border-radius:12px;width:360px;box-shadow:0 2px 20px rgba(0,0,0,0.1)">
+    <h2 style="color:#075e54;margin-bottom:20px;text-align:center;font-size:18px">Admin Panel</h2>
+    <input type="email" id="email" placeholder="Correo" style="width:100%;padding:10px;margin-bottom:10px;border:1px solid #ddd;border-radius:8px;font-size:14px">
+    <input type="password" id="pass" placeholder="Contrasena" style="width:100%;padding:10px;margin-bottom:12px;border:1px solid #ddd;border-radius:8px;font-size:14px">
+    <button id="btnLogin" style="width:100%;padding:11px;background:#075e54;color:white;border:none;border-radius:8px;font-size:15px;cursor:pointer">Entrar</button>
+    <p id="loginErr" style="color:red;font-size:12px;margin-top:8px;text-align:center"></p>
+  </div>
+</div>
+
+<div id="adminApp" style="display:none">
+  <div class="tabs">
+    <div class="tab active" onclick="showTab('usuarios',this)">Usuarios</div>
+    <div class="tab" onclick="showTab('plantillas',this)">Plantillas</div>
+    <div class="tab" onclick="showTab('difusion',this)">Difusion</div>
+    <div class="tab" onclick="showTab('reportes',this)">Reportes</div>
+        <div class="tab" onclick="showTab('biblioteca',this)">Biblioteca</div>
+  </div>
+
+  <div class="content">
+    <!-- USUARIOS -->
+    <div class="section active" id="sec-usuarios">
+      <div class="card">
+        <h2>Crear nuevo usuario</h2>
+        <div class="form-row">
+          <div class="form-group"><label>Nombre</label><input type="text" id="u_nombre" placeholder="Nombre completo"></div>
+          <div class="form-group"><label>Email</label><input type="email" id="u_email" placeholder="email@empresa.com"></div>
+          <div class="form-group"><label>Contrasena</label><input type="password" id="u_pass" placeholder="Minimo 6 caracteres"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Sucursal</label><input type="text" id="u_sucursal" placeholder="Nombre de la sucursal"></div>
+          <div class="form-group"><label>Phone Number ID</label><input type="text" id="u_numero" placeholder="ID del numero de WhatsApp"></div>
+          <div class="form-group"><label>Rol</label>
+            <select id="u_rol"><option value="recepcionista">Recepcionista</option><option value="supervisor">Supervisor</option></select>
+          </div>
+        </div>
+        <button class="btn btn-primary" id="btnCrearUsuario">Crear usuario</button>
+        <p id="msgUsuario" style="font-size:13px;margin-top:8px"></p>
+      </div>
+      <div class="card">
+        <h2>Usuarios registrados</h2>
+        <table><thead><tr><th>Nombre</th><th>Email</th><th>Sucursal</th><th>Phone ID</th><th>Rol</th><th>Acciones</th></tr></thead>
+        <tbody id="tablaUsuarios"></tbody></table>
+      </div>
+    </div>
+
+    <!-- PLANTILLAS -->
+    <div class="section" id="sec-plantillas">
+      <div style="display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start">
+        <div class="card" style="margin:0">
+          <h2>Nueva plantilla</h2>
+          <div class="form-row">
+            <div class="form-group"><label>Número WhatsApp</label>
+              <select id="p_numero_id" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px"><option value="">-- Seleccionar número --</option></select>
+            </div>
+            <div class="form-group"><label>Nombre de plantilla</label>
+              <input type="text" id="p_nombre" placeholder="ej: saludo_inicial" style="text-transform:lowercase">
+            </div>
+            <div class="form-group"><label>Categoría</label>
+              <select id="p_cat">
+                <option value="MARKETING">Marketing</option>
+                <option value="UTILITY">Utilidad</option>
+                <option value="AUTHENTICATION">Autenticación</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- ENCABEZADO -->
+          <div class="form-group" style="margin-bottom:12px">
+            <label>Encabezado <span style="color:#999;font-weight:400;font-size:12px">· Opcional</span></label>
+            <div style="display:flex;gap:8px;margin-bottom:8px">
+              <button type="button" class="btn-tipo" data-tipo="NONE" onclick="setTipoHeader(this)" style="padding:5px 12px;border:1px solid #ddd;border-radius:6px;background:#075e54;color:#fff;font-size:12px;cursor:pointer">Ninguno</button>
+              <button type="button" class="btn-tipo" data-tipo="TEXT" onclick="setTipoHeader(this)" style="padding:5px 12px;border:1px solid #ddd;border-radius:6px;background:#fff;font-size:12px;cursor:pointer">Texto</button>
+              <button type="button" class="btn-tipo" data-tipo="IMAGE" onclick="setTipoHeader(this)" style="padding:5px 12px;border:1px solid #ddd;border-radius:6px;background:#fff;font-size:12px;cursor:pointer">Imagen</button>
+            </div>
+            <div id="header_text_wrap" style="display:none">
+              <input type="text" id="p_header_text" placeholder="Texto del encabezado" maxlength="60" oninput="actualizarPreview()">
+            </div>
+            <div id="header_image_wrap" style="display:none">
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <input type="file" id="p_header_file" accept="image/*" onchange="previewImagen(this)" style="flex:1;min-width:180px">
+                <button type="button" onclick="abrirModalBiblioteca()" style="padding:6px 12px;border:1px solid #075e54;border-radius:6px;color:#075e54;background:#fff;cursor:pointer;font-size:13px">🖼 Elegir de biblioteca</button>
+                <span id="upload_status" style="font-size:12px;color:#999"></span>
+              </div>
+              <div id="header_img_preview" style="margin-top:8px;display:none">
+                <img id="header_img_thumb" style="max-height:100px;border-radius:6px;border:1px solid #ddd">
+              </div>
+              <input type="hidden" id="p_header_image">
+            </div>
+
+            <!-- MODAL BIBLIOTECA -->
+            <div id="modalBiblioteca" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;overflow-y:auto">
+              <div style="background:#fff;border-radius:12px;max-width:700px;margin:40px auto;padding:24px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                  <h3 style="margin:0">Biblioteca de imágenes</h3>
+                  <button onclick="cerrarModalBiblioteca()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#999">×</button>
+                </div>
+                <div id="galeriaBibliotecaModal" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- CUERPO -->
+          <div class="form-group" style="margin-bottom:6px">
+            <label>Cuerpo del mensaje</label>
+            <div style="border:1px solid #ddd;border-radius:6px;overflow:hidden">
+              <div style="background:#f5f5f5;padding:4px 8px;display:flex;gap:6px;border-bottom:1px solid #ddd">
+                <button type="button" onclick="fmtTexto('bold')" title="Negrita" style="background:none;border:none;cursor:pointer;font-weight:bold;font-size:13px;padding:2px 6px">B</button>
+                <button type="button" onclick="fmtTexto('italic')" title="Cursiva" style="background:none;border:none;cursor:pointer;font-style:italic;font-size:13px;padding:2px 6px">I</button>
+                <button type="button" onclick="fmtTexto('strike')" title="Tachado" style="background:none;border:none;cursor:pointer;text-decoration:line-through;font-size:13px;padding:2px 6px">S</button>
+                <button type="button" onclick="fmtTexto('code')" title="Código" style="background:none;border:none;cursor:pointer;font-family:monospace;font-size:13px;padding:2px 6px">&#60;/&#62;</button>
+                <span style="width:1px;background:#ddd;margin:2px 4px"></span>
+                <button type="button" onclick="agregarVariable()" style="background:none;border:none;cursor:pointer;font-size:12px;padding:2px 6px;color:#075e54">+ Variable</button>
+              </div>
+              <textarea id="p_contenido" placeholder="Escribe el mensaje de la plantilla..." style="border:none;border-radius:0;min-height:100px" oninput="actualizarPreview();actualizarMuestras()"></textarea>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:4px">
+              <span style="font-size:11px;color:#999">Usa {{1}}, {{2}} para variables</span>
+              <span id="p_counter" style="font-size:11px;color:#999">0/1028</span>
+            </div>
+          </div>
+
+          <!-- PIE DE PAGINA -->
+          <div class="form-group" style="margin-bottom:12px">
+            <label>Pie de página <span style="color:#999;font-weight:400;font-size:12px">· Opcional</span></label>
+            <input type="text" id="p_footer" placeholder="Ej: No responder a este mensaje" maxlength="60" oninput="actualizarPreview()">
+          </div>
+
+          <!-- BOTONES -->
+          <div class="form-group" style="margin-bottom:16px">
+            <label>Botones de respuesta rápida <span style="color:#999;font-weight:400;font-size:12px">· Opcional (máx 3)</span></label>
+            <div id="botones_container"></div>
+            <button type="button" onclick="agregarBoton()" style="background:none;border:1px dashed #ddd;border-radius:6px;padding:6px 14px;color:#075e54;cursor:pointer;font-size:13px;margin-top:6px">+ Agregar botón</button>
+          </div>
+
+          <!-- MUESTRAS DE VARIABLES -->
+          <div id="muestras_wrap" style="display:none;margin-bottom:16px">
+            <label>Muestras de variables <span style="color:#999;font-weight:400;font-size:12px">· Meta las requiere para aprobar</span></label>
+            <div id="muestras_container"></div>
+          </div>
+
+          <button class="btn btn-primary" id="btnCrearPlantilla">Guardar y enviar a Meta</button>
+          <p id="msgPlantilla" style="font-size:13px;margin-top:8px"></p>
+        </div>
+
+        <!-- VISTA PREVIA -->
+        <div style="position:sticky;top:20px">
+          <div style="background:#e5ddd5;border-radius:12px;padding:16px;min-height:300px">
+            <p style="text-align:center;font-size:11px;color:#999;margin-bottom:12px">Vista previa</p>
+            <div id="preview_bubble" style="background:#fff;border-radius:8px;padding:12px;max-width:280px;margin:0 auto;box-shadow:0 1px 3px rgba(0,0,0,0.1);font-size:13px;line-height:1.5">
+              <div id="prev_header" style="margin-bottom:6px;font-weight:600;display:none"></div>
+              <div id="prev_body" style="color:#111;white-space:pre-wrap;word-break:break-word">El mensaje aparecerá aquí...</div>
+              <div id="prev_footer" style="font-size:11px;color:#999;margin-top:6px;display:none"></div>
+              <div style="font-size:10px;color:#999;text-align:right;margin-top:4px">4:20 pm ✓✓</div>
+            </div>
+            <div id="prev_botones" style="max-width:280px;margin:6px auto 0"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Plantillas guardadas</h2>
+        <table><thead><tr><th>Nombre</th><th>Categoría</th><th>Contenido</th><th>Estado Meta</th><th>Número</th><th>Acciones</th></tr></thead>
+        <tbody id="tablaPlantillas"></tbody></table>
+      </div>
+    </div>
+
+    <!-- DIFUSION -->
+    <div class="section" id="sec-difusion">
+      <div class="card">
+        <h2>Nueva difusion</h2>
+        <div class="form-row">
+          <div class="form-group"><label>Nombre de la campana</label><input type="text" id="d_nombre" placeholder="Ej: Promo mayo"></div>
+          <div class="form-group"><label>Filtrar por etapa</label>
+            <select id="d_etapa">
+              <option value="">Todos los contactos</option>
+              <option>Nuevo</option><option>Seguimiento</option><option>Propuesta</option><option>Cerrado</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Enviar desde numero</label>
+            <select id="d_numero"></select>
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:12px"><label>Mensaje</label>
+          <textarea id="d_mensaje" placeholder="Escribe el mensaje a enviar..."></textarea>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <button class="btn btn-primary" id="btnEnviarDifusion">Enviar difusion</button>
+          <span id="msgDifusion" style="font-size:13px"></span>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Historial de difusiones</h2>
+        <table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="border-bottom:2px solid #eee;background:#f9f9f9"><th style="padding:8px;text-align:left">Nombre</th><th style="padding:8px;text-align:left">Enviado por</th><th style="padding:8px;text-align:left">Número</th><th style="padding:8px;text-align:left">Fecha</th><th style="padding:8px;text-align:left">Etapa</th><th style="padding:8px;text-align:center">Total</th><th style="padding:8px;text-align:left">Progreso</th><th style="padding:8px;text-align:left">Estado</th></tr></thead>
+        <tbody id="tablaDifusiones"></tbody></table>
+      </div>
+    </div>
+
+    <!-- REPORTES -->
+    <div class="section" id="sec-biblioteca">
+      <div class="card">
+        <h2>Biblioteca de imágenes</h2>
+        <div style="display:flex;gap:12px;align-items:flex-end;margin-bottom:20px;flex-wrap:wrap">
+          <div class="form-group" style="margin:0;flex:1;min-width:200px">
+            <label>Nombre de la imagen</label>
+            <input type="text" id="bib_nombre" placeholder="Ej: Banner Hot Sale">
+          </div>
+          <div class="form-group" style="margin:0;flex:1;min-width:200px">
+            <label>Seleccionar imagen</label>
+            <input type="file" id="bib_file" accept="image/*">
+          </div>
+          <button class="btn btn-primary" id="btnSubirBiblioteca" style="height:38px">Subir imagen</button>
+          <span id="msgBiblioteca" style="font-size:13px"></span>
+        </div>
+        <div id="galeriaBiblioteca" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:16px"></div>
+      </div>
+    </div>
+
+    <div class="section" id="sec-reportes">
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <h2 style="margin:0">Resumen general</h2>
+          <select id="r_numero_id" onchange="cargarReportes()" style="padding:6px 12px;border:1px solid #ddd;border-radius:6px;margin-right:8px">
+            <option value="">Todos los números</option>
+          </select>
+          <select id="r_dias" onchange="cargarReportes()">
+            <option value="7">Ultimos 7 dias</option>
+            <option value="14">Ultimos 14 dias</option>
+            <option value="30">Ultimos 30 dias</option>
+          </select>
+        </div>
+        <div class="stat-grid" id="statsGrid"></div>
+      </div>
+      <div class="card">
+        <h2>Actividad por dia</h2>
+        <div class="bar-chart" id="barChart"></div>
+      </div>
+      <div class="card">
+        <h2>Contactos por etapa del pipeline</h2>
+        <div class="bar-chart" id="etapasChart"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal editar usuario -->
+<div class="modal-overlay" id="modalUsuario">
+  <div class="modal">
+    <h3>Editar usuario</h3>
+    <input type="hidden" id="edit_id">
+    <div class="form-row">
+      <div class="form-group"><label>Nombre</label><input type="text" id="edit_nombre"></div>
+      <div class="form-group"><label>Sucursal</label><input type="text" id="edit_sucursal"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Phone Number ID</label><input type="text" id="edit_numero"></div>
+      <div class="form-group"><label>Rol</label>
+        <select id="edit_rol"><option value="recepcionista">Recepcionista</option><option value="supervisor">Supervisor</option></select>
+      </div>
+    </div>
+    <div class="form-group"><label>Nueva contrasena (dejar vacio para no cambiar)</label><input type="password" id="edit_pass" placeholder="Nueva contrasena"></div>
+    <div class="modal-footer">
+      <button class="btn" onclick="cerrarModal()" style="background:#f0f2f5">Cancelar</button>
+      <button class="btn btn-primary" id="btnGuardarUsuario">Guardar cambios</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal editar plantilla -->
+<div class="modal-overlay" id="modalPlantilla">
+  <div class="modal">
+    <h3>Editar plantilla</h3>
+    <input type="hidden" id="ep_id">
+    <div class="form-row">
+      <div class="form-group"><label>Nombre</label><input type="text" id="ep_nombre"></div>
+      <div class="form-group"><label>Categoria</label>
+        <select id="ep_cat"><option>Bienvenida</option><option>Seguimiento</option><option>Cierre</option><option>Promocion</option><option>General</option></select>
+      </div>
+    </div>
+    <div class="form-group"><label>Contenido</label><textarea id="ep_contenido" rows="4"></textarea></div>
+    <div class="modal-footer">
+      <button class="btn" onclick="cerrarModal()" style="background:#f0f2f5">Cancelar</button>
+      <button class="btn btn-primary" id="btnGuardarPlantilla">Guardar cambios</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var token='',numeros=[];
+
+document.getElementById('btnLogin').addEventListener('click',function(){
+  var e=document.getElementById('email').value,p=document.getElementById('pass').value;
+  fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:e,password:p})})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(d.token&&d.usuario.rol==='supervisor'){
+      token=d.token;
+      document.getElementById('loginWrap').style.display='none';
+      document.getElementById('adminApp').style.display='block';
+      document.getElementById('adminUser').textContent=d.usuario.nombre;
+      cargarTodo();
+    } else {
+      document.getElementById('loginErr').textContent=d.error||'Solo supervisores pueden acceder';
+    }
+  });
+});
+
+function logout(){token='';location.reload();}
+
+function showTab(id,el){
+  document.querySelectorAll('.section').forEach(function(s){s.classList.remove('active');});
+  document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active');});
+  document.getElementById('sec-'+id).classList.add('active');
+  el.classList.add('active');
+  if(id==='reportes')cargarReportes();
+    if(id==='biblioteca')cargarBiblioteca();
+}
+
+function h(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):''}
+
+function cargarTodo(){cargarUsuarios();cargarPlantillas();cargarNumeros();cargarDifusiones();cargarNumerosEnSelectores();}
+
+    function cargarBiblioteca(){
+      fetch('/api/biblioteca',{headers:{Authorization:'Bearer '+token}})
+      .then(function(r){return r.json()})
+      .then(function(d){
+        var g=document.getElementById('galeriaBiblioteca');
+        if(!d.length){g.innerHTML='<p style="color:#999;grid-column:1/-1">No hay imágenes aún</p>';return;}
+        g.innerHTML=d.map(function(img){
+          return '<div style="border:1px solid #eee;border-radius:8px;overflow:hidden;background:#fff">'+
+            '<img src="'+img.url+'" style="width:100%;height:120px;object-fit:cover;display:block">'+
+            '<div style="padding:8px">'+
+              '<div style="font-size:12px;font-weight:600;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+h(img.nombre)+'</div>'+
+              '<div style="font-size:11px;color:#999;margin-bottom:6px">'+h(img.subido_por_nombre||'')+'</div>'+
+              '<div style="display:flex;gap:4px">'+
+                '<button data-url="'+img.url+'" onclick="copiarUrlData(this)" style="flex:1;padding:4px;font-size:11px;border:1px solid #ddd;border-radius:4px;background:#f5f5f5;cursor:pointer">Copiar URL</button>'+
+                '<button onclick="eliminarImagen('+img.id+')" style="padding:4px 8px;font-size:11px;border:1px solid #ffcdd2;border-radius:4px;background:#fff3f3;color:#e74c3c;cursor:pointer">✕</button>'+
+              '</div>'+
+            '</div>'+
+          '</div>';
+        }).join('');
+      });
+    }
+
+    function abrirModalBiblioteca(){
+      var modal = document.getElementById('modalBiblioteca');
+      modal.style.display = 'block';
+      fetch('/api/biblioteca',{headers:{Authorization:'Bearer '+token}})
+      .then(function(r){return r.json()})
+      .then(function(d){
+        var g = document.getElementById('galeriaBibliotecaModal');
+        if(!d.length){g.innerHTML='<p style="color:#999">No hay imágenes en la biblioteca</p>';return;}
+        g.innerHTML = d.map(function(img){
+          return '<div style="border:1px solid #eee;border-radius:8px;overflow:hidden;cursor:pointer" data-url="'+img.url+'" onclick="seleccionarImagenBibliotecaData(this)">'+
+            '<img src="'+img.url+'" style="width:100%;height:100px;object-fit:cover;display:block">'+
+            '<div style="padding:6px;font-size:11px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+h(img.nombre)+'</div>'+
+          '</div>';
+        }).join('');
+      });
+    }
+
+    function cerrarModalBiblioteca(){
+      document.getElementById('modalBiblioteca').style.display = 'none';
+    }
+
+    function seleccionarImagenBibliotecaData(el){
+      seleccionarImagenBiblioteca(el.getAttribute('data-url'));
+    }
+
+    function seleccionarImagenBiblioteca(url){
+      document.getElementById('p_header_image').value = url;
+      var thumb = document.getElementById('header_img_thumb');
+      var preview = document.getElementById('header_img_preview');
+      thumb.src = url;
+      preview.style.display = 'block';
+      document.getElementById('upload_status').textContent = '✓ Seleccionada';
+      document.getElementById('upload_status').style.color = '#2e7d32';
+      cerrarModalBiblioteca();
+      actualizarPreview();
+    }
+
+    function copiarUrlData(btn){
+      var url = btn.getAttribute('data-url');
+      navigator.clipboard.writeText(url).then(function(){
+        btn.textContent = '✓ Copiada';
+        setTimeout(function(){ btn.textContent = 'Copiar URL'; }, 2000);
+      });
+    }
+
+    function copiarUrl(url){
+      navigator.clipboard.writeText(url).then(function(){
+        alert('URL copiada: '+url);
+      });
+    }
+
+    function eliminarImagen(id){
+      if(!confirm('¿Eliminar esta imagen?'))return;
+      fetch('/api/biblioteca/'+id,{method:'DELETE',headers:{Authorization:'Bearer '+token}})
+      .then(function(){cargarBiblioteca();});
+    }
+
+    document.addEventListener('DOMContentLoaded', function(){
+      var btnSubir = document.getElementById('btnSubirBiblioteca');
+      if(btnSubir) btnSubir.addEventListener('click', function(){
+        var file = document.getElementById('bib_file').files[0];
+        var nombre = document.getElementById('bib_nombre').value;
+        var msg = document.getElementById('msgBiblioteca');
+        if(!file){msg.textContent='Selecciona una imagen';msg.style.color='red';return;}
+        msg.textContent='Subiendo...';msg.style.color='#f39c12';
+        var fd = new FormData();
+        fd.append('imagen', file);
+        fd.append('nombre', nombre||file.name);
+        fetch('/api/biblioteca',{method:'POST',headers:{Authorization:'Bearer '+token},body:fd})
+        .then(function(r){return r.json()})
+        .then(function(d){
+          if(d.ok){
+            msg.textContent='✓ Subida';msg.style.color='#2e7d32';
+            document.getElementById('bib_file').value='';
+            document.getElementById('bib_nombre').value='';
+            cargarBiblioteca();
+          } else {msg.textContent=d.error||'Error';msg.style.color='red';}
+        });
+      });
+    });
+
+function cargarUsuarios(){
+  fetch('/api/usuarios',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    document.getElementById('tablaUsuarios').innerHTML=d.map(function(u){
+      return '<tr><td>'+h(u.nombre)+'</td><td>'+h(u.email)+'</td><td>'+h(u.sucursal)+'</td><td style="font-size:11px;color:#667781">'+h(u.numero_id)+'</td>'+
+        '<td><span class="badge badge-'+u.rol+'">'+u.rol+'</span></td>'+
+        '<td><button class="btn btn-edit btn-sm" data-uid="'+u.id+'" data-un="'+h(u.nombre)+'" data-us="'+h(u.sucursal)+'" data-num="'+h(u.numero_id)+'" data-rol="'+u.rol+'" onclick="editarUsuarioData(this)">Editar</button> '+
+        '<button class="btn btn-danger btn-sm" data-uid="'+u.id+'" data-un="'+h(u.nombre)+'" onclick="eliminarUsuarioData(this)">Eliminar</button></td></tr>';
+    }).join('');
+  });
+}
+
+document.getElementById('btnCrearUsuario').addEventListener('click',function(){
+  var data={nombre:document.getElementById('u_nombre').value,email:document.getElementById('u_email').value,
+    password:document.getElementById('u_pass').value,sucursal:document.getElementById('u_sucursal').value,
+    numero_id:document.getElementById('u_numero').value,rol:document.getElementById('u_rol').value};
+  fetch('/api/usuarios',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(data)})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    var msg=document.getElementById('msgUsuario');
+    if(d.id){msg.textContent='Usuario creado correctamente';msg.style.color='#2e7d32';cargarUsuarios();
+      ['u_nombre','u_email','u_pass','u_sucursal','u_numero'].forEach(function(id){document.getElementById(id).value='';});
+    } else {msg.textContent=d.error||'Error';msg.style.color='red';}
+  });
+});
+
+function editarUsuarioBtn(btn){var id=btn.dataset.id,nombre=btn.dataset.nombre,sucursal=btn.dataset.sucursal,numero=btn.dataset.numero,rol=btn.dataset.rol;editarUsuario(id,nombre,sucursal,numero,rol);}
+function editarUsuarioData(btn){var r=btn.closest("tr")||btn.parentElement.parentElement;editarUsuario(btn.dataset.uid,btn.dataset.un,btn.dataset.us,btn.dataset.num,btn.dataset.rol);}
+function editarUsuario(id,nombre,sucursal,numero,rol){
+  document.getElementById('edit_id').value=id;
+  document.getElementById('edit_nombre').value=nombre;
+  document.getElementById('edit_sucursal').value=sucursal;
+  document.getElementById('edit_numero').value=numero;
+  document.getElementById('edit_rol').value=rol;
+  document.getElementById('edit_pass').value='';
+  document.getElementById('modalUsuario').classList.add('open');
+}
+
+document.getElementById('btnGuardarUsuario').addEventListener('click',function(){
+  var id=document.getElementById('edit_id').value;
+  var data={nombre:document.getElementById('edit_nombre').value,sucursal:document.getElementById('edit_sucursal').value,
+    numero_id:document.getElementById('edit_numero').value,rol:document.getElementById('edit_rol').value,
+    password:document.getElementById('edit_pass').value};
+  fetch('/api/usuarios/'+id,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(data)})
+  .then(function(r){return r.json()})
+  .then(function(){cerrarModal();cargarUsuarios();});
+});
+
+function eliminarUsuario(id,nombre){
+  if(!confirm('Eliminar usuario '+nombre+'?'))return;
+  fetch('/api/usuarios/'+id,{method:'DELETE',headers:{Authorization:'Bearer '+token}})
+  .then(function(){cargarUsuarios();});
+}
+
+
+    var tipoHeader = 'NONE';
+    var numBotones = 0;
+
+    function setTipoHeader(btn){
+      tipoHeader = btn.dataset.tipo;
+      document.querySelectorAll('.btn-tipo').forEach(function(b){
+        b.style.background = b===btn ? '#075e54' : '#fff';
+        b.style.color = b===btn ? '#fff' : '#000';
+      });
+      document.getElementById('header_text_wrap').style.display = tipoHeader==='TEXT' ? 'block' : 'none';
+      document.getElementById('header_image_wrap').style.display = tipoHeader==='IMAGE' ? 'block' : 'none';
+      actualizarPreview();
+    }
+
+    function fmtTexto(tipo){
+      var ta = document.getElementById('p_contenido');
+      var start = ta.selectionStart, end = ta.selectionEnd;
+      var sel = ta.value.substring(start, end);
+      if(!sel) return;
+      var markers = {bold:'*',italic:'_',strike:'~',code:'`'};
+      var m = markers[tipo];
+      ta.value = ta.value.substring(0,start) + m+sel+m + ta.value.substring(end);
+      ta.focus();
+      actualizarPreview();
+    }
+
+    function agregarVariable(){
+      var ta = document.getElementById('p_contenido');
+      var vars = (ta.value.match(/\{\{\d+\}\}/g)||[]);
+      var nextNum = vars.length + 1;
+      var pos = ta.selectionStart;
+      ta.value = ta.value.substring(0,pos) + '{{'+nextNum+'}}' + ta.value.substring(pos);
+      actualizarPreview();
+    }
+
+    function agregarBoton(){
+      if(numBotones >= 3) return;
+      numBotones++;
+      var n = numBotones;
+      var div = document.createElement('div');
+      div.id = 'boton_'+n;
+      div.style.cssText = 'display:flex;gap:8px;margin-bottom:8px;align-items:center';
+      div.innerHTML = '<input type="text" id="btn_texto_'+n+'" placeholder="Texto del botón" style="flex:1" oninput="actualizarPreview()">' +
+        '<button type="button" onclick="eliminarBoton('+n+')" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:18px">x</button>';
+      document.getElementById('botones_container').appendChild(div);
+      actualizarPreview();
+    }
+
+    function eliminarBoton(n){
+      var el = document.getElementById('boton_'+n);
+      if(el) el.remove();
+      actualizarPreview();
+    }
+
+
+    function previewImagen(input){
+      var file = input.files[0];
+      if(!file) return;
+      var status = document.getElementById('upload_status');
+      var thumb = document.getElementById('header_img_thumb');
+      var preview = document.getElementById('header_img_preview');
+      var hiddenUrl = document.getElementById('p_header_image');
+
+      // Preview local inmediato
+      var reader = new FileReader();
+      reader.onload = function(e){
+        thumb.src = e.target.result;
+        preview.style.display = 'block';
+        actualizarPreview();
+      };
+      reader.readAsDataURL(file);
+
+      // Subir al servidor
+      status.textContent = 'Subiendo...';
+      status.style.color = '#f39c12';
+      var formData = new FormData();
+      formData.append('imagen', file);
+      fetch('/api/upload', {method:'POST', headers:{Authorization:'Bearer '+token}, body:formData})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d.ok){
+          hiddenUrl.value = d.url;
+          status.textContent = '✓ Subida';
+          status.style.color = '#2e7d32';
+          actualizarPreview();
+        } else {
+          status.textContent = 'Error: ' + (d.error||'desconocido');
+          status.style.color = '#e74c3c';
+        }
+      })
+      .catch(function(){ status.textContent = 'Error de conexión'; status.style.color='#e74c3c'; });
+    }
+
+    function actualizarMuestras(){
+      var ta = document.getElementById('p_contenido');
+      if(!ta) return;
+      var vars = ta.value.match(/\{\{(\d+)\}\}/g) || [];
+      var unique = [];
+      vars.forEach(function(v){ if(unique.indexOf(v)===-1) unique.push(v); });
+      var wrap = document.getElementById('muestras_wrap');
+      var container = document.getElementById('muestras_container');
+      if(!wrap || !container) return;
+      if(unique.length === 0){ wrap.style.display='none'; return; }
+      wrap.style.display = 'block';
+      container.innerHTML = unique.map(function(v){
+        var num = v.replace(/[^0-9]/g,'');
+        return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">' +
+          '<span style="background:#e8f5e9;color:#2e7d32;padding:3px 8px;border-radius:4px;font-size:12px;min-width:36px;text-align:center">'+v+'</span>' +
+          '<input type="text" id="muestra_'+num+'" placeholder="Ej: María" style="flex:1;font-size:13px">' +
+          '</div>';
+      }).join('');
+    }
+
+    function getMuestrasData(){
+      var ta = document.getElementById('p_contenido');
+      if(!ta) return [];
+      var vars = ta.value.match(/\{\{(\d+)\}\}/g) || [];
+      var unique = [];
+      vars.forEach(function(v){ if(unique.indexOf(v)===-1) unique.push(v); });
+      return unique.map(function(v){
+        var num = v.replace(/[^0-9]/g,'');
+        var el = document.getElementById('muestra_'+num);
+        return el ? el.value : '';
+      });
+    }
+
+    function actualizarPreview(){
+      var prevHeader = document.getElementById('prev_header');
+      if(!prevHeader) return;
+      if(tipoHeader==='TEXT'){
+        var ht = document.getElementById('p_header_text').value;
+        prevHeader.style.display = ht ? 'block' : 'none';
+        prevHeader.textContent = ht;
+      } else if(tipoHeader==='IMAGE'){
+        var hi = document.getElementById('p_header_image').value;
+        if(hi){ prevHeader.style.display='block'; prevHeader.innerHTML='<img src="'+hi+'" style="width:100%;border-radius:6px;max-height:140px;object-fit:cover">'; }
+        else { prevHeader.style.display='none'; }
+      } else {
+        prevHeader.style.display='none';
+      }
+      var body = document.getElementById('p_contenido').value || 'El mensaje aparecerá aquí...';
+      var counter = document.getElementById('p_counter');
+      if(counter) counter.textContent = body.length + '/1028';
+      body = body.replace(/\*(.*?)\*/g,'<strong>$1</strong>');
+      body = body.replace(/_(.*?)_/g,'<em>$1</em>');
+      body = body.replace(/~(.*?)~/g,'<s>$1</s>');
+      body = body.replace(/`(.*?)`/g,'<code style="background:#f5f5f5;padding:1px 4px;border-radius:3px">$1</code>');
+      document.getElementById('prev_body').innerHTML = body;
+      var footer = document.getElementById('p_footer').value;
+      var prevFooter = document.getElementById('prev_footer');
+      if(prevFooter){ prevFooter.style.display = footer ? 'block' : 'none'; prevFooter.textContent = footer; }
+      var prevBotones = document.getElementById('prev_botones');
+      if(prevBotones){
+        var btnsHtml = '';
+        for(var i=1;i<=numBotones;i++){
+          var el = document.getElementById('btn_texto_'+i);
+          if(el && el.value) btnsHtml += '<div style="background:#fff;border-radius:8px;padding:8px;text-align:center;color:#075e54;font-size:13px;margin-bottom:4px;box-shadow:0 1px 2px rgba(0,0,0,0.1)">'+el.value+'</div>';
+        }
+        prevBotones.innerHTML = btnsHtml;
+      }
+    }
+
+    function getBotonesData(){
+      var btns = [];
+      for(var i=1;i<=numBotones;i++){
+        var el = document.getElementById('btn_texto_'+i);
+        if(el && el.value) btns.push({type:'QUICK_REPLY',text:el.value});
+      }
+      return btns;
+    }
+
+function cargarPlantillas(){
+  fetch('/api/plantillas',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    document.getElementById('tablaPlantillas').innerHTML=d.map(function(p){
+      var estadoColor={'pendiente':'#f39c12','enviada':'#3498db','aprobada':'#2e7d32','rechazada':'#c0392b','error_envio':'#e74c3c'};
+      var estadoMeta=p.estado_meta||'pendiente';
+      return '<tr><td><strong>'+h(p.nombre)+'</strong></td><td>'+h(p.categoria)+'</td>'+
+        '<td style="max-width:200px;color:#667781">'+h(p.contenido.substring(0,60))+(p.contenido.length>60?'...':'')+'</td>'+
+        '<td style="font-size:11px"><span style="color:'+estadoColor[estadoMeta]+'">●</span> '+estadoMeta+'</td>'+
+        '<td>'+(p.phone_number_id||'<em style="color:#999">Global</em>')+'</td>'+
+        '<td><button class="btn btn-edit btn-sm" data-pid="'+p.id+'" data-pn="'+h(p.nombre)+'" data-pc="'+h(p.categoria)+'" data-pco="'+h(p.contenido)+'" onclick="editarPlantillaData(this)">Editar</button> ' +
+        '<button class="btn btn-danger btn-sm" data-pid="'+p.id+'" onclick="eliminarPlantillaData(this)">Eliminar</button></td></tr>';
+    }).join('');
+  });
+}
+
+document.getElementById('btnCrearPlantilla').addEventListener('click',function(){
+  var numSel=document.getElementById('p_numero_id');
+  var headerText=tipoHeader==='TEXT'?document.getElementById('p_header_text').value:'';
+  var headerImage=tipoHeader==='IMAGE'?document.getElementById('p_header_image').value:'';
+  var data={
+    nombre:document.getElementById('p_nombre').value.toLowerCase().replace(/\s+/g,'_'),
+    categoria:document.getElementById('p_cat').value,
+    contenido:document.getElementById('p_contenido').value,
+    phone_number_id:numSel?numSel.value:null,
+    header_type:tipoHeader,
+    header_text:headerText,
+    header_image:headerImage,
+    footer:document.getElementById('p_footer').value,
+    botones:getBotonesData(),
+    muestras:getMuestrasData()
+  };
+  fetch('/api/plantillas',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(data)})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    var msg=document.getElementById('msgPlantilla');
+    if(d.ok){msg.textContent='Plantilla guardada y enviada a Meta ✓';msg.style.color='#2e7d32';cargarPlantillas();
+      document.getElementById('p_nombre').value='';document.getElementById('p_contenido').value='';
+      document.getElementById('p_footer').value='';
+      document.getElementById('botones_container').innerHTML='';
+      numBotones=0;actualizarPreview();
+    } else {msg.textContent=d.error||'Error';msg.style.color='red';}
+  });
+});
+
+function editarPlantillaBtn(btn){var id=btn.dataset.id,nombre=btn.dataset.nombre,cat=btn.dataset.cat,contenido='';var rows=document.querySelectorAll('#tablaPlantillas tr');rows.forEach(function(r){if(r.querySelector('[data-id="'+id+'"]'))contenido=r.cells[2].textContent;});editarPlantilla(id,nombre,cat,contenido);}
+function editarPlantilla(id,nombre,cat,contenido){
+  document.getElementById('ep_id').value=id;
+  document.getElementById('ep_nombre').value=nombre;
+  document.getElementById('ep_cat').value=cat;
+  document.getElementById('ep_contenido').value=contenido;
+  document.getElementById('modalPlantilla').classList.add('open');
+}
+
+document.getElementById('btnGuardarPlantilla').addEventListener('click',function(){
+  var id=document.getElementById('ep_id').value;
+  var data={nombre:document.getElementById('ep_nombre').value,categoria:document.getElementById('ep_cat').value,contenido:document.getElementById('ep_contenido').value};
+  fetch('/api/plantillas/'+id,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(data)})
+  .then(function(r){return r.json()})
+  .then(function(){cerrarModal();cargarPlantillas();});
+});
+
+function eliminarPlantilla(id){
+  if(!confirm('Eliminar esta plantilla?'))return;
+  fetch('/api/plantillas/'+id,{method:'DELETE',headers:{Authorization:'Bearer '+token}}).then(function(){cargarPlantillas();});
+}
+
+function cargarNumerosEnSelectores(){
+  fetch('/api/numeros',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    var opts='<option value="">Todos los números</option>';
+    var optsP='<option value="">-- Seleccionar número --</option>';
+    d.forEach(function(n){
+      opts+='<option value="'+n.phone_number_id+'">'+n.nombre+' ('+n.sucursal+')</option>';
+      optsP+='<option value="'+n.phone_number_id+'">'+n.nombre+' ('+n.sucursal+')</option>';
+    });
+    var rNum=document.getElementById('r_numero_id');
+    var pNum=document.getElementById('p_numero_id');
+    if(rNum)rNum.innerHTML=opts;
+    if(pNum)pNum.innerHTML=optsP;
+  });
+}
+
+function cargarNumeros(){
+  fetch('/api/numeros',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    numeros=d;
+    var sel=document.getElementById('d_numero');
+    sel.innerHTML=d.map(function(n){return '<option value="'+n.phone_number_id+'">'+h(n.nombre)+' ('+h(n.sucursal)+')</option>';}).join('');
+  });
+}
+
+function cargarDifusiones(){
+  fetch('/api/difusiones',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    var estadoColor={pendiente:'#f39c12',enviando:'#3498db',completado:'#2e7d32',error:'#e74c3c'};
+    document.getElementById('tablaDifusiones').innerHTML=d.map(function(df){
+      var pct = df.total>0 ? Math.round(df.enviados/df.total*100) : 0;
+      var fecha = new Date(df.created_at).toLocaleString('es-MX',{dateStyle:'short',timeStyle:'short'});
+      return '<tr>'+
+        '<td><strong>'+h(df.nombre)+'</strong></td>'+
+        '<td style="font-size:12px;color:#667781">'+(df.enviado_por||'—')+'</td>'+
+        '<td style="font-size:11px;color:#999;font-family:monospace">'+(df.phone_number_id||'—')+'</td>'+
+        '<td style="font-size:12px;color:#667781">'+fecha+'</td>'+
+        '<td>'+(df.filtro_etapa?'<span class="etapa-pill etapa-'+df.filtro_etapa+'">'+df.filtro_etapa+'</span>':'Todos')+'</td>'+
+        '<td style="text-align:center">'+df.total+'</td>'+
+        '<td>'+
+          '<div style="display:flex;align-items:center;gap:6px">'+
+            '<div style="flex:1;background:#eee;border-radius:4px;height:6px"><div style="background:#075e54;width:'+pct+'%;height:6px;border-radius:4px"></div></div>'+
+            '<span style="font-size:12px;min-width:36px">'+df.enviados+'/'+df.total+'</span>'+
+          '</div>'+
+        '</td>'+
+        '<td><span style="color:'+(estadoColor[df.estado]||'#999')+'">● </span>'+df.estado+'</td>'+
+      '</tr>';
+    }).join('')||'<tr><td colspan="8" style="text-align:center;color:#999;padding:20px">Sin difusiones aún</td></tr>';
+  });
+}
+
+document.getElementById('btnEnviarDifusion').addEventListener('click',function(){
+  var data={nombre:document.getElementById('d_nombre').value,mensaje:document.getElementById('d_mensaje').value,
+    filtro_etapa:document.getElementById('d_etapa').value,numero_id:document.getElementById('d_numero').value};
+  if(!data.mensaje){document.getElementById('msgDifusion').textContent='Escribe un mensaje';return;}
+  var msg=document.getElementById('msgDifusion');
+  msg.textContent='Enviando...';msg.style.color='#e65100';
+  fetch('/api/difusion',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(data)})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(d.ok){msg.textContent='Enviando a '+d.total+' contactos';msg.style.color='#2e7d32';
+      document.getElementById('d_nombre').value='';document.getElementById('d_mensaje').value='';
+      setTimeout(cargarDifusiones,2000);
+    } else {msg.textContent=d.error||'Error';msg.style.color='red';}
+  });
+});
+
+function cargarReportes(){
+  var dias=document.getElementById('r_dias').value;
+  var numEl=document.getElementById('r_numero_id');
+  var numFiltro=numEl&&numEl.value?'&numero_id='+numEl.value:'';
+  fetch('/api/reportes?dias='+dias+numFiltro,{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    var total=0,ent=0,sal=0,dias_activos=new Set();
+    d.forEach(function(r){total+=r.total;ent+=r.entrantes;sal+=r.salientes;dias_activos.add(r.dia);});
+    document.getElementById('statsGrid').innerHTML=
+      '<div class="stat-card"><div class="num">'+total+'</div><div class="lbl">Total mensajes</div></div>'+
+      '<div class="stat-card"><div class="num">'+ent+'</div><div class="lbl">Recibidos</div></div>'+
+      '<div class="stat-card"><div class="num">'+sal+'</div><div class="lbl">Enviados</div></div>'+
+      '<div class="stat-card"><div class="num">'+dias_activos.size+'</div><div class="lbl">Dias activos</div></div>';
+    var porDia={};
+    d.forEach(function(r){if(!porDia[r.dia])porDia[r.dia]=0;porDia[r.dia]+=r.total;});
+    var diasArr=Object.keys(porDia).sort().reverse().slice(0,10);
+    var maxVal=Math.max.apply(null,diasArr.map(function(k){return porDia[k];}));
+    document.getElementById('barChart').innerHTML=diasArr.map(function(dia){
+      var pct=maxVal>0?Math.round(porDia[dia]/maxVal*100):0;
+      return '<div class="bar-row"><div class="bar-label">'+dia.slice(5)+'</div><div class="bar-track"><div class="bar-fill" style="width:'+pct+'%"></div></div><div class="bar-val">'+porDia[dia]+'</div></div>';
+    }).join('')||'<p style="color:#999;text-align:center;padding:20px">Sin datos en este periodo</p>';
+  });
+  fetch('/api/reportes/etapas',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    var max=Math.max.apply(null,d.map(function(e){return e.total;}));
+    document.getElementById('etapasChart').innerHTML=d.map(function(e){
+      var pct=max>0?Math.round(e.total/max*100):0;
+      return '<div class="bar-row"><div class="bar-label">'+h(e.etapa)+'</div><div class="bar-track"><div class="bar-fill" style="width:'+pct+'%"></div></div><div class="bar-val">'+e.total+'</div></div>';
+    }).join('')||'<p style="color:#999;text-align:center">Sin contactos</p>';
+  });
+}
+
+function cerrarModal(){
+  document.querySelectorAll('.modal-overlay').forEach(function(m){m.classList.remove('open');});
+}
+</script>
+</body>
+</html>

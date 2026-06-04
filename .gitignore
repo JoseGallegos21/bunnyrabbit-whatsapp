@@ -1,0 +1,6 @@
+whatsapp.db
+.env
+node_modules/
+public/uploads/
+public/fonts/
+*.log

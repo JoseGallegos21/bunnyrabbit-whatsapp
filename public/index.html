@@ -258,6 +258,31 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
               <tbody id="np_tablaPlantillas"></tbody>
             </table>
           </div>
+
+          <!-- RESPUESTAS RAPIDAS -->
+          <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-top:20px">
+            <h2 style="margin:0 0 16px;font-size:18px;color:#111">Mis respuestas rápidas</h2>
+            <p style="font-size:13px;color:#666;margin-bottom:16px">Respuestas personales para usar rápido en el chat — no requieren aprobación de Meta.</p>
+            
+            <!-- Formulario nueva respuesta -->
+            <div style="background:#f9f9f9;border-radius:8px;padding:14px;margin-bottom:16px">
+              <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+                <div style="flex:1;min-width:160px">
+                  <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Título / atajo</label>
+                  <input type="text" id="rr_titulo" placeholder="Ej: bienvenida, precio, horario" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;box-sizing:border-box">
+                </div>
+              </div>
+              <div style="margin-bottom:10px">
+                <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Contenido del mensaje</label>
+                <textarea id="rr_contenido" placeholder="Escribe el mensaje completo..." style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;min-height:80px;box-sizing:border-box;resize:none"></textarea>
+              </div>
+              <button onclick="guardarRespuestaRapida()" style="padding:8px 16px;background:#075e54;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px">+ Guardar respuesta</button>
+              <span id="msgRR" style="font-size:13px;margin-left:10px"></span>
+            </div>
+
+            <!-- Lista de respuestas -->
+            <div id="listaRR"></div>
+          </div>
         </div>
       </div>
 
@@ -866,12 +891,127 @@ function eliminarEtiqueta(btn){
   .then(function(){cargarEtiquetas();});
 }
 
+
+// ===== RESPUESTAS RAPIDAS =====
+var misRespuestas = [];
+
+function cargarRespuestasRapidas(){
+  fetch('/api/respuestas',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    misRespuestas = d;
+    var lista = document.getElementById('listaRR');
+    if(!lista) return;
+    if(!d.length){
+      lista.innerHTML='<p style="color:#999;font-size:13px;text-align:center;padding:16px">No tienes respuestas rápidas. Crea una arriba.</p>';
+      return;
+    }
+    lista.innerHTML = d.map(function(r){
+      return '<div style="border:1px solid #eee;border-radius:8px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px">'+
+        '<div style="flex:1">'+
+          '<div style="font-size:13px;font-weight:600;color:#075e54;margin-bottom:4px">/'+r.titulo+'</div>'+
+          '<div style="font-size:13px;color:#333">'+r.contenido.substring(0,100)+(r.contenido.length>100?'...':'')+'</div>'+
+        '</div>'+
+        '<button data-id="'+r.id+'" onclick="eliminarRespuestaRapida(this)" style="padding:4px 10px;border:1px solid #ffcdd2;border-radius:6px;background:#fff3f3;color:#e74c3c;cursor:pointer;font-size:12px;flex-shrink:0">Eliminar</button>'+
+      '</div>';
+    }).join('');
+  });
+}
+
+function guardarRespuestaRapida(){
+  var titulo = document.getElementById('rr_titulo').value.trim();
+  var contenido = document.getElementById('rr_contenido').value.trim();
+  var msg = document.getElementById('msgRR');
+  if(!titulo||!contenido){ msg.textContent='Completa titulo y contenido'; msg.style.color='red'; return; }
+  msg.textContent='Guardando...'; msg.style.color='#f39c12';
+  fetch('/api/respuestas',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    body:JSON.stringify({titulo:titulo,contenido:contenido})})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(d.ok){
+      msg.textContent='✓ Guardada'; msg.style.color='#2e7d32';
+      document.getElementById('rr_titulo').value='';
+      document.getElementById('rr_contenido').value='';
+      cargarRespuestasRapidas();
+      setTimeout(function(){ msg.textContent=''; },2000);
+    } else { msg.textContent=d.error||'Error'; msg.style.color='red'; }
+  });
+}
+
+function eliminarRespuestaRapida(btn){
+  if(!confirm('Eliminar esta respuesta?')) return;
+  fetch('/api/respuestas/'+btn.dataset.id,{method:'DELETE',headers:{Authorization:'Bearer '+token}})
+  .then(function(){cargarRespuestasRapidas();});
+}
+
+
+// ===== ATAJO / PARA RESPUESTAS RAPIDAS =====
+function iniciarAtajoRespuestas(){
+  var input = document.getElementById('msgInput');
+  if(!input) return;
+  input.addEventListener('input', function(){
+    var val = this.value;
+    if(val.startsWith('/')){
+      var busqueda = val.substring(1).toLowerCase();
+      mostrarSugerenciasRR(busqueda);
+    } else {
+      ocultarSugerenciasRR();
+    }
+  });
+  input.addEventListener('keydown', function(e){
+    if(e.key === 'Escape') ocultarSugerenciasRR();
+  });
+}
+
+function mostrarSugerenciasRR(busqueda){
+  var existing = document.getElementById('rrSugerencias');
+  if(existing) existing.remove();
+
+  var filtradas = misRespuestas.filter(function(r){
+    return !busqueda || r.titulo.toLowerCase().includes(busqueda) || r.contenido.toLowerCase().includes(busqueda);
+  });
+
+  if(!filtradas.length){ ocultarSugerenciasRR(); return; }
+
+  var inputArea = document.getElementById('inputAreaStatic');
+  if(!inputArea) return;
+
+  var div = document.createElement('div');
+  div.id = 'rrSugerencias';
+  div.style.cssText = 'position:absolute;bottom:100%;left:0;right:0;background:#233138;border-radius:8px 8px 0 0;border:1px solid #2a3942;max-height:220px;overflow-y:auto;z-index:100';
+
+  div.innerHTML = '<div style="padding:8px 12px;font-size:11px;color:#8696a0;border-bottom:1px solid #2a3942">Respuestas rápidas</div>'+
+    filtradas.map(function(r){
+      return '<div data-contenido="'+r.contenido.replace(/"/g,'&quot;')+'" onclick="seleccionarRR(this)" style="padding:10px 12px;cursor:pointer;border-bottom:1px solid #2a3942">'+ 
+        '<div style="color:#00a884;font-size:12px;font-weight:600">/'+r.titulo+'</div>'+
+        '<div style="color:#e9edef;font-size:13px;margin-top:2px">'+r.contenido.substring(0,60)+(r.contenido.length>60?'...':'')+'</div>'+
+      '</div>';
+    }).join('');
+
+  inputArea.style.position = 'relative';
+  inputArea.appendChild(div);
+}
+
+function ocultarSugerenciasRR(){
+  var existing = document.getElementById('rrSugerencias');
+  if(existing) existing.remove();
+}
+
+function seleccionarRR(el){
+  var input = document.getElementById('msgInput');
+  if(input){
+    input.value = el.getAttribute('data-contenido');
+    input.focus();
+  }
+  ocultarSugerenciasRR();
+}
+
 function switchMainTab(tab, btn){
   document.querySelectorAll('.main-tab').forEach(function(b){ b.classList.remove('active'); });
   document.querySelectorAll('.main-section').forEach(function(s){ s.classList.remove('active'); });
   btn.classList.add('active');
   document.getElementById('msec-'+tab).classList.add('active');
-  if(tab==='plantillas') cargarPlantillasPanel();
+  if(tab==='plantillas'){ cargarPlantillasPanel(); cargarRespuestasRapidas(); }
   if(tab==='difusion') cargarHistorialDifPanel();
   if(tab==='contactos') cargarContactos();
   if(tab==='etiquetas') cargarEtiquetas();
@@ -882,7 +1022,7 @@ function switchPanelTab(tab, btn){
   document.querySelectorAll('.panel-sec').forEach(function(s){ s.classList.remove('active'); });
   btn.classList.add('active');
   document.getElementById('psec-'+tab).classList.add('active');
-  if(tab==='plantillas') cargarPlantillasPanel();
+  if(tab==='plantillas'){ cargarPlantillasPanel(); cargarRespuestasRapidas(); }
   if(tab==='difusion') cargarHistorialDifPanel();
 }
 
@@ -984,6 +1124,8 @@ document.getElementById('btnLogin').addEventListener('click',function(){
       document.getElementById('loginBox').style.display='none';
       document.getElementById('app').style.display='block';
       document.getElementById('userInfo').textContent=usuario.nombre+' - '+(usuario.sucursal||'Supervisor');
+  fetch('/api/respuestas',{headers:{Authorization:'Bearer '+token}}).then(function(r){return r.json()}).then(function(d){misRespuestas=d;});
+  setTimeout(iniciarAtajoRespuestas, 500);
   var sub = document.getElementById('userSubtitle');
   if(sub) sub.textContent = usuario.nombre + ' · ' + (usuario.sucursal||'');
       cargarEtiquetas();cargarMensajes();iv=setInterval(cargarMensajes,5000);
@@ -1095,18 +1237,19 @@ function abrirChat(tel){
     inputStatic.innerHTML=
       '<button id="btnAdjuntar" onclick="toggleAdjuntar(event)" style="background:none;border:none;cursor:pointer;width:36px;height:36px;display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="bx bx-plus" style="font-size:20px;color:#8696a0"></i></button>'+
       '<div class="attach-menu" id="attachMenu">'+
-        '<div class="attach-item" onclick="adjuntarTipo(\"documento\")"><i class="bx bx-file" style="background:#7f66ff;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px"></i>Documento</div>'+
-        '<div class="attach-item" onclick="adjuntarTipo(\"fotos\")"><i class="bx bx-image" style="background:#007bfc;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px"></i>Fotos y videos</div>'+
-        '<div class="attach-item" onclick="adjuntarTipo(\"camara\")"><i class="bx bx-camera" style="background:#ff2e74;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px"></i>Camara</div>'+
-        '<div class="attach-item" onclick="adjuntarTipo(\"audio\")"><i class="bx bx-microphone" style="background:#ff9500;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px"></i>Audio</div>'+
-        '<div class="attach-item" onclick="adjuntarTipo(\"contacto\")"><i class="bx bx-user" style="background:#009de2;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px"></i>Contacto</div>'+
+        '<div class="attach-item" onclick="adjuntarTipo(\'documento\')"><i class="bx bx-file" style="background:#7f66ff;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px"></i>Documento</div>'+
+        '<div class="attach-item" onclick="adjuntarTipo(\'fotos\')"><i class="bx bx-image" style="background:#007bfc;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px"></i>Fotos y videos</div>'+
+        '<div class="attach-item" onclick="adjuntarTipo(\'camara\')"><i class="bx bx-camera" style="background:#ff2e74;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px"></i>Camara</div>'+
+        '<div class="attach-item" onclick="adjuntarTipo(\'audio\')"><i class="bx bx-microphone" style="background:#ff9500;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px"></i>Audio</div>'+
+        '<div class="attach-item" onclick="adjuntarTipo(\'contacto\')"><i class="bx bx-user" style="background:#009de2;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px"></i>Contacto</div>'+
         '<div class="attach-item" onclick="abrirStickers()"><i class="bx bx-smile" style="background:#f5a623;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px"></i>Stickers</div>'+
-        '<div class="attach-item" onclick="adjuntarTipo(\"respuestas\")"><i class="bx bx-bolt-circle" style="background:#7f66ff;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px"></i>Respuestas rapidas</div>'+
+        '<div class="attach-item" onclick="adjuntarTipo(\'respuestas\')"><i class="bx bx-bolt-circle" style="background:#7f66ff;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px"></i>Respuestas rapidas</div>'+
       '</div>'+
       '<input type="file" id="fileInput" style="display:none" onchange="subirArchivo(this)">'+
       '<input type="text" id="msgInput" placeholder="Escribe un mensaje..." style="flex:1;padding:9px 14px;border:none;border-radius:8px;background:#2a3942;font-size:13px;outline:none;color:#e9edef">'+
       '<button id="btnEnviar" style="flex-shrink:0;background:#00a884;color:white;border:none;border-radius:50%;width:40px;height:40px;cursor:pointer;display:flex;align-items:center;justify-content:center"><i class="bx bx-send" style="font-size:16px"></i></button>';
     document.getElementById('btnAbrirPerfil').addEventListener('click',function(){abrirPerfil(tel);});
+    iniciarAtajoRespuestas();
     document.getElementById('msgInput').addEventListener('keypress',function(e){if(e.key==='Enter')enviar();});
     document.getElementById('btnEnviar').addEventListener('click',function(){enviar();});
     renderMensajes(tel);
@@ -1140,25 +1283,26 @@ function adjuntarTipo(tipo){
 }
 
 function abrirRespuestasRapidas(){
-  fetch('/api/plantillas',{headers:{Authorization:'Bearer '+token}})
+  fetch('/api/respuestas',{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
   .then(function(d){
     var html='<div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:flex-end;justify-content:center" id="respuestasModal">'+
       '<div style="background:#233138;border-radius:12px 12px 0 0;width:100%;max-width:600px;padding:16px;max-height:70vh;overflow-y:auto">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="color:#e9edef;font-size:15px;font-weight:500">Respuestas rapidas</span>'+
-      '<button onclick="cerrarModal(&quot;respuestasModal&quot;)" style="background:none;border:none;color:#8696a0;font-size:22px;cursor:pointer">x</button></div>'+
-      '<input type="text" placeholder="Buscar..." oninput="filtrarRespuestas(this.value)" style="width:100%;padding:8px;background:#2a3942;border:none;border-radius:8px;color:#e9edef;font-size:13px;margin-bottom:12px;box-sizing:border-box">'+
+      '<button data-modal="respuestasModal" onclick="cerrarModalData(this)" style="background:none;border:none;color:#8696a0;font-size:22px;cursor:pointer">x</button></div>'+
+      '<input type="text" placeholder="Buscar por titulo..." oninput="filtrarRespuestas(this.value)" style="width:100%;padding:8px;background:#2a3942;border:none;border-radius:8px;color:#e9edef;font-size:13px;margin-bottom:12px;box-sizing:border-box">'+
       '<div id="listaRespuestas">'+
-      (d.length?d.map(function(p){
-        return '<div data-contenido="'+p.contenido.replace(/"/g,"&quot;")+'" onclick="usarRespuesta(this)" style="padding:10px 12px;border-radius:8px;cursor:pointer;margin-bottom:6px;background:#182229;border:1px solid #2a3942">'+
-          '<div style="color:#00a884;font-size:12px;font-weight:500;margin-bottom:3px">'+p.nombre+'</div>'+
-          '<div style="color:#e9edef;font-size:13px">'+p.contenido.substring(0,80)+(p.contenido.length>80?'...':'')+'</div></div>';
-      }).join(''):'<p style="color:#8696a0;text-align:center;padding:20px">No hay plantillas</p>')+
+      (d.length?d.map(function(r){
+        return '<div data-contenido="'+r.contenido.replace(/"/g,"&quot;")+'" onclick="usarRespuesta(this)" style="padding:10px 12px;border-radius:8px;cursor:pointer;margin-bottom:6px;background:#182229;border:1px solid #2a3942">'+
+          '<div style="color:#00a884;font-size:12px;font-weight:500;margin-bottom:3px">/'+r.titulo+'</div>'+
+          '<div style="color:#e9edef;font-size:13px">'+r.contenido.substring(0,80)+(r.contenido.length>80?'...':'')+'</div></div>';
+      }).join(''):'<p style="color:#8696a0;text-align:center;padding:20px">No tienes respuestas rapidas. Crealas en la tab Plantillas.</p>')+
       '</div></div></div>';
     document.body.insertAdjacentHTML('beforeend',html);
   });
 }
 
+function cerrarModalData(btn){ cerrarModal(btn.getAttribute('data-modal')); }
 function cerrarModal(id){
   var m=document.getElementById(id);
   if(m)m.remove();
@@ -1344,26 +1488,112 @@ function abrirPerfil(tel){
   .then(function(r){return r.json()})
   .then(function(p){
     var sel=(p.etiquetas||[]).map(function(e){return e.id;});
+    var iniciales=tel.slice(-2);
+    var bloqueado=p.bloqueado||false;
+    var silenciado=p.silenciado||false;
     document.getElementById('perfilBody').innerHTML=
-      '<div class="perfil-avatar">'+tel.slice(-2)+'</div>'+
-      '<div class="perfil-tel">+'+tel+'</div>'+
-      '<div class="form-group"><label>Nombre</label><input type="text" id="p_nombre" value="'+(p.nombre||'')+'"></div>'+
-      '<div class="form-group"><label>Etapa</label><select id="p_etapa">'+
-        ['Nuevo','Seguimiento','Propuesta','Cerrado','Perdido'].map(function(e){return '<option'+(p.etapa===e?' selected':'')+'>'+e+'</option>';}).join('')+
-      '</select></div>'+
-      '<div class="form-group"><label>Prioridad</label><select id="p_prioridad">'+
-        ['Alta','Media','Baja'].map(function(e){return '<option'+(p.prioridad===e?' selected':'')+'>'+e+'</option>';}).join('')+
-      '</select></div>'+
-      '<div class="form-group"><label>Etiquetas</label><div class="etiquetas-container" id="etqList">'+
-        etiquetas.map(function(e){return '<span class="etiqueta-tag'+(sel.includes(e.id)?' selected':'')+'" style="background:'+e.color+'" data-id="'+e.id+'">'+e.nombre+'</span>';}).join('')+
-      '</div></div>'+
-      '<div class="form-group"><label>Notas</label><textarea id="p_notas" rows="3">'+(p.notas||'')+'</textarea></div>'+
-      '<button class="btn-guardar" id="btnGuardar">Guardar</button>';
+      // Avatar y datos
+      '<div style="display:flex;flex-direction:column;align-items:center;padding:20px 0;border-bottom:1px solid #2a3942">'+
+        '<div class="perfil-avatar" style="width:72px;height:72px;font-size:26px;margin-bottom:8px">'+iniciales+'</div>'+
+        '<div style="color:#e9edef;font-size:16px;font-weight:500">'+(p.nombre||'Sin nombre')+'</div>'+
+        '<div style="color:#8696a0;font-size:13px;margin-top:2px">+'+tel+'</div>'+
+      '</div>'+
+      // Acciones rapidas
+      '<div style="display:flex;justify-content:space-around;padding:16px;border-bottom:1px solid #2a3942">'+
+        '<div data-accion="silenciar" data-tel="'+tel+'" onclick="accionPerfilData(this)" style="display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer">'+
+          '<div style="width:40px;height:40px;border-radius:50%;background:#2a3942;display:flex;align-items:center;justify-content:center">'+
+            '<i class="bx bx-bell-off" style="font-size:18px;color:#8696a0"></i>'+
+          '</div>'+
+          '<span style="font-size:11px;color:#8696a0">Silenciar</span>'+
+        '</div>'+
+        '<div data-accion="destacar" data-tel="'+tel+'" onclick="accionPerfilData(this)" style="display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer">'+
+          '<div style="width:40px;height:40px;border-radius:50%;background:#2a3942;display:flex;align-items:center;justify-content:center">'+
+            '<i class="bx bx-star" style="font-size:18px;color:#8696a0"></i>'+
+          '</div>'+
+          '<span style="font-size:11px;color:#8696a0">Destacar</span>'+
+        '</div>'+
+        '<div data-accion="archivos" data-tel="'+tel+'" onclick="accionPerfilData(this)" style="display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer">'+
+          '<div style="width:40px;height:40px;border-radius:50%;background:#2a3942;display:flex;align-items:center;justify-content:center">'+
+            '<i class="bx bx-image-alt" style="font-size:18px;color:#8696a0"></i>'+
+          '</div>'+
+          '<span style="font-size:11px;color:#8696a0">Archivos</span>'+
+        '</div>'+
+      '</div>'+
+      // Formulario
+      '<div style="padding:12px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid #2a3942">'+
+        '<div class="form-group"><label>Nombre</label><input type="text" id="p_nombre" value="'+(p.nombre||'')+'"></div>'+
+        '<div class="form-group"><label>Etapa</label><select id="p_etapa">'+
+          ['Nuevo','Seguimiento','Propuesta','Cerrado','Perdido'].map(function(e){return '<option'+(p.etapa===e?' selected':'')+'>'+e+'</option>';}).join('')+
+        '</select></div>'+
+        '<div class="form-group"><label>Prioridad</label><select id="p_prioridad">'+
+          ['Alta','Media','Baja'].map(function(e){return '<option'+(p.prioridad===e?' selected':'')+'>'+e+'</option>';}).join('')+
+        '</select></div>'+
+        '<div class="form-group"><label>Etiquetas</label><div class="etiquetas-container" id="etqList">'+
+          etiquetas.map(function(e){return '<span class="etiqueta-tag'+(sel.includes(e.id)?' selected':'')+'" style="background:'+e.color+'" data-id="'+e.id+'">'+e.nombre+'</span>';}).join('')+
+        '</div></div>'+
+        '<div class="form-group"><label>Notas</label><textarea id="p_notas" rows="3">'+(p.notas||'')+'</textarea></div>'+
+        '<button class="btn-guardar" id="btnGuardar">Guardar</button>'+
+      '</div>'+
+      // Opciones peligrosas
+      '<div style="padding:12px;display:flex;flex-direction:column;gap:2px">'+
+        '<div data-accion="vaciar" data-tel="'+tel+'" onclick="accionPerfilData(this)" style="display:flex;align-items:center;gap:12px;padding:12px;border-radius:8px;cursor:pointer;color:#e74c3c">'+
+          '<i class="bx bx-trash" style="font-size:18px"></i>'+
+          '<span style="font-size:14px">Vaciar chat</span>'+
+        '</div>'+
+        '<div data-accion="bloquear" data-tel="'+tel+'" onclick="accionPerfilData(this)" style="display:flex;align-items:center;gap:12px;padding:12px;border-radius:8px;cursor:pointer;color:#e74c3c">'+
+          '<i class="bx bx-block" style="font-size:18px"></i>'+
+          '<span style="font-size:14px">Bloquear contacto</span>'+
+        '</div>'+
+        '<div data-accion="reportar" data-tel="'+tel+'" onclick="accionPerfilData(this)" style="display:flex;align-items:center;gap:12px;padding:12px;border-radius:8px;cursor:pointer;color:#e74c3c">'+
+          '<i class="bx bx-error-circle" style="font-size:18px"></i>'+
+          '<span style="font-size:14px">Reportar</span>'+
+        '</div>'+
+      '</div>';
     document.querySelectorAll('.etiqueta-tag').forEach(function(el){
       el.addEventListener('click',function(){this.classList.toggle('selected');});
     });
     document.getElementById('btnGuardar').addEventListener('click',function(){guardarPerfil(tel);});
   });
+}
+
+function abrirImagenArchivo(el){
+  window.open(el.getAttribute('data-url'), '_blank');
+}
+function accionPerfilData(el){
+  accionPerfil(el.getAttribute('data-accion'), el.getAttribute('data-tel'));
+}
+function accionPerfil(accion, tel){
+  if(accion==='vaciar'){
+    if(!confirm('Vaciar el chat de +'+tel+'? Esta accion no se puede deshacer.')) return;
+    fetch('/api/mensajes/'+tel,{method:'DELETE',headers:{Authorization:'Bearer '+token}})
+    .then(function(r){return r.json()})
+    .then(function(){
+      mensajes = mensajes.filter(function(m){return m.contacto!==tel;});
+      renderMensajes(tel);
+    });
+  } else if(accion==='bloquear'){
+    if(!confirm('Bloquear a +'+tel+'?')) return;
+    alert('Contacto bloqueado. No podrá enviarte mensajes.');
+  } else if(accion==='silenciar'){
+    alert('Notificaciones silenciadas para +'+tel+'.');
+  } else if(accion==='destacar'){
+    alert('Función de mensajes destacados próximamente.');
+  } else if(accion==='archivos'){
+    var imgs = mensajes.filter(function(m){return m.contacto===tel && m.mensaje && m.mensaje.startsWith('[imagen:');});
+    if(!imgs.length){ alert('No hay archivos compartidos en este chat.'); return; }
+    var html='<div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:9999;display:flex;align-items:center;justify-content:center" onclick="this.remove()">'+
+      '<div style="background:#233138;border-radius:12px;padding:20px;max-width:500px;width:90%;max-height:70vh;overflow-y:auto" onclick="event.stopPropagation()">'+
+      '<div style="color:#e9edef;font-size:15px;font-weight:500;margin-bottom:12px">Archivos compartidos</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">'+
+      imgs.map(function(m){
+        var url=m.mensaje.replace('[imagen:','').replace(']','');
+        return '<img src="'+url+'" style="width:100%;height:80px;object-fit:cover;border-radius:6px;cursor:pointer" data-url="'+url+'" onclick="abrirImagenArchivo(this)">';
+      }).join('')+
+      '</div></div></div>';
+    document.body.insertAdjacentHTML('beforeend',html);
+  } else if(accion==='reportar'){
+    alert('Reporte enviado.');
+  }
 }
 
 function guardarPerfil(tel){

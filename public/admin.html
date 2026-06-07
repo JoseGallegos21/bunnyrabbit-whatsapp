@@ -90,6 +90,7 @@ tr:last-child td{border-bottom:none}
     <div class="tab" onclick="showTab('difusion',this)">Difusion</div>
     <div class="tab" onclick="showTab('reportes',this)">Reportes</div>
         <div class="tab" onclick="showTab('biblioteca',this)">Biblioteca</div>
+        <div class="tab" onclick="showTab('facebook',this)">&#128279; Facebook CAPI</div>
   </div>
 
   <div class="content">
@@ -305,6 +306,8 @@ tr:last-child td{border-bottom:none}
           </select>
         </div>
         <div class="stat-grid" id="statsGrid"></div>
+
+
       </div>
       <div class="card">
         <h2>Actividad por dia</h2>
@@ -314,6 +317,84 @@ tr:last-child td{border-bottom:none}
         <h2>Contactos por etapa del pipeline</h2>
         <div class="bar-chart" id="etapasChart"></div>
       </div>
+    </div>
+
+    <div class="section" id="sec-facebook">
+          <h2 style="margin-bottom:16px;font-size:18px;color:#1877F2">&#128279; Facebook Conversions API</h2>
+
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
+            <div style="background:#f0f7ff;border-radius:10px;padding:16px;text-align:center">
+              <div style="font-size:26px;font-weight:600;color:#1877F2" id="fb-total">0</div>
+              <div style="font-size:12px;color:#666;margin-top:4px">Eventos enviados</div>
+            </div>
+            <div style="background:#f0fff4;border-radius:10px;padding:16px;text-align:center">
+              <div style="font-size:26px;font-weight:600;color:#16a34a" id="fb-ok">0</div>
+              <div style="font-size:12px;color:#666;margin-top:4px">Exitosos</div>
+            </div>
+            <div style="background:#fff0f0;border-radius:10px;padding:16px;text-align:center">
+              <div style="font-size:26px;font-weight:600;color:#dc2626" id="fb-fail">0</div>
+              <div style="font-size:12px;color:#666;margin-top:4px">Fallidos</div>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px;margin-bottom:16px">
+            <button onclick="fbShowSection('conexion',this)" style="padding:7px 16px;border-radius:6px;border:1px solid #1877F2;background:#1877F2;color:white;cursor:pointer;font-size:13px" id="fbBtn-conexion">Conexion</button>
+            <button onclick="fbShowSection('disparadores',this)" style="padding:7px 16px;border-radius:6px;border:1px solid #ddd;background:white;cursor:pointer;font-size:13px" id="fbBtn-disparadores">Disparadores</button>
+            <button onclick="fbShowSection('logs',this)" style="padding:7px 16px;border-radius:6px;border:1px solid #ddd;background:white;cursor:pointer;font-size:13px" id="fbBtn-logs">Historial</button>
+          </div>
+
+          <div id="fbSec-conexion" style="background:white;border:1px solid #e0e0e0;border-radius:10px;padding:20px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+              <h3 style="font-size:15px;color:#333;margin:0">Configuracion por numero</h3>
+              <button onclick="fbLoadNumeros()" style="padding:6px 12px;background:white;border:1px solid #ddd;border-radius:6px;cursor:pointer;font-size:12px">&#8635; Actualizar</button>
+            </div>
+            <div style="background:#e7f0fd;border-left:3px solid #1877F2;border-radius:4px;padding:10px 12px;margin-bottom:16px;font-size:12px;color:#1565d8">
+              Cada numero puede tener su propio Pixel ID y token CAPI. Los eventos se enviaran al pixel del numero que atendio al contacto.
+            </div>
+            <div id="fb-numeros-list">
+              <div style="text-align:center;padding:30px;color:#999;font-size:13px">Cargando numeros...</div>
+            </div>
+          </div>
+
+          <div id="fbSec-disparadores" style="display:none;background:white;border:1px solid #e0e0e0;border-radius:10px;padding:20px">
+            <h3 style="font-size:15px;margin-bottom:4px;color:#333">Reglas de disparo</h3>
+            <p style="font-size:12px;color:#888;margin-bottom:16px">Cuando un contacto cambie a esta etapa, se envia automaticamente el evento a Meta</p>
+            <div id="fb-triggers-list"></div>
+            <button onclick="fbAddTrigger()" style="margin-top:12px;padding:7px 14px;background:white;border:1px solid #ddd;border-radius:6px;cursor:pointer;font-size:13px">+ Agregar regla</button>
+            <div style="margin-top:14px">
+              <button onclick="fbSaveConfig()" style="padding:8px 16px;background:#1877F2;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px">Guardar reglas</button>
+            </div>
+          </div>
+
+          <div id="fbSec-logs" style="display:none;background:white;border:1px solid #e0e0e0;border-radius:10px;padding:20px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+              <h3 style="font-size:15px;color:#333;margin:0">Historial de eventos enviados</h3>
+              <div style="display:flex;gap:8px;align-items:center">
+                <select id="fb-filtro-numero" onchange="fbLoadLogs()" style="padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:12px">
+                  <option value="">Todos los numeros</option>
+                </select>
+                <select id="fb-filtro-evento" onchange="fbFiltrarTabla()" style="padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:12px">
+                  <option value="">Todos los eventos</option>
+                  <option value="Lead">Lead</option>
+                  <option value="Purchase">Purchase</option>
+                  <option value="error">Error</option>
+                </select>
+              </div>
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead><tr style="background:#f9f9f9;border-bottom:2px solid #eee">
+                <th style="padding:8px;text-align:left">Fecha</th>
+                <th style="padding:8px;text-align:left">Contacto</th>
+                <th style="padding:8px;text-align:left">Telefono</th>
+                <th style="padding:8px;text-align:left">Evento</th>
+                <th style="padding:8px;text-align:left">Etapa</th>
+                <th style="padding:8px;text-align:left">Event ID</th>
+                <th style="padding:8px;text-align:center">Estado</th>
+              </tr></thead>
+              <tbody id="fb-logs-body"></tbody>
+            </table>
+            <button onclick="fbLoadLogs()" style="margin-top:12px;padding:7px 14px;background:white;border:1px solid #ddd;border-radius:6px;cursor:pointer;font-size:13px">Actualizar</button>
+          </div>
     </div>
   </div>
 </div>
@@ -389,6 +470,7 @@ function showTab(id,el){
   el.classList.add('active');
   if(id==='reportes')cargarReportes();
     if(id==='biblioteca')cargarBiblioteca();
+    if(id==='facebook'){setTimeout(function(){fbLoadNumeros();fbLoadStats();},100);}
 }
 
 function h(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):''}
@@ -900,6 +982,394 @@ function cargarReportes(){
 function cerrarModal(){
   document.querySelectorAll('.modal-overlay').forEach(function(m){m.classList.remove('open');});
 }
+
+// ===== FACEBOOK CAPI =====
+var fbTriggers = [];
+
+function fbShowSection(name, btn) {
+  ['conexion','disparadores','logs'].forEach(function(s) {
+    document.getElementById('fbSec-'+s).style.display = s===name ? 'block' : 'none';
+    document.getElementById('fbBtn-'+s).style.background = s===name ? '#1877F2' : 'white';
+    document.getElementById('fbBtn-'+s).style.color = s===name ? 'white' : '#333';
+    document.getElementById('fbBtn-'+s).style.borderColor = s===name ? '#1877F2' : '#ddd';
+  });
+  if (name === 'logs') { fbLoadLogs(); fbCargarFiltroNumeros(); }
+  if (name === 'disparadores') fbRenderTriggers();
+}
+
+function fbToggleToken() {
+  var inp = document.getElementById('fb-token');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+function fbLoadConfig() {
+  fbLoadNumeros();
+  fbLoadStats();
+  fetch('/api/facebook/config', { headers: { Authorization: 'Bearer '+token } })
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      fbTriggers = d.triggers || [];
+    });
+}
+
+function fbLoadNumeros() {
+  fetch('/api/numeros/capi', { headers: { Authorization: 'Bearer '+token } })
+    .then(function(r){ return r.json(); })
+    .then(function(numeros) {
+      var html = numeros.map(function(n) {
+        var activo = n.capi_activo ? 'checked' : '';
+        var pixelCorto = n.pixel_id ? n.pixel_id.substring(0,8)+'...' : '';
+        var estadoBadge = n.capi_activo && n.pixel_id
+          ? '<span style="background:#f0fff4;color:#16a34a;padding:2px 8px;border-radius:999px;font-size:11px">Activo</span>'
+          : '<span style="background:#f5f5f5;color:#888;padding:2px 8px;border-radius:999px;font-size:11px">Inactivo</span>';
+        return '<div style="border:1px solid #e0e0e0;border-radius:8px;padding:16px;margin-bottom:12px">' +
+          '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">' +
+            '<div>' +
+              '<div style="font-size:14px;font-weight:500;color:#333">' + (n.sucursal||n.nombre||'Sin nombre') + '</div>' +
+              '<div style="font-size:11px;color:#888;margin-top:2px">ID: ' + n.phone_number_id + '</div>' +
+            '</div>' +
+            '<div style="display:flex;align-items:center;gap:10px">' +
+              estadoBadge +
+              '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">' +
+                '<input type="checkbox" ' + activo + ' id="capi-activo-'+n.id+'"> CAPI activo' +
+              '</label>' +
+            '</div>' +
+          '</div>' +
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">' +
+            '<div>' +
+              '<label style="font-size:11px;color:#666;font-weight:500;display:block;margin-bottom:3px">NOMBRE SUCURSAL</label>' +
+              '<input type="text" id="capi-nombre-'+n.id+'" value="'+(n.sucursal||n.nombre||'')+'" placeholder="Ej: Sucursal Norte" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">' +
+            '</div>' +
+            '<div>' +
+              '<label style="font-size:11px;color:#666;font-weight:500;display:block;margin-bottom:3px">VERSION API</label>' +
+              '<select id="capi-version-'+n.id+'" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">' +
+                '<option value="v21.0"'+((n.capi_version||'v21.0')==='v21.0'?' selected':'')+'>v21.0 (recomendada)</option>' +
+                '<option value="v20.0"'+((n.capi_version||'v21.0')==='v20.0'?' selected':'')+'>v20.0</option>' +
+                '<option value="v19.0"'+((n.capi_version||'v21.0')==='v19.0'?' selected':'')+'>v19.0</option>' +
+              '</select>' +
+            '</div>' +
+            '<div>' +
+              '<label style="font-size:11px;color:#666;font-weight:500;display:block;margin-bottom:3px">PIXEL ID</label>' +
+              '<input type="text" id="capi-pixel-'+n.id+'" value="'+(n.pixel_id||'')+'" placeholder="1234567890" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">' +
+            '</div>' +
+            '<div>' +
+              '<label style="font-size:11px;color:#666;font-weight:500;display:block;margin-bottom:3px">TEST EVENT CODE</label>' +
+              '<input type="text" id="capi-test-'+n.id+'" value="'+(n.capi_test_code||'')+'" placeholder="TEST12345" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">' +
+            '</div>' +
+            '<div style="grid-column:1/-1">' +
+              '<label style="font-size:11px;color:#666;font-weight:500;display:block;margin-bottom:3px">ACCESS TOKEN CAPI (dejar vacio para no cambiar)</label>' +
+              '<input type="password" id="capi-token-'+n.id+'" placeholder="EAAxxxxxxxxxxxxxxxx" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">' +
+            '</div>' +
+          '</div>' +
+          '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #f0f0f0">' +
+            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">' +
+              '<span style="font-size:12px;font-weight:500;color:#333">Reglas de disparo</span>' +
+              '<button onclick="fbAgregarTrigger('+n.id+')" style="padding:3px 10px;background:white;border:1px solid #ddd;border-radius:5px;cursor:pointer;font-size:11px">+ Agregar</button>' +
+            '</div>' +
+            '<div id="triggers-'+n.id+'"></div>' +
+          '</div>' +
+          '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+            '<button onclick="fbGuardarNumero('+n.id+')" style="padding:6px 14px;background:#1877F2;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px">Guardar</button>' +
+            '<button onclick="fbTestNumero('+n.id+')" style="padding:6px 14px;background:white;border:1px solid #1877F2;color:#1877F2;border-radius:6px;cursor:pointer;font-size:12px">&#9654; Probar conexion</button>' +
+            '<button onclick="fbVerLogs(\'' + n.phone_number_id + '\')" style="padding:6px 14px;background:white;border:1px solid #ddd;color:#666;border-radius:6px;cursor:pointer;font-size:12px">Ver historial</button>' +
+            '<span id="capi-msg-'+n.id+'" style="font-size:12px;color:#666;align-self:center"></span>' +
+          '</div>' +
+          '<div id="capi-test-result-'+n.id+'" style="display:none;margin-top:10px;padding:12px;background:#f8f9fa;border-radius:8px;border:1px solid #e0e0e0">' +
+            '<div style="font-size:12px;font-weight:500;color:#333;margin-bottom:8px">Resultado del evento de prueba</div>' +
+            '<div id="capi-test-detail-'+n.id+'" style="font-size:12px;color:#555;line-height:1.8;font-family:monospace"></div>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+      if (!numeros.length) html = '<p style="color:#999;text-align:center;padding:20px">No hay numeros registrados</p>';
+      document.getElementById('fb-numeros-list').innerHTML = html;
+      // Inicializar triggers por numero
+      numeros.forEach(function(n) {
+        fbTriggersData[n.id] = n.capi_triggers ? JSON.parse(n.capi_triggers) : [];
+        fbRenderTriggersNumero(n.id, fbTriggersData[n.id]);
+      });
+    });
+}
+
+function fbGuardarNumero(id) {
+  var pixel = document.getElementById('capi-pixel-'+id).value.trim();
+  var capiTok = document.getElementById('capi-token-'+id).value.trim();
+  var test = document.getElementById('capi-test-'+id).value.trim();
+  var activo = document.getElementById('capi-activo-'+id).checked;
+  var verEl = document.getElementById('capi-version-'+id);
+  var version = verEl ? verEl.value : 'v21.0';
+  var nomEl = document.getElementById('capi-nombre-'+id);
+  var nombre = nomEl ? nomEl.value.trim() : '';
+  var msg = document.getElementById('capi-msg-'+id);
+  msg.textContent = 'Guardando...';
+  fetch('/api/numeros/'+id+'/capi', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer '+token },
+    body: JSON.stringify({ pixel_id: pixel, capi_token: capiTok, capi_version: version, capi_test_code: test, capi_activo: activo, sucursal: nombre, capi_triggers: fbTriggersData[id]||[] })
+  }).then(function(r){ return r.json(); })
+    .then(function(d) {
+      msg.textContent = d.ok ? 'Guardado correctamente' : 'Error: '+d.error;
+      msg.style.color = d.ok ? '#16a34a' : '#dc2626';
+      setTimeout(function(){ msg.textContent=''; }, 3000);
+      fbLoadStats();
+    });
+}
+
+function fbTestNumero(id) {
+  var msg = document.getElementById('capi-msg-'+id);
+  var resultBox = document.getElementById('capi-test-result-'+id);
+  var resultDetail = document.getElementById('capi-test-detail-'+id);
+  msg.textContent = 'Probando...';
+  msg.style.color = '#f59e0b';
+  if (resultBox) resultBox.style.display = 'none';
+  fetch('/api/numeros/'+id+'/capi/test', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer '+token }
+  }).then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (d.ok) {
+        msg.textContent = 'Conexion OK';
+        msg.style.color = '#16a34a';
+        if (resultBox && resultDetail) {
+          resultBox.style.display = 'block';
+          resultBox.style.borderColor = '#86efac';
+          resultBox.style.background = '#f0fff4';
+          resultDetail.innerHTML =
+            '<span style="color:#16a34a">&#10003; Evento enviado exitosamente</span><br>' +
+            'Event ID: <strong>' + (d.event_id||'-') + '</strong><br>' +
+            'Fuente: <strong>' + (d.source==='numero' ? 'Pixel de este numero' : 'Config global') + '</strong><br>' +
+            'Estado Meta: <strong>200 OK</strong><br>' +
+            '<span style="color:#888;font-size:11px">Verifica en Meta Events Manager → Test Events que aparezca el evento Lead</span>';
+        }
+      } else {
+        msg.textContent = 'Error';
+        msg.style.color = '#dc2626';
+        if (resultBox && resultDetail) {
+          resultBox.style.display = 'block';
+          resultBox.style.borderColor = '#fca5a5';
+          resultBox.style.background = '#fff0f0';
+          resultDetail.innerHTML =
+            '<span style="color:#dc2626">&#10007; Error al enviar evento</span><br>' +
+            'Detalle: <strong>' + (d.error||'Error desconocido') + '</strong><br>' +
+            '<span style="color:#888;font-size:11px">Verifica que el Pixel ID y el Access Token CAPI sean correctos</span>';
+        }
+      }
+      setTimeout(function(){ msg.textContent=''; }, 5000);
+      fbLoadStats();
+      fbLoadLogs();
+    });
+}
+
+function fbLoadStats() {
+  fetch('/api/facebook/stats', { headers: { Authorization: 'Bearer '+token } })
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      document.getElementById('fb-total').textContent = d.total || 0;
+      document.getElementById('fb-ok').textContent = d.exitosos || 0;
+      document.getElementById('fb-fail').textContent = d.fallidos || 0;
+    });
+}
+
+function fbDot(state, msg) {
+  var dot = document.getElementById('fb-dot');
+  var txt = document.getElementById('fb-status-text');
+  var colors = { connected: '#16a34a', error: '#dc2626', testing: '#f59e0b', disconnected: '#aaa' };
+  dot.style.background = colors[state] || '#aaa';
+  txt.textContent = msg;
+}
+
+function fbTestConnection() {
+  fbDot('testing', 'Probando conexion con Meta...');
+  fetch('/api/facebook/test', { method:'POST', headers: { Authorization: 'Bearer '+token } })
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (d.ok) {
+        fbDot('connected', 'Conexion exitosa — evento de prueba enviado a Meta');
+        fbLoadStats();
+      } else {
+        fbDot('error', 'Error: ' + (d.error || 'Token o Pixel ID invalido'));
+      }
+    }).catch(function() { fbDot('error', 'Error de red'); });
+}
+
+function fbSaveConfig() {
+  var data = {
+    pixel_id: document.getElementById('fb-pixel-id').value.trim(),
+    access_token: document.getElementById('fb-token').value.trim(),
+    test_event_code: document.getElementById('fb-test-code').value.trim(),
+    api_version: document.getElementById('fb-version').value,
+    triggers: fbTriggers
+  };
+  if (!data.pixel_id) { alert('Ingresa el Pixel ID'); return; }
+  fetch('/api/facebook/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer '+token },
+    body: JSON.stringify(data)
+  }).then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (d.ok) {
+        fbDot('connected', 'Configuracion guardada correctamente');
+      } else {
+        alert('Error al guardar');
+      }
+    });
+}
+
+function fbSendTest() {
+  fbDot('testing', 'Enviando evento de prueba...');
+  fetch('/api/facebook/test', { method:'POST', headers: { Authorization: 'Bearer '+token } })
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (d.ok) {
+        fbDot('connected', 'Evento de prueba enviado — event_id: ' + d.event_id);
+        fbLoadStats();
+        fbLoadLogs();
+      } else {
+        fbDot('error', 'Error: ' + (d.error||'Verifica tus credenciales'));
+      }
+    });
+}
+
+function fbRenderTriggers() {
+  var etapas = ['Nuevo','Seguimiento','Propuesta','Cerrado','Perdido'];
+  var eventos = ['Lead','Purchase','CompleteRegistration','Contact','Schedule','InitiateCheckout'];
+  var html = fbTriggers.map(function(t, i) {
+    return '<div style="display:grid;grid-template-columns:1fr 24px 1fr 80px 40px;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid #f0f0f0">' +
+      '<select onchange="fbTriggers['+i+'].etapa=this.value" style="padding:7px;border:1px solid #ddd;border-radius:6px;font-size:13px">' +
+      etapas.map(function(e){ return '<option value="'+e+'"'+(t.etapa===e?' selected':'')+'>'+e+'</option>'; }).join('') +
+      '</select>' +
+      '<span style="text-align:center;color:#888;font-size:16px">&rarr;</span>' +
+      '<select onchange="fbTriggers['+i+'].evento=this.value" style="padding:7px;border:1px solid #ddd;border-radius:6px;font-size:13px">' +
+      eventos.map(function(e){ return '<option value="'+e+'"'+(t.evento===e?' selected':'')+'>'+e+'</option>'; }).join('') +
+      '</select>' +
+      '<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">' +
+      '<input type="checkbox" '+(t.activo?'checked':'')+' onchange="fbTriggers['+i+'].activo=this.checked"> Activo</label>' +
+      '<button onclick="fbTriggers.splice('+i+',1);fbRenderTriggers()" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:18px">&times;</button>' +
+      '</div>';
+  }).join('');
+  if (!fbTriggers.length) html = '<p style="color:#999;font-size:13px;text-align:center;padding:20px 0">Sin reglas — agrega una abajo</p>';
+  document.getElementById('fb-triggers-list').innerHTML = html;
+}
+
+function fbAddTrigger() {
+  fbTriggers.push({ etapa: 'Cerrado', evento: 'Lead', activo: true });
+  fbRenderTriggers();
+}
+
+function fbRenderTriggersNumero(numId, triggers) {
+  var etapas = ['Nuevo','Seguimiento','Propuesta','Cerrado','Perdido'];
+  var eventos = ['Lead','Purchase','CompleteRegistration','Contact','Schedule','InitiateCheckout'];
+  var container = document.getElementById('triggers-'+numId);
+  if (!container) return;
+  if (!triggers || !triggers.length) {
+    container.innerHTML = '<p style="font-size:11px;color:#aaa;margin:0">Sin reglas — agrega una arriba</p>';
+    return;
+  }
+  container.innerHTML = triggers.map(function(t, i) {
+    return '<div style="display:grid;grid-template-columns:1fr 20px 1fr 70px 24px;align-items:center;gap:6px;margin-bottom:6px">' +
+      '<select onchange="fbTriggerChange('+numId+','+i+',\'etapa\',this.value)" style="padding:5px;border:1px solid #ddd;border-radius:5px;font-size:12px">' +
+      etapas.map(function(e){ return '<option value="'+e+'"'+(t.etapa===e?' selected':'')+'>'+e+'</option>'; }).join('') +
+      '</select>' +
+      '<span style="text-align:center;color:#aaa;font-size:12px">&rarr;</span>' +
+      '<select onchange="fbTriggerChange('+numId+','+i+',\'evento\',this.value)" style="padding:5px;border:1px solid #ddd;border-radius:5px;font-size:12px">' +
+      eventos.map(function(e){ return '<option value="'+e+'"'+(t.evento===e?' selected':'')+'>'+e+'</option>'; }).join('') +
+      '</select>' +
+      '<label style="display:flex;align-items:center;gap:4px;font-size:11px;cursor:pointer">' +
+        '<input type="checkbox" '+(t.activo?'checked':'')+' onchange="fbTriggerChange('+numId+','+i+',\'activo\',this.checked)"> Activo' +
+      '</label>' +
+      '<button onclick="fbEliminarTrigger('+numId+','+i+')" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:16px;padding:0">&times;</button>' +
+    '</div>';
+  }).join('');
+}
+
+var fbTriggersData = {};
+
+function fbTriggerChange(numId, idx, field, value) {
+  if (!fbTriggersData[numId]) fbTriggersData[numId] = [];
+  fbTriggersData[numId][idx][field] = value;
+}
+
+function fbAgregarTrigger(numId) {
+  if (!fbTriggersData[numId]) fbTriggersData[numId] = [];
+  fbTriggersData[numId].push({ etapa: 'Cerrado', evento: 'Lead', activo: true });
+  fbRenderTriggersNumero(numId, fbTriggersData[numId]);
+}
+
+function fbEliminarTrigger(numId, idx) {
+  fbTriggersData[numId].splice(idx, 1);
+  fbRenderTriggersNumero(numId, fbTriggersData[numId]);
+}
+
+function fbFiltrarTabla() {
+  var filtro = document.getElementById('fb-filtro-evento').value.toLowerCase();
+  var filas = document.querySelectorAll('#fb-logs-body tr');
+  filas.forEach(function(fila) {
+    if (!filtro) { fila.style.display = ''; return; }
+    fila.style.display = fila.textContent.toLowerCase().indexOf(filtro) > -1 ? '' : 'none';
+  });
+}
+
+function fbCargarFiltroNumeros() {
+  fetch('/api/numeros/capi', { headers: { Authorization: 'Bearer '+token } })
+    .then(function(r){ return r.json(); })
+    .then(function(numeros) {
+      var sel = document.getElementById('fb-filtro-numero');
+      if (!sel) return;
+      var opts = '<option value="">Todos los numeros</option>';
+      numeros.forEach(function(n) {
+        opts += '<option value="'+n.phone_number_id+'">'+(n.sucursal||n.nombre||n.phone_number_id)+'</option>';
+      });
+      sel.innerHTML = opts;
+    });
+}
+
+function fbVerLogs(numeroId) {
+  fbShowSection('logs', document.getElementById('fbBtn-logs'));
+  setTimeout(function(){ fbLoadLogs(numeroId); }, 100);
+}
+
+function fbLoadLogs(filtroNumero) {
+  var select = document.getElementById('fb-filtro-numero');
+  var numeroId = filtroNumero || (select ? select.value : '');
+  if (filtroNumero && select) select.value = filtroNumero;
+  var url = '/api/facebook/logs' + (numeroId ? '?numero_id='+encodeURIComponent(numeroId) : '');
+  fetch(url, { headers: { Authorization: 'Bearer '+token } })
+    .then(function(r){ return r.json(); })
+    .then(function(rows) {
+      var html = rows.map(function(l) {
+        var isOk = l.status_code === 200;
+        var badge = isOk
+          ? '<span style="background:#f0fff4;color:#16a34a;padding:2px 8px;border-radius:999px;font-size:11px">&#10003; OK</span>'
+          : '<span style="background:#fff0f0;color:#dc2626;padding:2px 8px;border-radius:999px;font-size:11px">&#10007; Error</span>';
+        var evColor = l.evento_tipo==='Lead' ? '#1877F2' : l.evento_tipo==='Purchase' ? '#16a34a' : '#888';
+        var evBg = l.evento_tipo==='Lead' ? '#e7f0fd' : l.evento_tipo==='Purchase' ? '#f0fff4' : '#f5f5f5';
+        var evBadge = '<span style="background:'+evBg+';color:'+evColor+';padding:2px 8px;border-radius:999px;font-size:11px">'+( l.evento_tipo||'-')+'</span>';
+        var fecha = l.created_at ? l.created_at.substring(0,16).replace('T',' ') : '-';
+        var sucursal = l.sucursal || l.num_nombre || (l.numero_id ? l.numero_id.substring(0,8)+'...' : 'Global');
+        var respuesta = '';
+        if (!isOk && l.respuesta) {
+          respuesta = '<div style="margin-top:4px;font-size:11px;color:#dc2626;background:#fff0f0;padding:4px 8px;border-radius:4px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+l.respuesta.replace(/"/g,'&quot;')+'">'+l.respuesta.substring(0,80)+'</div>';
+        }
+        if (isOk && l.respuesta) {
+          try {
+            var parsed = JSON.parse(l.respuesta);
+            var eventsReceived = parsed.events_received || '-';
+            respuesta = '<div style="margin-top:4px;font-size:11px;color:#16a34a">Meta recibio: '+eventsReceived+' evento(s)</div>';
+          } catch(e) {}
+        }
+        return '<tr style="border-bottom:1px solid #f0f0f0">' +
+          '<td style="padding:8px;font-size:12px;color:#666;white-space:nowrap">'+fecha+'</td>' +
+          '<td style="padding:8px;font-size:13px"><div style="font-weight:500">'+( l.contacto_nombre||'-')+'</div><div style="font-size:11px;color:#888">'+( l.contacto_telefono||'-')+'</div></td>' +
+          '<td style="padding:8px;font-size:12px;color:#1877F2">'+sucursal+'</td>' +
+          '<td style="padding:8px">'+evBadge+'</td>' +
+          '<td style="padding:8px;font-size:12px">'+( l.etapa||'-')+'</td>' +
+          '<td style="padding:8px;font-size:11px;color:#888;font-family:monospace">'+( l.event_id||'-')+'</td>' +
+          '<td style="padding:8px">'+badge+respuesta+'</td>' +
+          '</tr>';
+      }).join('') || '<tr><td colspan="7" style="padding:20px;text-align:center;color:#999">Sin eventos aun</td></tr>';
+      document.getElementById('fb-logs-body').innerHTML = html;
+    });
+}
 </script>
+
 </body>
 </html>

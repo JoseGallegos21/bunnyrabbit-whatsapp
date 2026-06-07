@@ -105,11 +105,56 @@ app.get('/api/contactos', auth, (req, res) => {
   }
 });
 
-app.put('/api/contactos/:id', auth, (req, res) => {
+app.put('/api/contactos/:id', auth, async (req, res) => {
   const { nombre, etapa, prioridad, notas } = req.body;
-  db.run('UPDATE contactos SET nombre=?, etapa=?, prioridad=?, notas=? WHERE id=?',
-    [nombre, etapa||'Nuevo', prioridad||'Media', notas||'', req.params.id],
-    (err) => res.json({ ok: !err, error: err?.message }));
+  db.get('SELECT etapa, telefono, nombre as nombre_actual FROM contactos WHERE id=?', [req.params.id], (err, contactoAnterior) => {
+    db.run('UPDATE contactos SET nombre=?, etapa=?, prioridad=?, notas=? WHERE id=?',
+      [nombre, etapa||'Nuevo', prioridad||'Media', notas||'', req.params.id],
+      async (err2) => {
+        if (!err2 && contactoAnterior && etapa && etapa !== contactoAnterior.etapa) {
+          try {
+            // Buscar triggers del numero del contacto
+            const numeroId = contactoAnterior.numero_id;
+            const numRow = await new Promise((resolve) => {
+              db.get('SELECT capi_triggers, capi_activo, pixel_id FROM numeros WHERE phone_number_id=?', [numeroId], (e, row) => resolve(row));
+            });
+            let matched = false;
+            if (numRow && numRow.capi_activo && numRow.pixel_id) {
+              const triggers = JSON.parse(numRow.capi_triggers || '[]');
+              const match = triggers.find(t => t.etapa === etapa && t.activo);
+              if (match) {
+                await sendCapiEvent(match.evento, {
+                  nombre: nombre || contactoAnterior.nombre_actual,
+                  telefono: contactoAnterior.telefono,
+                  etapa: etapa,
+                  numero_id: numeroId
+                });
+                matched = true;
+              }
+            }
+            // Fallback a config global si no hay config por numero
+            if (!matched) {
+              const config = await new Promise((resolve, reject) => {
+                db.get('SELECT triggers, activo FROM facebook_capi_config WHERE activo=1 LIMIT 1', [], (e, row) => {
+                  if (e || !row) reject('sin config'); else resolve(row);
+                });
+              });
+              const triggers = JSON.parse(config.triggers || '[]');
+              const match = triggers.find(t => t.etapa === etapa && t.activo);
+              if (match) {
+                await sendCapiEvent(match.evento, {
+                  nombre: nombre || contactoAnterior.nombre_actual,
+                  telefono: contactoAnterior.telefono,
+                  etapa: etapa,
+                  numero_id: numeroId
+                });
+              }
+            }
+          } catch(e2) {}
+        }
+        res.json({ ok: !err2, error: err2?.message });
+      });
+  });
 });
 
 app.delete('/api/contactos/:id', auth, (req, res) => {
@@ -185,6 +230,42 @@ app.get('/api/contactos/:id/etiquetas', auth, (req, res) => {
   });
 });
 
+
+app.delete('/api/mensajes/:tel', auth, (req, res) => {
+  db.run('DELETE FROM mensajes WHERE contacto=? AND numero_id=?',
+    [req.params.tel, req.user.numero_id || req.query.numero_id],
+    (err) => res.json({ ok: !err }));
+});
+
+
+// ===== RESPUESTAS RAPIDAS =====
+app.get('/api/respuestas', auth, (req, res) => {
+  db.all('SELECT * FROM respuestas_rapidas WHERE usuario_id=? ORDER BY titulo', [req.user.id], (err, rows) => {
+    res.json(rows || []);
+  });
+});
+
+app.post('/api/respuestas', auth, (req, res) => {
+  const { titulo, contenido } = req.body;
+  if(!titulo||!contenido) return res.status(400).json({ error: 'Titulo y contenido requeridos' });
+  db.run('INSERT INTO respuestas_rapidas (usuario_id, titulo, contenido) VALUES (?,?,?)',
+    [req.user.id, titulo, contenido], function(err) {
+      if(err) return res.status(500).json({ error: err.message });
+      res.json({ ok: true, id: this.lastID });
+    });
+});
+
+app.put('/api/respuestas/:id', auth, (req, res) => {
+  const { titulo, contenido } = req.body;
+  db.run('UPDATE respuestas_rapidas SET titulo=?, contenido=? WHERE id=? AND usuario_id=?',
+    [titulo, contenido, req.params.id, req.user.id], (err) => res.json({ ok: !err }));
+});
+
+app.delete('/api/respuestas/:id', auth, (req, res) => {
+  db.run('DELETE FROM respuestas_rapidas WHERE id=? AND usuario_id=?',
+    [req.params.id, req.user.id], (err) => res.json({ ok: !err }));
+});
+
 app.post('/api/login', (req, res) => {
   const { email, password } = req.body;
   db.get('SELECT * FROM usuarios WHERE email = ?', [email], async (err, user) => {
@@ -222,7 +303,7 @@ app.post('/api/enviar', auth, async (req, res) => {
       await axios.post(`https://graph.facebook.com/v18.0/${nid}/messages`, { messaging_product: 'whatsapp', to: telefono, type: 'text', text: { body: mensaje } }, { headers: { Authorization: `Bearer ${num.token}` } });
       db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion) VALUES (?, ?, ?, ?)', [nid, telefono, mensaje, 'saliente']);
       res.json({ ok: true });
-    } catch (e) { res.status(500).json({ error: e.response?.data || e.message }); }
+    } catch (e) { console.error('Error enviar:', JSON.stringify(e.response?.data || e.message)); res.status(500).json({ error: e.response?.data || e.message }); }
   });
 });
 
@@ -434,3 +515,157 @@ app.get('/api/reportes/etapas', auth, (req, res) => {
 });
 
 app.listen(process.env.PORT, () => console.log(`Sistema WhatsApp corriendo en puerto ${process.env.PORT}`));
+
+// ==================== FACEBOOK CONVERSIONS API ====================
+const crypto = require('crypto');
+
+function hashData(value) {
+  if (!value) return null;
+  return crypto.createHash('sha256').update(value.trim().toLowerCase()).digest('hex');
+}
+
+async function sendCapiEvent(eventName, contacto) {
+  try {
+    // Buscar config por numero_id del contacto primero, luego config global
+    const config = await new Promise((resolve, reject) => {
+      if (contacto.numero_id) {
+        db.get('SELECT pixel_id, capi_token as access_token, capi_version as api_version, capi_test_code as test_event_code FROM numeros WHERE phone_number_id=? AND capi_activo=1 AND pixel_id IS NOT NULL', [contacto.numero_id], (err, row) => {
+          if (row) resolve({ ...row, source: 'numero' });
+          else {
+            db.get('SELECT * FROM facebook_capi_config WHERE activo=1 LIMIT 1', [], (err2, row2) => {
+              if (err2 || !row2) reject('Sin config CAPI para este numero');
+              else resolve({ ...row2, source: 'global' });
+            });
+          }
+        });
+      } else {
+        db.get('SELECT * FROM facebook_capi_config WHERE activo=1 LIMIT 1', [], (err, row) => {
+          if (err || !row) reject('Sin config');
+          else resolve({ ...row, source: 'global' });
+        });
+      }
+    });
+
+    const eventId = 'ev_' + Math.random().toString(36).substring(2, 9);
+    const payload = {
+      data: [{
+        event_name: eventName,
+        event_time: Math.floor(Date.now() / 1000),
+        event_id: eventId,
+        action_source: 'crm',
+        user_data: {
+          ph: [hashData(contacto.telefono)],
+          fn: [hashData(contacto.nombre ? contacto.nombre.split(' ')[0] : null)],
+          ln: [hashData(contacto.nombre && contacto.nombre.split(' ')[1] ? contacto.nombre.split(' ')[1] : null)]
+        }
+      }]
+    };
+
+    if (config.test_event_code) {
+      payload.test_event_code = config.test_event_code;
+    }
+
+    const url = `https://graph.facebook.com/${config.api_version || 'v21.0'}/${config.pixel_id}/events?access_token=${config.access_token}`;
+    const response = await require('axios').post(url, payload);
+
+    db.run('INSERT INTO facebook_capi_logs (contacto_nombre, contacto_telefono, evento_tipo, etapa, event_id, status_code, respuesta, numero_id) VALUES (?,?,?,?,?,?,?,?)',
+      [contacto.nombre, contacto.telefono, eventName, contacto.etapa, eventId, 200, JSON.stringify(response.data), contacto.numero_id || null]);
+
+    return { ok: true, event_id: eventId, source: config.source };
+  } catch(e) {
+    const msg = e.response?.data?.error?.message || e.message || 'Error desconocido';
+    db.run('INSERT INTO facebook_capi_logs (contacto_nombre, contacto_telefono, evento_tipo, etapa, event_id, status_code, respuesta, numero_id) VALUES (?,?,?,?,?,?,?,?)',
+      [contacto.nombre, contacto.telefono, 'error', contacto.etapa, null, e.response?.status || 0, msg, contacto.numero_id || null]);
+    return { ok: false, error: msg };
+  }
+}
+
+// Guardar configuración CAPI
+app.post('/api/facebook/config', auth, (req, res) => {
+  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  const { pixel_id, access_token, test_event_code, api_version, triggers } = req.body;
+  db.get('SELECT id FROM facebook_capi_config LIMIT 1', [], (err, row) => {
+    if (row) {
+      db.run('UPDATE facebook_capi_config SET pixel_id=?, access_token=?, test_event_code=?, api_version=?, triggers=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+        [pixel_id, access_token, test_event_code || null, api_version || 'v21.0', JSON.stringify(triggers || []), row.id],
+        (e) => res.json({ ok: !e }));
+    } else {
+      db.run('INSERT INTO facebook_capi_config (pixel_id, access_token, test_event_code, api_version, triggers) VALUES (?,?,?,?,?)',
+        [pixel_id, access_token, test_event_code || null, api_version || 'v21.0', JSON.stringify(triggers || [])],
+        (e) => res.json({ ok: !e }));
+    }
+  });
+});
+
+// Obtener configuración CAPI
+app.get('/api/facebook/config', auth, (req, res) => {
+  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  db.get('SELECT * FROM facebook_capi_config LIMIT 1', [], (err, row) => {
+    if (!row) return res.json({ configured: false });
+    res.json({ configured: true, pixel_id: row.pixel_id, test_event_code: row.test_event_code, api_version: row.api_version, triggers: JSON.parse(row.triggers || '[]'), has_token: !!row.access_token });
+  });
+});
+
+// Probar conexión CAPI
+app.post('/api/facebook/test', auth, async (req, res) => {
+  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  const result = await sendCapiEvent('Lead', { nombre: 'Test BunnyRabbit', telefono: '5200000000000', etapa: 'test' });
+  res.json(result);
+});
+
+// Logs CAPI
+app.get('/api/facebook/logs', auth, (req, res) => {
+  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  const numero_id = req.query.numero_id || null;
+  let query = `SELECT l.*, n.sucursal, n.nombre as num_nombre
+    FROM facebook_capi_logs l
+    LEFT JOIN numeros n ON l.numero_id = n.phone_number_id
+    WHERE 1=1`;
+  const params = [];
+  if (numero_id) { query += ' AND l.numero_id=?'; params.push(numero_id); }
+  query += ' ORDER BY l.created_at DESC LIMIT 100';
+  db.all(query, params, (err, rows) => res.json(rows || []));
+});
+
+// Stats CAPI
+app.get('/api/facebook/stats', auth, (req, res) => {
+  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  db.get('SELECT COUNT(*) as total, SUM(CASE WHEN status_code=200 THEN 1 ELSE 0 END) as exitosos, SUM(CASE WHEN status_code!=200 THEN 1 ELSE 0 END) as fallidos FROM facebook_capi_logs', [], (err, row) => res.json(row || { total: 0, exitosos: 0, fallidos: 0 }));
+});
+
+
+// ===== CAPI POR NUMERO =====
+app.get('/api/numeros/capi', auth, (req, res) => {
+  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  db.all('SELECT id, nombre, sucursal, phone_number_id, pixel_id, capi_version, capi_test_code, capi_activo, capi_triggers FROM numeros ORDER BY sucursal', [], (err, rows) => {
+    res.json(rows || []);
+  });
+});
+
+app.put('/api/numeros/:id/capi', auth, (req, res) => {
+  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  const { pixel_id, capi_token, capi_version, capi_test_code, capi_activo, sucursal, capi_triggers } = req.body;
+  const triggersJson = JSON.stringify(capi_triggers || []);
+  const query = capi_token
+    ? 'UPDATE numeros SET pixel_id=?, capi_token=?, capi_version=?, capi_test_code=?, capi_activo=?, sucursal=?, capi_triggers=? WHERE id=?'
+    : 'UPDATE numeros SET pixel_id=?, capi_version=?, capi_test_code=?, capi_activo=?, sucursal=?, capi_triggers=? WHERE id=?';
+  const params = capi_token
+    ? [pixel_id, capi_token, capi_version || 'v21.0', capi_test_code || null, capi_activo ? 1 : 0, sucursal || null, triggersJson, req.params.id]
+    : [pixel_id, capi_version || 'v21.0', capi_test_code || null, capi_activo ? 1 : 0, sucursal || null, triggersJson, req.params.id];
+  db.run(query, params, (err) => res.json({ ok: !err, error: err?.message }));
+});
+
+app.post('/api/numeros/:id/capi/test', auth, async (req, res) => {
+  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  db.get('SELECT * FROM numeros WHERE id=?', [req.params.id], async (err, num) => {
+    if (!num) return res.status(404).json({ error: 'Numero no encontrado' });
+    if (!num.pixel_id || !num.capi_token) return res.status(400).json({ error: 'Configura Pixel ID y token primero' });
+    const result = await sendCapiEvent('Lead', {
+      nombre: 'Test BunnyRabbit',
+      telefono: '5200000000000',
+      etapa: 'test',
+      numero_id: num.phone_number_id
+    });
+    res.json(result);
+  });
+});

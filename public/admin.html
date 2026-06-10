@@ -346,7 +346,44 @@ tr:last-child td{border-bottom:none}
           <div id="fbSec-conexion" style="background:white;border:1px solid #e0e0e0;border-radius:10px;padding:20px">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
               <h3 style="font-size:15px;color:#333;margin:0">Configuracion por numero</h3>
-              <button onclick="fbLoadNumeros()" style="padding:6px 12px;background:white;border:1px solid #ddd;border-radius:6px;cursor:pointer;font-size:12px">&#8635; Actualizar</button>
+              <div style="display:flex;gap:8px">
+                <button onclick="fbMostrarFormNuevo()" style="padding:6px 12px;background:#1877F2;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px">+ Agregar numero</button>
+                <button onclick="fbLoadNumeros()" style="padding:6px 12px;background:white;border:1px solid #ddd;border-radius:6px;cursor:pointer;font-size:12px">&#8635; Actualizar</button>
+              </div>
+            </div>
+            <div id="fb-form-nuevo" style="display:none;background:#f8f9fa;border:1px solid #e0e0e0;border-radius:8px;padding:16px;margin-bottom:16px">
+              <h4 style="font-size:13px;font-weight:500;color:#333;margin:0 0 12px">Nuevo numero</h4>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+                <div>
+                  <label style="font-size:11px;color:#666;font-weight:500;display:block;margin-bottom:3px">NOMBRE / SUCURSAL</label>
+                  <input type="text" id="nuevo-nombre" placeholder="Ej: Sucursal Norte" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:#666;font-weight:500;display:block;margin-bottom:3px">PHONE NUMBER ID</label>
+                  <input type="text" id="nuevo-phone-id" placeholder="Ej: 123456789012345" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:#666;font-weight:500;display:block;margin-bottom:3px">PIXEL ID</label>
+                  <input type="text" id="nuevo-pixel-id" placeholder="Ej: 1234567890123456" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">
+                </div>
+                <div>
+                  <label style="font-size:11px;color:#666;font-weight:500;display:block;margin-bottom:3px">VERSION API</label>
+                  <select id="nuevo-version" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">
+                    <option value="v21.0">v21.0 (recomendada)</option>
+                    <option value="v20.0">v20.0</option>
+                    <option value="v19.0">v19.0</option>
+                  </select>
+                </div>
+                <div style="grid-column:1/-1">
+                  <label style="font-size:11px;color:#666;font-weight:500;display:block;margin-bottom:3px">ACCESS TOKEN CAPI</label>
+                  <input type="password" id="nuevo-capi-token" placeholder="EAAxxxxxxxxxxxxxxxx" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center">
+                <button onclick="fbGuardarNuevoNumero()" style="padding:7px 16px;background:#1877F2;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px">Guardar numero</button>
+                <button onclick="fbCerrarFormNuevo()" style="padding:7px 16px;background:white;border:1px solid #ddd;border-radius:6px;cursor:pointer;font-size:13px">Cancelar</button>
+                <span id="nuevo-msg" style="font-size:12px;color:#666"></span>
+              </div>
             </div>
             <div style="background:#e7f0fd;border-left:3px solid #1877F2;border-radius:4px;padding:10px 12px;margin-bottom:16px;font-size:12px;color:#1565d8">
               Cada numero puede tener su propio Pixel ID y token CAPI. Los eventos se enviaran al pixel del numero que atendio al contacto.
@@ -1058,7 +1095,7 @@ function fbLoadNumeros() {
             '</div>' +
             '<div style="grid-column:1/-1">' +
               '<label style="font-size:11px;color:#666;font-weight:500;display:block;margin-bottom:3px">ACCESS TOKEN CAPI (dejar vacio para no cambiar)</label>' +
-              '<input type="password" id="capi-token-'+n.id+'" placeholder="EAAxxxxxxxxxxxxxxxx" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">' +
+              '<input type="password" id="capi-token-'+n.id+'" placeholder="'+(n.capi_activo && n.pixel_id ? "Token guardado — dejar vacio para no cambiar" : "EAAxxxxxxxxxxxxxxxx")+'" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">' +
             '</div>' +
           '</div>' +
           '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #f0f0f0">' +
@@ -1297,6 +1334,46 @@ function fbAgregarTrigger(numId) {
 function fbEliminarTrigger(numId, idx) {
   fbTriggersData[numId].splice(idx, 1);
   fbRenderTriggersNumero(numId, fbTriggersData[numId]);
+}
+
+function fbMostrarFormNuevo() {
+  document.getElementById('fb-form-nuevo').style.display = 'block';
+  document.getElementById('nuevo-nombre').focus();
+}
+
+function fbCerrarFormNuevo() {
+  document.getElementById('fb-form-nuevo').style.display = 'none';
+  ['nuevo-nombre','nuevo-phone-id','nuevo-pixel-id','nuevo-capi-token'].forEach(function(id){
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('nuevo-msg').textContent = '';
+}
+
+function fbGuardarNuevoNumero() {
+  var nombre = document.getElementById('nuevo-nombre').value.trim();
+  var phoneId = document.getElementById('nuevo-phone-id').value.trim();
+  var pixelId = document.getElementById('nuevo-pixel-id').value.trim();
+  var version = document.getElementById('nuevo-version').value;
+  var capiToken = document.getElementById('nuevo-capi-token').value.trim();
+  var msg = document.getElementById('nuevo-msg');
+
+  if (!nombre || !phoneId) { msg.textContent = 'Nombre y Phone Number ID son obligatorios'; msg.style.color='#dc2626'; return; }
+
+  msg.textContent = 'Guardando...'; msg.style.color = '#888';
+
+  fetch('/api/numeros/nuevo', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer '+token },
+    body: JSON.stringify({ nombre: nombre, sucursal: nombre, phone_number_id: phoneId, pixel_id: pixelId, capi_version: version, capi_token: capiToken, capi_activo: 0 })
+  }).then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (d.ok) {
+        msg.textContent = 'Numero agregado correctamente'; msg.style.color = '#16a34a';
+        setTimeout(function(){ fbCerrarFormNuevo(); fbLoadNumeros(); }, 1500);
+      } else {
+        msg.textContent = 'Error: ' + (d.error||'Error desconocido'); msg.style.color = '#dc2626';
+      }
+    });
 }
 
 function fbFiltrarTabla() {

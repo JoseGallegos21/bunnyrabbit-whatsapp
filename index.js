@@ -552,7 +552,7 @@ async function sendCapiEvent(eventName, contacto) {
         event_name: eventName,
         event_time: Math.floor(Date.now() / 1000),
         event_id: eventId,
-        action_source: 'crm',
+        action_source: 'website',
         user_data: {
           ph: [hashData(contacto.telefono)],
           fn: [hashData(contacto.nombre ? contacto.nombre.split(' ')[0] : null)],
@@ -660,12 +660,49 @@ app.post('/api/numeros/:id/capi/test', auth, async (req, res) => {
   db.get('SELECT * FROM numeros WHERE id=?', [req.params.id], async (err, num) => {
     if (!num) return res.status(404).json({ error: 'Numero no encontrado' });
     if (!num.pixel_id || !num.capi_token) return res.status(400).json({ error: 'Configura Pixel ID y token primero' });
-    const result = await sendCapiEvent('Lead', {
-      nombre: 'Test BunnyRabbit',
-      telefono: '5200000000000',
-      etapa: 'test',
-      numero_id: num.phone_number_id
-    });
-    res.json(result);
+    // Usar test_event_code del numero para que aparezca en Meta Events Manager
+    const eventId = 'ev_test_' + Math.random().toString(36).substring(2, 9);
+    try {
+      const crypto = require('crypto');
+      const payload = {
+        data: [{
+          event_name: 'Lead',
+          event_time: Math.floor(Date.now() / 1000),
+          event_id: eventId,
+          action_source: 'website',
+          user_data: {
+            ph: [crypto.createHash('sha256').update('525512345678').digest('hex')],
+            fn: [crypto.createHash('sha256').update('test').digest('hex')],
+            ln: [crypto.createHash('sha256').update('bunnyrabbit').digest('hex')],
+            ct: [crypto.createHash('sha256').update('mexico').digest('hex')],
+            country: [crypto.createHash('sha256').update('mx').digest('hex')]
+          }
+        }]
+      };
+      if (num.capi_test_code) payload.test_event_code = num.capi_test_code;
+      const url = `https://graph.facebook.com/${num.capi_version||'v21.0'}/${num.pixel_id}/events?access_token=${num.capi_token}`;
+      const response = await require('axios').post(url, payload);
+      db.run('INSERT INTO facebook_capi_logs (contacto_nombre, contacto_telefono, evento_tipo, etapa, event_id, status_code, respuesta, numero_id) VALUES (?,?,?,?,?,?,?,?)',
+        ['Test BunnyRabbit', '5200000000000', 'Lead', 'test', eventId, 200, JSON.stringify(response.data), num.phone_number_id]);
+      res.json({ ok: true, event_id: eventId, test_code: num.capi_test_code||null, message: num.capi_test_code ? 'Evento enviado con test_event_code — revisa Meta Events Manager' : 'Evento enviado — agrega un Test Event Code para verlo en Meta' });
+    } catch(e) {
+      const msg = e.response?.data?.error?.message || e.message;
+      res.json({ ok: false, error: msg });
+    }
   });
+});
+
+// ===== AGREGAR NUMERO NUEVO =====
+app.post('/api/numeros/nuevo', auth, (req, res) => {
+  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  const { nombre, sucursal, phone_number_id, pixel_id, capi_version, token: waToken, capi_token, capi_activo } = req.body;
+  if (!nombre || !phone_number_id) return res.status(400).json({ error: 'Nombre y Phone Number ID son obligatorios' });
+  db.run(
+    'INSERT INTO numeros (nombre, sucursal, phone_number_id, token, pixel_id, capi_token, capi_version, capi_activo, capi_triggers) VALUES (?,?,?,?,?,?,?,?,?)',
+    [nombre, sucursal||nombre, phone_number_id, waToken||null, pixel_id||null, capi_token||null, capi_version||'v21.0', capi_activo?1:0, '[]'],
+    function(err) {
+      if (err) return res.status(400).json({ ok: false, error: err.message });
+      res.json({ ok: true, id: this.lastID });
+    }
+  );
 });

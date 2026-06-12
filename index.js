@@ -271,7 +271,7 @@ app.post('/api/login', (req, res) => {
   db.get('SELECT * FROM usuarios WHERE email = ?', [email], async (err, user) => {
     if (!user || !(await bcrypt.compare(password, user.password))) return res.status(401).json({ error: 'Credenciales incorrectas' });
     const token = jwt.sign({ id: user.id, rol: user.rol, numero_id: user.numero_id }, process.env.JWT_SECRET, { expiresIn: '24h' });
-    res.json({ token, usuario: { nombre: user.nombre, rol: user.rol, sucursal: user.sucursal } });
+    res.json({ token, usuario: { nombre: user.nombre, rol: user.rol, sucursal: user.sucursal, numero_id: user.numero_id } });
   });
 });
 
@@ -514,7 +514,7 @@ app.get('/api/reportes/etapas', auth, (req, res) => {
   db.all('SELECT etapa, COUNT(*) as total FROM contactos GROUP BY etapa', [], (err, rows) => res.json(rows || []));
 });
 
-app.listen(process.env.PORT, () => console.log(`Sistema WhatsApp corriendo en puerto ${process.env.PORT}`));
+// app.listen moved to end
 
 // ==================== FACEBOOK CONVERSIONS API ====================
 const crypto = require('crypto');
@@ -706,3 +706,39 @@ app.post('/api/numeros/nuevo', auth, (req, res) => {
     }
   );
 });
+
+// ===== ENVIAR PLANTILLA DESDE CHAT =====
+app.post('/api/enviar-plantilla', auth, async (req, res) => {
+  const { telefono, plantilla_id, numero_id } = req.body;
+  if (!telefono || !plantilla_id) return res.status(400).json({ error: 'Faltan datos' });
+  db.get('SELECT * FROM plantillas WHERE id=?', [plantilla_id], async (err, plantilla) => {
+    if (!plantilla) return res.status(404).json({ error: 'Plantilla no encontrada' });
+    db.get('SELECT * FROM numeros WHERE phone_number_id=?', [numero_id], async (err2, num) => {
+      if (!num) return res.status(404).json({ error: 'Numero no encontrado' });
+      try {
+        await require('axios').post(
+          'https://graph.facebook.com/v18.0/' + numero_id + '/messages',
+          {
+            messaging_product: 'whatsapp',
+            to: telefono,
+            type: 'template',
+            template: {
+              name: plantilla.nombre.toLowerCase().replace(/\s+/g, '_'),
+              language: { code: 'es' },
+              components: []
+            }
+          },
+          { headers: { Authorization: 'Bearer ' + num.token } }
+        );
+        db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion) VALUES (?,?,?,?)',
+          [numero_id, telefono, '[Plantilla: ' + plantilla.nombre + ']', 'saliente']);
+        res.json({ ok: true });
+      } catch(e) {
+        const msg = e.response?.data?.error?.message || e.message;
+        res.json({ ok: false, error: msg });
+      }
+    });
+  });
+});
+
+app.listen(process.env.PORT, () => console.log(`Sistema WhatsApp corriendo en puerto ${process.env.PORT}`));

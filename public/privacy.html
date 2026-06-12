@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Política de Privacidad — BunnyRabbit</title>
+<style>
+  body { font-family: Arial, sans-serif; max-width: 860px; margin: 0 auto; padding: 40px 24px; color: #333; line-height: 1.7; }
+  h1 { color: #075e54; border-bottom: 2px solid #075e54; padding-bottom: 12px; }
+  h2 { color: #128c7e; margin-top: 32px; }
+  .meta { color: #888; font-size: 14px; margin-bottom: 32px; }
+  .badge { background: #075e54; color: white; padding: 4px 12px; border-radius: 20px; font-size: 13px; }
+  a { color: #075e54; }
+  ul { padding-left: 20px; }
+  li { margin-bottom: 6px; }
+  .contact-box { background: #f0faf9; border-left: 4px solid #075e54; padding: 16px 20px; border-radius: 4px; margin-top: 24px; }
+</style>
+</head>
+<body>
+
+<h1>&#127381; Política de Privacidad</h1>
+<p class="meta">
+  <span class="badge">BunnyRabbit</span> &nbsp;
+  Desarrollado por <strong>Raga Digital Startup SAS de CV</strong> &nbsp;|&nbsp;
+  Última actualización: Junio 2026
+</p>
+
+<p>BunnyRabbit es una plataforma de gestión de comunicaciones vía WhatsApp Business API, desarrollada y operada por <strong>Raga Digital Startup SAS de CV</strong> para uso interno de sus equipos de atención al cliente y para la gestión de comunicaciones con clientes finales de los negocios que utilizan la plataforma.</p>
+
+<h2>1. Información que recopilamos</h2>
+<p>BunnyRabbit recopila y procesa la siguiente información para operar sus funciones:</p>
+<ul>
+  <li><strong>Datos de contacto:</strong> número de teléfono, nombre y notas de clientes que se comunican a través de WhatsApp Business.</li>
+  <li><strong>Mensajes:</strong> contenido de conversaciones de WhatsApp enviadas y recibidas a través de la plataforma.</li>
+  <li><strong>Datos de uso:</strong> etapa del pipeline, etiquetas, historial de interacciones y métricas de atención.</li>
+  <li><strong>Datos de cuenta:</strong> nombre, correo electrónico y rol de los usuarios (empleados) que acceden al sistema.</li>
+  <li><strong>Datos de conversión:</strong> información hasheada (SHA-256) de contactos enviada a Meta Conversions API para optimización de campañas publicitarias, incluyendo número de teléfono y nombre.</li>
+</ul>
+
+<h2>2. Cómo usamos la información</h2>
+<ul>
+  <li>Gestionar y centralizar comunicaciones de WhatsApp Business entre agentes y clientes.</li>
+  <li>Organizar contactos en pipelines de ventas y seguimiento.</li>
+  <li>Enviar mensajes de difusión y plantillas aprobadas por Meta a contactos que han iniciado conversación.</li>
+  <li>Medir conversiones y optimizar campañas publicitarias mediante Meta Conversions API (CAPI), enviando datos hasheados de forma segura.</li>
+  <li>Generar reportes de actividad para supervisores del negocio.</li>
+</ul>
+
+<h2>3. Integración con WhatsApp Business API (Meta)</h2>
+<p>BunnyRabbit utiliza la <strong>WhatsApp Business Cloud API</strong> de Meta Platforms, Inc. para enviar y recibir mensajes. Esta integración requiere los siguientes permisos de Meta:</p>
+<ul>
+  <li><strong>whatsapp_business_messaging:</strong> permite enviar y recibir mensajes de WhatsApp en nombre de los números de teléfono registrados en la plataforma.</li>
+  <li><strong>whatsapp_business_management:</strong> permite gestionar la configuración de los números de WhatsApp Business, incluyendo plantillas de mensajes y webhooks.</li>
+  <li><strong>business_management:</strong> permite acceder a la información del portafolio comercial de Meta asociado a la cuenta para verificar la identidad del negocio.</li>
+  <li><strong>public_profile:</strong> permite acceder a información básica del perfil público de la cuenta de Meta asociada.</li>
+</ul>
+<p>BunnyRabbit opera como una aplicación <strong>servidor a servidor (server-to-server)</strong> utilizando un System User Token. No solicita acceso a cuentas personales de Meta de usuarios finales.</p>
+
+<h2>4. Meta Conversions API (CAPI)</h2>
+<p>BunnyRabbit envía eventos de conversión a Meta Conversions API cuando un contacto avanza en el pipeline de ventas (por ejemplo, cuando se marca como cliente cerrado). Los datos enviados incluyen:</p>
+<ul>
+  <li>Número de teléfono hasheado con SHA-256</li>
+  <li>Nombre hasheado con SHA-256</li>
+  <li>Tipo de evento (Lead, Purchase, etc.)</li>
+</ul>
+<p>Estos datos son utilizados exclusivamente para optimizar las campañas publicitarias del negocio en Meta y nunca se comparten con terceros fuera de Meta Platforms, Inc.</p>
+
+<h2>5. Almacenamiento y seguridad</h2>
+<p>Los datos son almacenados en servidores seguros ubicados en Estados Unidos (DigitalOcean). Implementamos las siguientes medidas de seguridad:</p>
+<ul>
+  <li>Comunicaciones cifradas mediante HTTPS/TLS</li>
+  <li>Autenticación con tokens JWT para acceso al sistema</li>
+  <li>Hashing SHA-256 para datos personales enviados a terceros</li>
+  <li>Acceso restringido por roles (supervisor / agente)</li>
+</ul>
+
+<h2>6. Compartir información con terceros</h2>
+<p>BunnyRabbit no vende ni comparte datos personales con terceros, excepto:</p>
+<ul>
+  <li><strong>Meta Platforms, Inc.</strong> — para el envío de mensajes vía WhatsApp Business API y optimización de campañas vía CAPI.</li>
+  <li><strong>DigitalOcean LLC</strong> — proveedor de infraestructura de servidores.</li>
+</ul>
+
+<h2>7. Retención de datos</h2>
+<p>Los mensajes y datos de contacto se conservan mientras el negocio mantenga una cuenta activa en BunnyRabbit. Los usuarios pueden solicitar la eliminación de sus datos contactando al administrador de la plataforma.</p>
+
+<h2>8. Derechos de los usuarios</h2>
+<p>Los contactos cuyos datos son procesados por BunnyRabbit tienen derecho a:</p>
+<ul>
+  <li>Solicitar acceso a sus datos almacenados</li>
+  <li>Solicitar la corrección o eliminación de sus datos</li>
+  <li>Oponerse al procesamiento de sus datos para fines de marketing</li>
+</ul>
+
+<h2>9. Cambios a esta política</h2>
+<p>Raga Digital Startup SAS de CV se reserva el derecho de actualizar esta política de privacidad en cualquier momento. Los cambios serán publicados en esta página con la fecha de actualización correspondiente.</p>
+
+<h2>10. Contacto</h2>
+<div class="contact-box">
+  <strong>Raga Digital Startup SAS de CV</strong><br>
+  Carolina 113, Colonia Noche Buena<br>
+  CDMX, México 03720<br>
+  Teléfono: +52 55 1598 1157<br>
+  Email: <a href="mailto:diego.raga@gmail.com">diego.raga@gmail.com</a><br>
+  Sitio web: <a href="https://www.ragadigitalstartup.com.mx/" target="_blank">www.ragadigitalstartup.com.mx</a><br>
+  App: <a href="https://bunnyrabbit.lat">bunnyrabbit.lat</a>
+</div>
+
+</body>
+</html>

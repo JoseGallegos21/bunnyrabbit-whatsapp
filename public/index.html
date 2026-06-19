@@ -1121,9 +1121,17 @@ document.getElementById('btnLogin').addEventListener('click',function(){
   .then(function(d){
     if(d.token){
       token=d.token;usuario=d.usuario;
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', JSON.stringify(usuario));
+      // Redirigir según rol
+      if(usuario.rol === 'supervisor' || usuario.rol === 'admin'){
+        if(usuario.rol === 'supervisor'){ window.location.href = '/supervisor.html'; return; }
+      }
+      if(usuario.rol === 'tecnica'){ window.location.href = '/tecnica.html'; return; }
+      // recepcionista y admin se quedan en el chat principal
       document.getElementById('loginBox').style.display='none';
       document.getElementById('app').style.display='block';
-      document.getElementById('userInfo').textContent=usuario.nombre+' - '+(usuario.sucursal||'Supervisor');
+      document.getElementById('userInfo').textContent=usuario.nombre+' - '+(usuario.sucursal||'');
   fetch('/api/respuestas',{headers:{Authorization:'Bearer '+token}}).then(function(r){return r.json()}).then(function(d){misRespuestas=d;});
   setTimeout(iniciarAtajoRespuestas, 500);
   var sub = document.getElementById('userSubtitle');

@@ -270,8 +270,8 @@ app.post('/api/login', (req, res) => {
   const { email, password } = req.body;
   db.get('SELECT * FROM usuarios WHERE email = ?', [email], async (err, user) => {
     if (!user || !(await bcrypt.compare(password, user.password))) return res.status(401).json({ error: 'Credenciales incorrectas' });
-    const token = jwt.sign({ id: user.id, rol: user.rol, numero_id: user.numero_id }, process.env.JWT_SECRET, { expiresIn: '24h' });
-    res.json({ token, usuario: { nombre: user.nombre, rol: user.rol, sucursal: user.sucursal, numero_id: user.numero_id } });
+    const token = jwt.sign({ id: user.id, rol: user.rol, numero_id: user.numero_id, sucursal: user.sucursal, nombre: user.nombre }, process.env.JWT_SECRET, { expiresIn: '24h' });
+    res.json({ token, usuario: { id: user.id, nombre: user.nombre, rol: user.rol, sucursal: user.sucursal, numero_id: user.numero_id } });
   });
 });
 
@@ -283,7 +283,7 @@ app.get('/api/mensajes', auth, (req, res) => {
 });
 
 app.get('/api/numeros', auth, (req, res) => {
-  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
   db.all('SELECT id, nombre, sucursal, phone_number_id FROM numeros', [], (err, rows) => res.json(rows || []));
 });
 
@@ -348,7 +348,7 @@ app.get('/api/etiquetas', auth, (req, res) => {
 });
 
 app.post('/api/etiquetas', auth, (req, res) => {
-  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
   const { nombre, color } = req.body;
   db.run('INSERT INTO etiquetas (nombre, color) VALUES (?, ?)', [nombre, color || '#075e54'], function(err) {
     if (err) return res.status(400).json({ error: 'Etiqueta ya existe' });
@@ -380,10 +380,10 @@ app.post('/webhook', (req, res) => {
 });
 
 app.post('/api/usuarios', auth, async (req, res) => {
-  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
-  const { nombre, email, password, numero_id, sucursal, rol } = req.body;
+  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
+  const { nombre, email, password, numero_id, sucursal, rol, telefono } = req.body;
   const hash = await bcrypt.hash(password, 10);
-  db.run('INSERT INTO usuarios (nombre, email, password, numero_id, sucursal, rol) VALUES (?, ?, ?, ?, ?, ?)', [nombre, email, hash, numero_id, sucursal, rol || 'recepcionista'], function(err) {
+  db.run('INSERT INTO usuarios (nombre, email, password, numero_id, sucursal, rol, telefono) VALUES (?, ?, ?, ?, ?, ?, ?)', [nombre, email, hash, numero_id, sucursal, rol || 'recepcionista', telefono || null], function(err) {
     if (err) return res.status(400).json({ error: 'Email ya existe' });
     res.json({ id: this.lastID });
   });
@@ -391,12 +391,14 @@ app.post('/api/usuarios', auth, async (req, res) => {
 
 
 app.get('/api/usuarios', auth, (req, res) => {
-  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
-  db.all('SELECT id, nombre, email, sucursal, numero_id, rol FROM usuarios', [], (err, rows) => res.json(rows || []));
+  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
+  const query = req.user.rol === 'supervisor' ? "SELECT id, nombre, email, sucursal, numero_id, rol FROM usuarios WHERE rol != 'admin' AND sucursal = ?" : "SELECT id, nombre, email, sucursal, numero_id, rol FROM usuarios";
+  const params = req.user.rol === 'supervisor' ? [req.user.sucursal] : [];
+  db.all(query, params, (err, rows) => res.json(rows || []));
 });
 
 app.put('/api/usuarios/:id', auth, async (req, res) => {
-  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
   const { nombre, sucursal, numero_id, rol, password } = req.body;
   if (password) {
     const hash = await require('bcryptjs').hash(password, 10);
@@ -407,7 +409,7 @@ app.put('/api/usuarios/:id', auth, async (req, res) => {
 });
 
 app.delete('/api/usuarios/:id', auth, (req, res) => {
-  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
   db.run('DELETE FROM usuarios WHERE id=?', [req.params.id], (err) => res.json({ ok: !err }));
 });
 
@@ -464,7 +466,7 @@ app.delete('/api/plantillas/:id', auth, (req, res) => {
 });
 
 app.post('/api/difusion', auth, async (req, res) => {
-  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
   const { nombre, mensaje, filtro_etapa, numero_id } = req.body;
   let query = 'SELECT DISTINCT telefono FROM contactos WHERE 1=1';
   const params = [];
@@ -582,7 +584,7 @@ async function sendCapiEvent(eventName, contacto) {
 
 // Guardar configuración CAPI
 app.post('/api/facebook/config', auth, (req, res) => {
-  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
   const { pixel_id, access_token, test_event_code, api_version, triggers } = req.body;
   db.get('SELECT id FROM facebook_capi_config LIMIT 1', [], (err, row) => {
     if (row) {
@@ -599,7 +601,7 @@ app.post('/api/facebook/config', auth, (req, res) => {
 
 // Obtener configuración CAPI
 app.get('/api/facebook/config', auth, (req, res) => {
-  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
   db.get('SELECT * FROM facebook_capi_config LIMIT 1', [], (err, row) => {
     if (!row) return res.json({ configured: false });
     res.json({ configured: true, pixel_id: row.pixel_id, test_event_code: row.test_event_code, api_version: row.api_version, triggers: JSON.parse(row.triggers || '[]'), has_token: !!row.access_token });
@@ -608,14 +610,14 @@ app.get('/api/facebook/config', auth, (req, res) => {
 
 // Probar conexión CAPI
 app.post('/api/facebook/test', auth, async (req, res) => {
-  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
   const result = await sendCapiEvent('Lead', { nombre: 'Test BunnyRabbit', telefono: '5200000000000', etapa: 'test' });
   res.json(result);
 });
 
 // Logs CAPI
 app.get('/api/facebook/logs', auth, (req, res) => {
-  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
   const numero_id = req.query.numero_id || null;
   let query = `SELECT l.*, n.sucursal, n.nombre as num_nombre
     FROM facebook_capi_logs l
@@ -629,21 +631,21 @@ app.get('/api/facebook/logs', auth, (req, res) => {
 
 // Stats CAPI
 app.get('/api/facebook/stats', auth, (req, res) => {
-  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
   db.get('SELECT COUNT(*) as total, SUM(CASE WHEN status_code=200 THEN 1 ELSE 0 END) as exitosos, SUM(CASE WHEN status_code!=200 THEN 1 ELSE 0 END) as fallidos FROM facebook_capi_logs', [], (err, row) => res.json(row || { total: 0, exitosos: 0, fallidos: 0 }));
 });
 
 
 // ===== CAPI POR NUMERO =====
 app.get('/api/numeros/capi', auth, (req, res) => {
-  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
   db.all('SELECT id, nombre, sucursal, phone_number_id, pixel_id, capi_version, capi_test_code, capi_activo, capi_triggers FROM numeros ORDER BY sucursal', [], (err, rows) => {
     res.json(rows || []);
   });
 });
 
 app.put('/api/numeros/:id/capi', auth, (req, res) => {
-  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
   const { pixel_id, capi_token, capi_version, capi_test_code, capi_activo, sucursal, capi_triggers } = req.body;
   const triggersJson = JSON.stringify(capi_triggers || []);
   const query = capi_token
@@ -656,7 +658,7 @@ app.put('/api/numeros/:id/capi', auth, (req, res) => {
 });
 
 app.post('/api/numeros/:id/capi/test', auth, async (req, res) => {
-  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
   db.get('SELECT * FROM numeros WHERE id=?', [req.params.id], async (err, num) => {
     if (!num) return res.status(404).json({ error: 'Numero no encontrado' });
     if (!num.pixel_id || !num.capi_token) return res.status(400).json({ error: 'Configura Pixel ID y token primero' });
@@ -694,7 +696,7 @@ app.post('/api/numeros/:id/capi/test', auth, async (req, res) => {
 
 // ===== AGREGAR NUMERO NUEVO =====
 app.post('/api/numeros/nuevo', auth, (req, res) => {
-  if (req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
   const { nombre, sucursal, phone_number_id, pixel_id, capi_version, token: waToken, capi_token, capi_activo } = req.body;
   if (!nombre || !phone_number_id) return res.status(400).json({ error: 'Nombre y Phone Number ID son obligatorios' });
   db.run(
@@ -738,6 +740,628 @@ app.post('/api/enviar-plantilla', auth, async (req, res) => {
         res.json({ ok: false, error: msg });
       }
     });
+  });
+});
+
+
+// ============================================
+// MIDDLEWARE DE ROLES
+// ============================================
+const requireRole = (...roles) => (req, res, next) => {
+  if (!req.user) return res.status(401).json({ error: 'No autorizado' });
+  if (!roles.includes(req.user.rol)) return res.status(403).json({ error: 'Sin permiso para esta acción' });
+  next();
+};
+
+// ============================================
+// ENDPOINTS DE USUARIOS / ROLES
+// ============================================
+
+// Obtener todos los usuarios (admin/supervisor)
+app.get('/api/usuarios', auth, requireRole('admin', 'supervisor'), (req, res) => {
+  const sucursal = req.user.rol === 'supervisor' ? req.user.sucursal : null;
+  const query = sucursal
+    ? `SELECT id, nombre, email, rol, sucursal, numero_id FROM usuarios WHERE sucursal = ?`
+    : `SELECT id, nombre, email, rol, sucursal, numero_id FROM usuarios`;
+  const params = sucursal ? [sucursal] : [];
+  db.all(query, params, (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
+  });
+});
+
+// Crear usuario nuevo (solo admin)
+app.post('/api/usuarios', auth, requireRole('admin'), (req, res) => {
+  const { nombre, email, password, rol, sucursal, numero_id } = req.body;
+  if (!nombre || !email || !password || !rol) return res.status(400).json({ error: 'Faltan campos requeridos' });
+  const validRoles = ['admin', 'supervisor', 'recepcionista', 'tecnica'];
+  if (!validRoles.includes(rol)) return res.status(400).json({ error: 'Rol inválido' });
+  const bcrypt = require('bcrypt');
+  bcrypt.hash(password, 10, (err, hash) => {
+    if (err) return res.status(500).json({ error: err.message });
+    db.run(
+      `INSERT INTO usuarios (nombre, email, password, rol, sucursal, numero_id) VALUES (?,?,?,?,?,?)`,
+      [nombre, email, hash, rol, sucursal || null, numero_id || null],
+      function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ ok: true, id: this.lastID });
+      }
+    );
+  });
+});
+
+// Actualizar usuario (solo admin)
+app.put('/api/usuarios/:id', auth, requireRole('admin'), (req, res) => {
+  const { nombre, email, rol, sucursal, numero_id } = req.body;
+  db.run(
+    `UPDATE usuarios SET nombre=?, email=?, rol=?, sucursal=?, numero_id=? WHERE id=?`,
+    [nombre, email, rol, sucursal || null, numero_id || null, req.params.id],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ ok: true });
+    }
+  );
+});
+
+// Eliminar usuario (solo admin)
+app.delete('/api/usuarios/:id', auth, requireRole('admin'), (req, res) => {
+  db.run(`DELETE FROM usuarios WHERE id=?`, [req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ ok: true });
+  });
+});
+
+// ============================================
+// ENDPOINTS DE CITAS
+// ============================================
+
+// Obtener citas (filtradas por rol)
+app.get('/api/citas', auth, (req, res) => {
+  const { fecha_inicio, fecha_fin } = req.query;
+  const hoy = fecha_inicio || new Date().toISOString().split('T')[0];
+  const fin = fecha_fin || hoy;
+
+  let query, params;
+
+  if (req.user.rol === 'admin') {
+    query = `SELECT c.*, u.nombre as tecnica_nombre, u2.nombre as recepcionista_nombre, ct.nombre as contacto_nombre, ct.telefono
+             FROM citas c
+             LEFT JOIN usuarios u ON c.tecnica_id = u.id
+             LEFT JOIN usuarios u2 ON c.recepcionista_id = u2.id
+             LEFT JOIN contactos ct ON c.contacto_id = ct.id
+             WHERE c.fecha BETWEEN ? AND ? ORDER BY c.fecha, c.hora_inicio`;
+    params = [hoy, fin];
+  } else if (req.user.rol === 'supervisor') {
+    query = `SELECT c.*, u.nombre as tecnica_nombre, u2.nombre as recepcionista_nombre, ct.nombre as contacto_nombre, ct.telefono
+             FROM citas c
+             LEFT JOIN usuarios u ON c.tecnica_id = u.id
+             LEFT JOIN usuarios u2 ON c.recepcionista_id = u2.id
+             LEFT JOIN contactos ct ON c.contacto_id = ct.id
+             WHERE c.sucursal = ? AND c.fecha BETWEEN ? AND ? ORDER BY c.fecha, c.hora_inicio`;
+    params = [req.user.sucursal, hoy, fin];
+  } else if (req.user.rol === 'tecnica') {
+    query = `SELECT c.*, u.nombre as tecnica_nombre, ct.nombre as contacto_nombre, ct.telefono
+             FROM citas c
+             LEFT JOIN usuarios u ON c.tecnica_id = u.id
+             LEFT JOIN contactos ct ON c.contacto_id = ct.id
+             WHERE c.tecnica_id = ? AND c.fecha BETWEEN ? AND ? ORDER BY c.fecha, c.hora_inicio`;
+    params = [req.user.id, hoy, fin];
+  } else {
+    // recepcionista — ve citas de su sucursal
+    query = `SELECT c.*, u.nombre as tecnica_nombre, ct.nombre as contacto_nombre, ct.telefono
+             FROM citas c
+             LEFT JOIN usuarios u ON c.tecnica_id = u.id
+             LEFT JOIN contactos ct ON c.contacto_id = ct.id
+             WHERE c.sucursal = ? AND c.fecha BETWEEN ? AND ? ORDER BY c.fecha, c.hora_inicio`;
+    params = [req.user.sucursal, hoy, fin];
+  }
+
+  db.all(query, params, (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
+  });
+});
+
+// Crear cita
+app.post('/api/citas', auth, requireRole('admin', 'supervisor', 'recepcionista'), (req, res) => {
+  const { contacto_id, tecnica_id, fecha, hora_inicio, hora_fin, servicio, notas, numero_id } = req.body;
+  if (!fecha || !hora_inicio) return res.status(400).json({ error: 'Fecha y hora son requeridas' });
+  const sucursal = req.body.sucursal || req.user.sucursal;
+  db.run(
+    `INSERT INTO citas (contacto_id, tecnica_id, recepcionista_id, numero_id, sucursal, fecha, hora_inicio, hora_fin, servicio, notas, estado)
+     VALUES (?,?,?,?,?,?,?,?,?,?,'pendiente')`,
+    [contacto_id || null, tecnica_id || null, req.user.id, numero_id || null, sucursal, fecha, hora_inicio, hora_fin || null, servicio || null, notas || null],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ ok: true, id: this.lastID });
+    }
+  );
+});
+
+// Actualizar cita
+app.put('/api/citas/:id', auth, requireRole('admin', 'supervisor', 'recepcionista'), (req, res) => {
+  const { contacto_id, tecnica_id, fecha, hora_inicio, hora_fin, servicio, notas, estado } = req.body;
+  db.run(
+    `UPDATE citas SET contacto_id=?, tecnica_id=?, fecha=?, hora_inicio=?, hora_fin=?, servicio=?, notas=?, estado=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+    [contacto_id || null, tecnica_id || null, fecha, hora_inicio, hora_fin || null, servicio || null, notas || null, estado || 'pendiente', req.params.id],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ ok: true });
+    }
+  );
+});
+
+// Cancelar / eliminar cita
+app.delete('/api/citas/:id', auth, requireRole('admin', 'supervisor', 'recepcionista'), (req, res) => {
+  db.run(`UPDATE citas SET estado='cancelada', updated_at=CURRENT_TIMESTAMP WHERE id=?`, [req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ ok: true });
+  });
+});
+
+// ============================================
+// MÉTRICAS PARA SUPERVISOR / ADMIN
+// ============================================
+app.get('/api/metricas', auth, requireRole('admin', 'supervisor'), (req, res) => {
+  const sucursal = req.user.rol === 'supervisor' ? req.user.sucursal : req.query.sucursal || null;
+
+  const filtroSucursal = sucursal ? `WHERE u.sucursal = '${sucursal}'` : '';
+  const filtroMensajes = sucursal ? `AND m.numero_id IN (SELECT numero_id FROM usuarios WHERE sucursal = '${sucursal}')` : '';
+
+  const hoy = new Date().toISOString().split('T')[0];
+
+  db.all(`
+    SELECT
+      u.id, u.nombre, u.sucursal,
+      COUNT(DISTINCT c.id) as total_contactos,
+      SUM(CASE WHEN m.timestamp >= datetime('now', '-1 day') THEN 1 ELSE 0 END) as mensajes_hoy,
+      SUM(CASE WHEN m.timestamp >= datetime('now', '-7 days') THEN 1 ELSE 0 END) as mensajes_semana
+    FROM usuarios u
+    LEFT JOIN mensajes m ON m.numero_id = u.numero_id AND m.direccion = 'saliente' ${filtroMensajes ? filtroMensajes.replace('AND ', 'AND ') : ''}
+    LEFT JOIN citas c ON c.recepcionista_id = u.id
+    WHERE u.rol = 'recepcionista' ${sucursal ? `AND u.sucursal = '${sucursal}'` : ''}
+    GROUP BY u.id
+  `, [], (err, recepcionistas) => {
+    if (err) return res.status(500).json({ error: err.message });
+
+    db.get(`
+      SELECT
+        COUNT(*) as total_citas_hoy,
+        SUM(CASE WHEN estado = 'pendiente' THEN 1 ELSE 0 END) as pendientes,
+        SUM(CASE WHEN estado = 'completada' THEN 1 ELSE 0 END) as completadas,
+        SUM(CASE WHEN estado = 'cancelada' THEN 1 ELSE 0 END) as canceladas
+      FROM citas WHERE fecha = ?
+      ${sucursal ? `AND sucursal = '${sucursal}'` : ''}
+    `, [hoy], (err2, citasHoy) => {
+      if (err2) return res.status(500).json({ error: err2.message });
+      res.json({ recepcionistas, citasHoy });
+    });
+  });
+});
+
+// ============================================
+// GOOGLE CALENDAR — Lectura de eventos
+// ============================================
+app.get('/api/google-calendar/eventos', auth, (req, res) => {
+  const sucursal = req.user.rol === 'tecnica' || req.user.rol === 'recepcionista'
+    ? req.user.sucursal
+    : req.query.sucursal;
+
+  if (!sucursal) return res.status(400).json({ error: 'Sucursal requerida' });
+
+  db.get(`SELECT * FROM google_calendar_config WHERE sucursal = ? AND activo = 1`, [sucursal], async (err, config) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!config) return res.json({ eventos: [], configurado: false });
+
+    const { fecha_inicio, fecha_fin } = req.query;
+    const timeMin = fecha_inicio ? new Date(fecha_inicio).toISOString() : new Date().toISOString();
+    const timeMax = fecha_fin
+      ? new Date(fecha_fin + 'T23:59:59').toISOString()
+      : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    try {
+      const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendar_id)}/events?timeMin=${timeMin}&timeMax=${timeMax}&singleEvents=true&orderBy=startTime`;
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${config.access_token}` }
+      });
+      const data = await response.json();
+      if (data.error) return res.json({ eventos: [], error: data.error.message, configurado: true });
+      res.json({ eventos: data.items || [], configurado: true });
+    } catch(e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+});
+
+// Config Google Calendar (solo admin)
+app.post('/api/google-calendar/config', auth, requireRole('admin'), (req, res) => {
+  const { sucursal, calendar_id, access_token, refresh_token } = req.body;
+  if (!sucursal || !calendar_id || !access_token) return res.status(400).json({ error: 'Faltan campos' });
+  db.run(
+    `INSERT INTO google_calendar_config (sucursal, calendar_id, access_token, refresh_token, activo)
+     VALUES (?,?,?,?,1)
+     ON CONFLICT(sucursal) DO UPDATE SET calendar_id=excluded.calendar_id, access_token=excluded.access_token, refresh_token=excluded.refresh_token, activo=1`,
+    [sucursal, calendar_id, access_token, refresh_token || null],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ ok: true });
+    }
+  );
+});
+
+// Técnicas disponibles por sucursal
+app.get('/api/tecnicas', auth, (req, res) => {
+  const sucursal = req.query.sucursal || req.user.sucursal;
+  db.all(`SELECT id, nombre FROM usuarios WHERE rol='tecnica' AND sucursal=?`, [sucursal], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
+  });
+});
+
+
+// ============================================
+// CRON + NOTIFICACIONES WHATSAPP A TÉCNICAS
+// ============================================
+const cronJobs = require('node-cron');
+
+async function enviarMensajeWhatsApp(phoneNumberId, token, telefono, mensaje) {
+  try {
+    const telefonoLimpio = telefono.replace(/\D/g, '');
+    const telefonoFinal = telefonoLimpio.startsWith('52') ? telefonoLimpio : '52' + telefonoLimpio;
+    const response = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to: telefonoFinal,
+        type: 'text',
+        text: { body: mensaje }
+      })
+    });
+    const data = await response.json();
+    return { ok: !data.error, data };
+  } catch(e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function obtenerDatosSucursal(sucursalNombre) {
+  return new Promise((resolve, reject) => {
+    db.get(`SELECT s.phone_number_id, n.token FROM sucursales s
+            LEFT JOIN numeros n ON n.phone_number_id = s.phone_number_id
+            WHERE s.nombre = ? AND s.activo = 1`, [sucursalNombre], (err, row) => {
+      if (err) reject(err); else resolve(row);
+    });
+  });
+}
+
+async function notificarTecnicaCitaNueva(citaId) {
+  try {
+    const cita = await new Promise((resolve, reject) => {
+      db.get(`SELECT c.*, u.nombre as tecnica_nombre, u.email as tecnica_email,
+              ct.nombre as contacto_nombre, ct.telefono as contacto_tel,
+              u2.nombre as recepcionista_nombre
+              FROM citas c
+              LEFT JOIN usuarios u ON c.tecnica_id = u.id
+              LEFT JOIN contactos ct ON c.contacto_id = ct.id
+              LEFT JOIN usuarios u2 ON c.recepcionista_id = u2.id
+              WHERE c.id = ?`, [citaId], (err, row) => {
+        if (err) reject(err); else resolve(row);
+      });
+    });
+
+    if (!cita || !cita.tecnica_id) return;
+
+    // Obtener teléfono de la técnica desde contactos o email
+    const tecnicaContacto = await new Promise((resolve) => {
+      db.get(`SELECT telefono FROM contactos WHERE nombre LIKE ? LIMIT 1`,
+        ['%' + (cita.tecnica_nombre || '') + '%'], (err, row) => resolve(row));
+    });
+
+    // Obtener número de la sucursal
+    const sucursal = await obtenerDatosSucursal(cita.sucursal);
+    if (!sucursal || !sucursal.phone_number_id || !sucursal.token) return;
+
+    // Buscar teléfono de la técnica en usuarios
+    const tecnicaUser = await new Promise((resolve) => {
+      db.get(`SELECT telefono, numero_id FROM usuarios WHERE id = ?`, [cita.tecnica_id], (err, row) => resolve(row));
+    });
+
+    // Usar telefono personal o numero_id como fallback
+    const telefonoTecnica = tecnicaUser?.telefono || tecnicaUser?.numero_id;
+    if (!telefonoTecnica) {
+      console.log(`[NOTIF] Técnica ${cita.tecnica_nombre} no tiene teléfono configurado`);
+      return;
+    }
+
+    const fecha = new Date(cita.fecha + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
+    const mensaje = `🌸 *Nueva cita agendada*\n\nHola ${cita.tecnica_nombre}, tienes una nueva cita:\n\n📅 *Fecha:* ${fecha}\n🕐 *Hora:* ${cita.hora_inicio?.slice(0,5)}${cita.hora_fin ? ' – ' + cita.hora_fin.slice(0,5) : ''}\n👤 *Clienta:* ${cita.contacto_nombre || 'Sin nombre'}\n✂️ *Servicio:* ${cita.servicio || 'Sin especificar'}${cita.notas ? '\n📝 *Notas:* ' + cita.notas : ''}\n\nAgendada por: ${cita.recepcionista_nombre || 'Sistema'}`;
+
+    await enviarMensajeWhatsApp(sucursal.phone_number_id, sucursal.token, telefonoTecnica, mensaje);
+    console.log(`[NOTIF] Mensaje enviado a técnica ${cita.tecnica_nombre} por cita ${citaId}`);
+  } catch(e) {
+    console.error('[NOTIF] Error notificando técnica:', e.message);
+  }
+}
+
+// CRON — Recordatorio día anterior a las 8pm
+cronJobs.schedule('0 20 * * *', async () => {
+  console.log('[CRON] Enviando recordatorios noche...');
+  const manana = new Date();
+  manana.setDate(manana.getDate() + 1);
+  const fechaManana = manana.toISOString().split('T')[0];
+
+  db.all(`SELECT c.*, u.nombre as tecnica_nombre, ct.nombre as contacto_nombre
+          FROM citas c
+          LEFT JOIN usuarios u ON c.tecnica_id = u.id
+          LEFT JOIN contactos ct ON c.contacto_id = ct.id
+          WHERE c.fecha = ? AND c.estado = 'pendiente' AND c.tecnica_id IS NOT NULL
+          ORDER BY c.tecnica_id, c.hora_inicio`, [fechaManana], async (err, citas) => {
+    if (err || !citas.length) return;
+
+    // Agrupar por técnica
+    const porTecnica = {};
+    citas.forEach(c => {
+      if (!porTecnica[c.tecnica_id]) porTecnica[c.tecnica_id] = { nombre: c.tecnica_nombre, sucursal: c.sucursal, citas: [] };
+      porTecnica[c.tecnica_id].citas.push(c);
+    });
+
+    for (const [tecnicaId, data] of Object.entries(porTecnica)) {
+      const tecnica = await new Promise(resolve => db.get(`SELECT telefono, numero_id FROM usuarios WHERE id=?`, [tecnicaId], (err,r) => resolve(r)));
+      const telTecnica = tecnica?.telefono || tecnica?.numero_id;
+      if (!telTecnica) continue;
+      const sucursal = await obtenerDatosSucursal(data.sucursal);
+      if (!sucursal?.phone_number_id || !sucursal?.token) continue;
+
+      const fechaTexto = manana.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
+      const listaCitas = data.citas.map((c, i) => `${i+1}. ${c.hora_inicio?.slice(0,5)} — ${c.contacto_nombre || 'Sin nombre'} (${c.servicio || 'Sin especificar'})`).join('\n');
+      const mensaje = `🌙 *Recordatorio para mañana*\n\nHola ${data.nombre}, mañana *${fechaTexto}* tienes *${data.citas.length} cita${data.citas.length > 1 ? 's' : ''}*:\n\n${listaCitas}\n\n¡Que tengas una excelente jornada! 🌸`;
+
+      await enviarMensajeWhatsApp(sucursal.phone_number_id, sucursal.token, telTecnica, mensaje);
+    }
+  });
+}, { timezone: 'America/Mexico_City' });
+
+// CRON — Recordatorio mismo día a las 7am
+cronJobs.schedule('0 7 * * *', async () => {
+  console.log('[CRON] Enviando recordatorios mañana...');
+  const hoy = new Date().toISOString().split('T')[0];
+
+  db.all(`SELECT c.*, u.nombre as tecnica_nombre, ct.nombre as contacto_nombre
+          FROM citas c
+          LEFT JOIN usuarios u ON c.tecnica_id = u.id
+          LEFT JOIN contactos ct ON c.contacto_id = ct.id
+          WHERE c.fecha = ? AND c.estado = 'pendiente' AND c.tecnica_id IS NOT NULL
+          ORDER BY c.tecnica_id, c.hora_inicio`, [hoy], async (err, citas) => {
+    if (err || !citas.length) return;
+
+    const porTecnica = {};
+    citas.forEach(c => {
+      if (!porTecnica[c.tecnica_id]) porTecnica[c.tecnica_id] = { nombre: c.tecnica_nombre, sucursal: c.sucursal, citas: [] };
+      porTecnica[c.tecnica_id].citas.push(c);
+    });
+
+    for (const [tecnicaId, data] of Object.entries(porTecnica)) {
+      const tecnica = await new Promise(resolve => db.get(`SELECT telefono, numero_id FROM usuarios WHERE id=?`, [tecnicaId], (err,r) => resolve(r)));
+      const telTecnica2 = tecnica?.telefono || tecnica?.numero_id;
+      if (!telTecnica2) continue;
+      const sucursal = await obtenerDatosSucursal(data.sucursal);
+      if (!sucursal?.phone_number_id || !sucursal?.token) continue;
+
+      const primera = data.citas[0];
+      const listaCitas = data.citas.map((c, i) => `${i+1}. ${c.hora_inicio?.slice(0,5)} — ${c.contacto_nombre || 'Sin nombre'} (${c.servicio || 'Sin especificar'})`).join('\n');
+      const mensaje = `🌸 *¡Buenos días ${data.nombre}!*\n\nHoy tienes *${data.citas.length} cita${data.citas.length > 1 ? 's' : ''}*:\n\n${listaCitas}\n\nTu primera cita es a las *${primera.hora_inicio?.slice(0,5)}*. ¡Mucho éxito hoy! ✨`;
+
+      await enviarMensajeWhatsApp(sucursal.phone_number_id, sucursal.token, telTecnica2, mensaje);
+    }
+  });
+}, { timezone: 'America/Mexico_City' });
+
+// ============================================
+// ENDPOINTS DE SUCURSALES
+// ============================================
+
+app.get('/api/sucursales', auth, (req, res) => {
+  db.all(`SELECT s.*, n.token FROM sucursales s
+          LEFT JOIN numeros n ON n.phone_number_id = s.phone_number_id
+          WHERE s.activo = 1 ORDER BY s.nombre`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows || []);
+  });
+});
+
+app.post('/api/sucursales', auth, requireRole('admin'), (req, res) => {
+  const { nombre, direccion, phone_number_id, logo_url } = req.body;
+  if (!nombre) return res.status(400).json({ error: 'Nombre requerido' });
+  db.run(`INSERT INTO sucursales (nombre, direccion, phone_number_id, logo_url) VALUES (?,?,?,?)`,
+    [nombre, direccion || null, phone_number_id || null, logo_url || null],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ ok: true, id: this.lastID });
+    });
+});
+
+app.put('/api/sucursales/:id', auth, requireRole('admin'), (req, res) => {
+  const { nombre, direccion, phone_number_id, logo_url } = req.body;
+  db.run(`UPDATE sucursales SET nombre=?, direccion=?, phone_number_id=?, logo_url=? WHERE id=?`,
+    [nombre, direccion || null, phone_number_id || null, logo_url || null, req.params.id],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ ok: true });
+    });
+});
+
+app.delete('/api/sucursales/:id', auth, requireRole('admin'), (req, res) => {
+  db.run(`UPDATE sucursales SET activo=0 WHERE id=?`, [req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ ok: true });
+  });
+});
+
+// Usuarios por sucursal
+app.get('/api/sucursales/:id/usuarios', auth, requireRole('admin', 'supervisor'), (req, res) => {
+  db.get(`SELECT nombre FROM sucursales WHERE id=?`, [req.params.id], (err, suc) => {
+    if (!suc) return res.status(404).json({ error: 'Sucursal no encontrada' });
+    db.all(`SELECT id, nombre, email, rol, numero_id FROM usuarios WHERE sucursal=?`,
+      [suc.nombre], (err, rows) => res.json(rows || []));
+  });
+});
+
+
+// ============================================
+// CRON + NOTIFICACIONES WHATSAPP A TÉCNICAS
+// ============================================
+const cron = require('node-cron');
+
+async function enviarMensajeWhatsApp(phoneNumberId, token, telefono, mensaje) {
+  try {
+    const telefonoLimpio = telefono.replace(/\D/g, '');
+    const telefonoFinal = telefonoLimpio.startsWith('52') ? telefonoLimpio : '52' + telefonoLimpio;
+    const response = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to: telefonoFinal,
+        type: 'text',
+        text: { body: mensaje }
+      })
+    });
+    const data = await response.json();
+    return { ok: !data.error, data };
+  } catch(e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function obtenerDatosSucursal(sucursalNombre) {
+  return new Promise((resolve, reject) => {
+    db.get(`SELECT s.phone_number_id, n.token FROM sucursales s
+            LEFT JOIN numeros n ON n.phone_number_id = s.phone_number_id
+            WHERE s.nombre = ? AND s.activo = 1`, [sucursalNombre], (err, row) => {
+      if (err) reject(err); else resolve(row);
+    });
+  });
+}
+
+// CRON — Recordatorio día anterior a las 8pm
+cron.schedule('0 20 * * *', async () => {
+  console.log('[CRON] Enviando recordatorios noche...');
+  const manana = new Date();
+  manana.setDate(manana.getDate() + 1);
+  const fechaManana = manana.toISOString().split('T')[0];
+
+  db.all(`SELECT c.*, u.nombre as tecnica_nombre, ct.nombre as contacto_nombre
+          FROM citas c
+          LEFT JOIN usuarios u ON c.tecnica_id = u.id
+          LEFT JOIN contactos ct ON c.contacto_id = ct.id
+          WHERE c.fecha = ? AND c.estado = 'pendiente' AND c.tecnica_id IS NOT NULL
+          ORDER BY c.tecnica_id, c.hora_inicio`, [fechaManana], async (err, citas) => {
+    if (err || !citas.length) return;
+
+    // Agrupar por técnica
+    const porTecnica = {};
+    citas.forEach(c => {
+      if (!porTecnica[c.tecnica_id]) porTecnica[c.tecnica_id] = { nombre: c.tecnica_nombre, sucursal: c.sucursal, citas: [] };
+      porTecnica[c.tecnica_id].citas.push(c);
+    });
+
+    for (const [tecnicaId, data] of Object.entries(porTecnica)) {
+      const tecnica = await new Promise(resolve => db.get(`SELECT numero_id FROM usuarios WHERE id=?`, [tecnicaId], (err,r) => resolve(r)));
+      if (!tecnica?.numero_id) continue;
+      const sucursal = await obtenerDatosSucursal(data.sucursal);
+      if (!sucursal?.phone_number_id || !sucursal?.token) continue;
+
+      const fechaTexto = manana.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
+      const listaCitas = data.citas.map((c, i) => `${i+1}. ${c.hora_inicio?.slice(0,5)} — ${c.contacto_nombre || 'Sin nombre'} (${c.servicio || 'Sin especificar'})`).join('\n');
+      const mensaje = `🌙 *Recordatorio para mañana*\n\nHola ${data.nombre}, mañana *${fechaTexto}* tienes *${data.citas.length} cita${data.citas.length > 1 ? 's' : ''}*:\n\n${listaCitas}\n\n¡Que tengas una excelente jornada! 🌸`;
+
+      await enviarMensajeWhatsApp(sucursal.phone_number_id, sucursal.token, tecnica.numero_id, mensaje);
+    }
+  });
+}, { timezone: 'America/Mexico_City' });
+
+// CRON — Recordatorio mismo día a las 7am
+cron.schedule('0 7 * * *', async () => {
+  console.log('[CRON] Enviando recordatorios mañana...');
+  const hoy = new Date().toISOString().split('T')[0];
+
+  db.all(`SELECT c.*, u.nombre as tecnica_nombre, ct.nombre as contacto_nombre
+          FROM citas c
+          LEFT JOIN usuarios u ON c.tecnica_id = u.id
+          LEFT JOIN contactos ct ON c.contacto_id = ct.id
+          WHERE c.fecha = ? AND c.estado = 'pendiente' AND c.tecnica_id IS NOT NULL
+          ORDER BY c.tecnica_id, c.hora_inicio`, [hoy], async (err, citas) => {
+    if (err || !citas.length) return;
+
+    const porTecnica = {};
+    citas.forEach(c => {
+      if (!porTecnica[c.tecnica_id]) porTecnica[c.tecnica_id] = { nombre: c.tecnica_nombre, sucursal: c.sucursal, citas: [] };
+      porTecnica[c.tecnica_id].citas.push(c);
+    });
+
+    for (const [tecnicaId, data] of Object.entries(porTecnica)) {
+      const tecnica = await new Promise(resolve => db.get(`SELECT numero_id FROM usuarios WHERE id=?`, [tecnicaId], (err,r) => resolve(r)));
+      if (!tecnica?.numero_id) continue;
+      const sucursal = await obtenerDatosSucursal(data.sucursal);
+      if (!sucursal?.phone_number_id || !sucursal?.token) continue;
+
+      const primera = data.citas[0];
+      const listaCitas = data.citas.map((c, i) => `${i+1}. ${c.hora_inicio?.slice(0,5)} — ${c.contacto_nombre || 'Sin nombre'} (${c.servicio || 'Sin especificar'})`).join('\n');
+      const mensaje = `🌸 *¡Buenos días ${data.nombre}!*\n\nHoy tienes *${data.citas.length} cita${data.citas.length > 1 ? 's' : ''}*:\n\n${listaCitas}\n\nTu primera cita es a las *${primera.hora_inicio?.slice(0,5)}*. ¡Mucho éxito hoy! ✨`;
+
+      await enviarMensajeWhatsApp(sucursal.phone_number_id, sucursal.token, tecnica.numero_id, mensaje);
+    }
+  });
+}, { timezone: 'America/Mexico_City' });
+
+// ============================================
+// ENDPOINTS DE SUCURSALES
+// ============================================
+
+app.get('/api/sucursales', auth, (req, res) => {
+  db.all(`SELECT s.*, n.token FROM sucursales s
+          LEFT JOIN numeros n ON n.phone_number_id = s.phone_number_id
+          WHERE s.activo = 1 ORDER BY s.nombre`, [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows || []);
+  });
+});
+
+app.post('/api/sucursales', auth, requireRole('admin'), (req, res) => {
+  const { nombre, direccion, phone_number_id, logo_url } = req.body;
+  if (!nombre) return res.status(400).json({ error: 'Nombre requerido' });
+  db.run(`INSERT INTO sucursales (nombre, direccion, phone_number_id, logo_url) VALUES (?,?,?,?)`,
+    [nombre, direccion || null, phone_number_id || null, logo_url || null],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ ok: true, id: this.lastID });
+    });
+});
+
+app.put('/api/sucursales/:id', auth, requireRole('admin'), (req, res) => {
+  const { nombre, direccion, phone_number_id, logo_url } = req.body;
+  db.run(`UPDATE sucursales SET nombre=?, direccion=?, phone_number_id=?, logo_url=? WHERE id=?`,
+    [nombre, direccion || null, phone_number_id || null, logo_url || null, req.params.id],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ ok: true });
+    });
+});
+
+app.delete('/api/sucursales/:id', auth, requireRole('admin'), (req, res) => {
+  db.run(`UPDATE sucursales SET activo=0 WHERE id=?`, [req.params.id], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ ok: true });
+  });
+});
+
+// Usuarios por sucursal
+app.get('/api/sucursales/:id/usuarios', auth, requireRole('admin', 'supervisor'), (req, res) => {
+  db.get(`SELECT nombre FROM sucursales WHERE id=?`, [req.params.id], (err, suc) => {
+    if (!suc) return res.status(404).json({ error: 'Sucursal no encontrada' });
+    db.all(`SELECT id, nombre, email, rol, numero_id FROM usuarios WHERE sucursal=?`,
+      [suc.nombre], (err, rows) => res.json(rows || []));
   });
 });
 

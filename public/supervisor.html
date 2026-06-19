@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BunnyRabbit — Supervisor</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e9edef; min-height: 100vh; }
+
+  .topbar { background: #1f2c34; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #2a3942; position: sticky; top: 0; z-index: 100; }
+  .topbar-left { display: flex; align-items: center; gap: 12px; }
+  .logo { font-size: 20px; font-weight: 700; color: #00a884; }
+  .badge-rol { background: #005c4b; color: #00a884; font-size: 11px; padding: 2px 10px; border-radius: 20px; font-weight: 600; }
+  .topbar-right { display: flex; align-items: center; gap: 16px; }
+  .btn-logout { background: transparent; border: 1px solid #2a3942; color: #8696a0; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .btn-logout:hover { border-color: #00a884; color: #00a884; }
+  .nombre-usuario { font-size: 13px; color: #8696a0; }
+
+  .tabs { background: #1f2c34; display: flex; gap: 0; border-bottom: 1px solid #2a3942; padding: 0 24px; }
+  .tab { padding: 14px 20px; cursor: pointer; font-size: 14px; color: #8696a0; border-bottom: 2px solid transparent; transition: all 0.2s; }
+  .tab.active { color: #00a884; border-bottom-color: #00a884; }
+  .tab:hover { color: #e9edef; }
+
+  .content { padding: 24px; max-width: 1400px; margin: 0 auto; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* Métricas */
+  .metricas-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .metrica-card { background: #1f2c34; border-radius: 12px; padding: 20px; border: 1px solid #2a3942; }
+  .metrica-card .valor { font-size: 32px; font-weight: 700; color: #00a884; }
+  .metrica-card .label { font-size: 12px; color: #8696a0; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .metrica-card .sub { font-size: 12px; color: #667781; margin-top: 8px; }
+
+  /* Tabla recepcionistas */
+  .section-title { font-size: 16px; font-weight: 600; color: #e9edef; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+  .section-title::before { content: ''; width: 3px; height: 18px; background: #00a884; border-radius: 2px; display: inline-block; }
+  .tabla-container { background: #1f2c34; border-radius: 12px; border: 1px solid #2a3942; overflow: hidden; margin-bottom: 24px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #2a3942; padding: 12px 16px; text-align: left; font-size: 12px; color: #8696a0; text-transform: uppercase; letter-spacing: 0.5px; }
+  td { padding: 14px 16px; border-bottom: 1px solid #2a3942; font-size: 14px; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #233138; }
+  .badge { padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+  .badge-activo { background: #005c4b; color: #00a884; }
+  .badge-inactivo { background: #2a3942; color: #8696a0; }
+
+  /* Calendario */
+  .calendario-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+  .nav-fecha { display: flex; align-items: center; gap: 12px; }
+  .btn-nav { background: #2a3942; border: none; color: #e9edef; width: 36px; height: 36px; border-radius: 8px; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; }
+  .btn-nav:hover { background: #3d4f58; }
+  .fecha-titulo { font-size: 18px; font-weight: 600; min-width: 200px; text-align: center; }
+  .btn-hoy { background: #005c4b; border: none; color: #00a884; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; }
+
+  .semana-grid { display: grid; grid-template-columns: 60px repeat(7, 1fr); gap: 1px; background: #2a3942; border-radius: 12px; overflow: hidden; }
+  .hora-label { background: #1f2c34; padding: 8px 4px; text-align: right; font-size: 11px; color: #8696a0; }
+  .dia-header { background: #2a3942; padding: 10px 4px; text-align: center; }
+  .dia-header .dia-nombre { font-size: 11px; color: #8696a0; text-transform: uppercase; }
+  .dia-header .dia-num { font-size: 20px; font-weight: 700; }
+  .dia-header.hoy .dia-num { color: #00a884; }
+  .celda { background: #1f2c34; min-height: 48px; padding: 2px; position: relative; cursor: pointer; transition: background 0.1s; }
+  .celda:hover { background: #233138; }
+  .cita-bloque { background: #005c4b; border-left: 3px solid #00a884; border-radius: 4px; padding: 4px 6px; margin: 1px 0; cursor: pointer; }
+  .cita-bloque .cita-hora { font-size: 10px; color: #00a884; }
+  .cita-bloque .cita-nombre { font-size: 11px; font-weight: 600; color: #e9edef; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cita-bloque .cita-tecnica { font-size: 10px; color: #8696a0; }
+  .cita-bloque.cancelada { background: #3d1a1a; border-left-color: #e74c3c; opacity: 0.6; }
+  .cita-bloque.completada { background: #1a2e3d; border-left-color: #3d85c8; }
+
+  /* Chats */
+  .chats-grid { display: grid; grid-template-columns: 280px 1fr; gap: 16px; height: calc(100vh - 200px); }
+  .chats-lista { background: #1f2c34; border-radius: 12px; border: 1px solid #2a3942; overflow-y: auto; }
+  .chat-item { padding: 14px 16px; border-bottom: 1px solid #2a3942; cursor: pointer; transition: background 0.15s; }
+  .chat-item:hover, .chat-item.active { background: #233138; }
+  .chat-item .chat-nombre { font-size: 14px; font-weight: 600; }
+  .chat-item .chat-preview { font-size: 12px; color: #8696a0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .chat-item .chat-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .chat-item .chat-tiempo { font-size: 11px; color: #8696a0; }
+  .chat-item .chat-recep { font-size: 10px; background: #2a3942; padding: 2px 6px; border-radius: 10px; color: #8696a0; }
+  .chat-vista { background: #1f2c34; border-radius: 12px; border: 1px solid #2a3942; display: flex; flex-direction: column; }
+  .chat-vista-header { padding: 16px; border-bottom: 1px solid #2a3942; display: flex; align-items: center; gap: 12px; }
+  .chat-avatar { width: 40px; height: 40px; border-radius: 50%; background: #2a3942; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; color: #00a884; flex-shrink: 0; }
+  .chat-mensajes { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .msg { max-width: 65%; padding: 8px 12px; border-radius: 8px; font-size: 13px; }
+  .msg.entrante { background: #1f2c34; border: 1px solid #2a3942; align-self: flex-start; }
+  .msg.saliente { background: #005c4b; align-self: flex-end; }
+  .msg .msg-tiempo { font-size: 10px; color: #8696a0; margin-top: 4px; text-align: right; }
+  .chat-vista-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: #8696a0; font-size: 14px; }
+
+  /* Usuarios */
+  .usuarios-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .btn-primary { background: #00a884; border: none; color: #fff; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; }
+  .btn-primary:hover { background: #008f72; }
+  .btn-danger { background: #e74c3c; border: none; color: #fff; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  .btn-edit { background: #2a3942; border: none; color: #e9edef; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+
+  /* Modal */
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: #1f2c34; border-radius: 16px; padding: 28px; width: 440px; max-width: 95vw; border: 1px solid #2a3942; }
+  .modal h3 { font-size: 18px; margin-bottom: 20px; color: #e9edef; }
+  .form-group { margin-bottom: 16px; }
+  .form-group label { display: block; font-size: 12px; color: #8696a0; margin-bottom: 6px; text-transform: uppercase; }
+  .form-group input, .form-group select, .form-group textarea { width: 100%; background: #2a3942; border: 1px solid #3d4f58; color: #e9edef; padding: 10px 14px; border-radius: 8px; font-size: 14px; outline: none; }
+  .form-group input:focus, .form-group select:focus { border-color: #00a884; }
+  .form-group select option { background: #1f2c34; }
+  .modal-actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px; }
+  .btn-cancel { background: transparent; border: 1px solid #2a3942; color: #8696a0; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+
+  .loading { text-align: center; padding: 40px; color: #8696a0; }
+  .empty-state { text-align: center; padding: 40px; color: #8696a0; }
+  .dot-online { width: 8px; height: 8px; background: #00a884; border-radius: 50%; display: inline-block; margin-right: 4px; }
+  .filter-bar { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .filter-input { background: #2a3942; border: 1px solid #3d4f58; color: #e9edef; padding: 8px 14px; border-radius: 8px; font-size: 13px; outline: none; }
+  .filter-input:focus { border-color: #00a884; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-left">
+    <span class="logo">🐰 BunnyRabbit</span>
+    <span class="badge-rol">SUPERVISOR</span>
+  </div>
+  <div class="topbar-right">
+    <span class="nombre-usuario" id="nombreUsuario">—</span>
+    <button class="btn-logout" onclick="logout()">Cerrar sesión</button>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('metricas', this)">📊 Métricas</div>
+  <div class="tab" onclick="switchTab('calendario', this)">📅 Calendario</div>
+  <div class="tab" onclick="switchTab('chats', this)">💬 Chats</div>
+  <div class="tab" onclick="switchTab('usuarios', this)">👥 Equipo</div>
+</div>
+
+<div class="content">
+
+  <!-- TAB MÉTRICAS -->
+  <div class="tab-panel active" id="tab-metricas">
+    <div class="metricas-grid" id="metricasGrid">
+      <div class="loading">Cargando métricas...</div>
+    </div>
+    <div class="section-title">Actividad por recepcionista</div>
+    <div class="tabla-container">
+      <table>
+        <thead><tr><th>Recepcionista</th><th>Sucursal</th><th>Mensajes hoy</th><th>Mensajes semana</th><th>Citas agendadas</th></tr></thead>
+        <tbody id="tablaRecepcionistas"><tr><td colspan="5" class="loading">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- TAB CALENDARIO -->
+  <div class="tab-panel" id="tab-calendario">
+    <div class="calendario-header">
+      <div class="nav-fecha">
+        <button class="btn-nav" onclick="navegarSemana(-1)">‹</button>
+        <span class="fecha-titulo" id="fechaTitulo">—</span>
+        <button class="btn-nav" onclick="navegarSemana(1)">›</button>
+      </div>
+      <div style="display:flex;gap:12px;align-items:center;">
+        <select class="filter-input" id="filtroPorTecnica" onchange="cargarCitas()">
+          <option value="">Todas las técnicas</option>
+        </select>
+        <button class="btn-hoy" onclick="irAHoy()">Hoy</button>
+        <button class="btn-primary" onclick="abrirModalCita()">+ Nueva cita</button>
+      </div>
+    </div>
+    <div class="semana-grid" id="semanaGrid">
+      <div class="loading" style="grid-column:1/-1;padding:40px;">Cargando calendario...</div>
+    </div>
+  </div>
+
+  <!-- TAB CHATS -->
+  <div class="tab-panel" id="tab-chats">
+    <div class="filter-bar">
+      <input class="filter-input" id="buscarChat" placeholder="🔍 Buscar contacto..." oninput="filtrarChats()">
+      <select class="filter-input" id="filtroRecepcionista" onchange="filtrarChats()">
+        <option value="">Todas las recepcionistas</option>
+      </select>
+    </div>
+    <div class="chats-grid">
+      <div class="chats-lista" id="chatsLista"><div class="loading">Cargando chats...</div></div>
+      <div class="chat-vista" id="chatVista">
+        <div class="chat-vista-empty">← Selecciona un chat para verlo</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB USUARIOS -->
+  <div class="tab-panel" id="tab-usuarios">
+    <div class="usuarios-header">
+      <div class="section-title" style="margin:0">Equipo</div>
+      <button class="btn-primary" onclick="abrirModalUsuario()">+ Agregar usuario</button>
+    </div>
+    <div class="tabla-container">
+      <table>
+        <thead><tr><th>Nombre</th><th>Email</th><th>Rol</th><th>Sucursal</th><th>Acciones</th></tr></thead>
+        <tbody id="tablaUsuarios"><tr><td colspan="5" class="loading">Cargando...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- Modal Nueva Cita -->
+<div class="modal-overlay" id="modalCita">
+  <div class="modal">
+    <h3>📅 Nueva cita</h3>
+    <div class="form-group"><label>Clienta</label>
+      <select id="citaContacto"><option value="">Sin asignar</option></select>
+    </div>
+    <div class="form-group"><label>Técnica</label>
+      <select id="citaTecnica"><option value="">Sin asignar</option></select>
+    </div>
+    <div class="form-group"><label>Fecha</label>
+      <input type="date" id="citaFecha">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>Hora inicio</label><input type="time" id="citaHoraInicio"></div>
+      <div class="form-group"><label>Hora fin</label><input type="time" id="citaHoraFin"></div>
+    </div>
+    <div class="form-group"><label>Servicio</label>
+      <select id="citaServicio">
+        <option>Micropigmentación de cejas</option>
+        <option>Micropigmentación de labios</option>
+        <option>Micropigmentación de ojos</option>
+        <option>Retoque</option>
+        <option>Consulta</option>
+        <option>Otro</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Notas</label>
+      <textarea id="citaNotas" rows="2" style="resize:none"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="cerrarModal('modalCita')">Cancelar</button>
+      <button class="btn-primary" onclick="guardarCita()">Guardar cita</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Usuario -->
+<div class="modal-overlay" id="modalUsuario">
+  <div class="modal">
+    <h3 id="modalUsuarioTitulo">👤 Nuevo usuario</h3>
+    <div class="form-group"><label>Nombre completo</label><input type="text" id="uNombre"></div>
+    <div class="form-group"><label>Email</label><input type="email" id="uEmail"></div>
+    <div class="form-group"><label>Contraseña</label><input type="password" id="uPassword" placeholder="Dejar vacío para no cambiar"></div>
+    <div class="form-group"><label>Rol</label>
+      <select id="uRol">
+        <option value="recepcionista">Recepcionista</option>
+        <option value="tecnica">Técnica</option>
+        <option value="supervisor">Supervisor</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Sucursal</label><input type="text" id="uSucursal" placeholder="Ej: Simone Studio"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="cerrarModal('modalUsuario')">Cancelar</button>
+      <button class="btn-primary" onclick="guardarUsuario()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const TOKEN = localStorage.getItem('token');
+const USER = JSON.parse(localStorage.getItem('user') || '{}');
+let semanaOffset = 0;
+let citasData = [];
+let contactosData = [];
+let tecnicasData = [];
+let usuariosData = [];
+let editandoUsuarioId = null;
+let chatActivo = null;
+let todosLosChats = [];
+
+if (!TOKEN) window.location.href = '/';
+if (USER.rol !== 'supervisor' && USER.rol !== 'admin') window.location.href = '/';
+
+document.getElementById('nombreUsuario').textContent = USER.nombre || 'Supervisor';
+
+function api(path, opts = {}) {
+  return fetch(path, {
+    ...opts,
+    headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json', ...(opts.headers || {}) }
+  }).then(r => r.json());
+}
+
+function logout() {
+  localStorage.clear();
+  window.location.href = '/';
+}
+
+function switchTab(tab, el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('tab-' + tab).classList.add('active');
+  if (tab === 'metricas') cargarMetricas();
+  if (tab === 'calendario') { cargarTecnicas(); cargarCitas(); }
+  if (tab === 'chats') cargarChats();
+  if (tab === 'usuarios') cargarUsuarios();
+}
+
+// ── MÉTRICAS ──
+async function cargarMetricas() {
+  const data = await api('/api/metricas');
+  const grid = document.getElementById('metricasGrid');
+  const ch = data.citasHoy || {};
+  grid.innerHTML = `
+    <div class="metrica-card"><div class="valor">${ch.total_citas_hoy || 0}</div><div class="label">Citas hoy</div></div>
+    <div class="metrica-card"><div class="valor" style="color:#f39c12">${ch.pendientes || 0}</div><div class="label">Pendientes</div></div>
+    <div class="metrica-card"><div class="valor" style="color:#3d85c8">${ch.completadas || 0}</div><div class="label">Completadas</div></div>
+    <div class="metrica-card"><div class="valor" style="color:#e74c3c">${ch.canceladas || 0}</div><div class="label">Canceladas</div></div>
+  `;
+  const tbody = document.getElementById('tablaRecepcionistas');
+  if (!data.recepcionistas || !data.recepcionistas.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Sin recepcionistas registradas</td></tr>'; return;
+  }
+  tbody.innerHTML = data.recepcionistas.map(r => `
+    <tr>
+      <td><span class="dot-online"></span>${r.nombre || '—'}</td>
+      <td>${r.sucursal || '—'}</td>
+      <td><strong>${r.mensajes_hoy || 0}</strong></td>
+      <td>${r.mensajes_semana || 0}</td>
+      <td>${r.total_contactos || 0}</td>
+    </tr>
+  `).join('');
+}
+
+// ── CALENDARIO ──
+function getSemanaFechas() {
+  const hoy = new Date();
+  hoy.setDate(hoy.getDate() + semanaOffset * 7);
+  const lunes = new Date(hoy);
+  lunes.setDate(hoy.getDate() - ((hoy.getDay() + 6) % 7));
+  const dias = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(lunes);
+    d.setDate(lunes.getDate() + i);
+    dias.push(d);
+  }
+  return dias;
+}
+
+function irAHoy() { semanaOffset = 0; cargarCitas(); }
+function navegarSemana(dir) { semanaOffset += dir; cargarCitas(); }
+
+async function cargarTecnicas() {
+  tecnicasData = await api('/api/tecnicas');
+  const sel = document.getElementById('filtroPorTecnica');
+  const selCita = document.getElementById('citaTecnica');
+  sel.innerHTML = '<option value="">Todas las técnicas</option>' + tecnicasData.map(t => `<option value="${t.id}">${t.nombre}</option>`).join('');
+  if (selCita) selCita.innerHTML = '<option value="">Sin asignar</option>' + tecnicasData.map(t => `<option value="${t.id}">${t.nombre}</option>`).join('');
+}
+
+async function cargarCitas() {
+  const dias = getSemanaFechas();
+  const fi = dias[0].toISOString().split('T')[0];
+  const ff = dias[6].toISOString().split('T')[0];
+  const tecnicaId = document.getElementById('filtroPorTecnica')?.value || '';
+
+  document.getElementById('fechaTitulo').textContent =
+    dias[0].toLocaleDateString('es-MX', { day:'numeric', month:'short' }) + ' – ' +
+    dias[6].toLocaleDateString('es-MX', { day:'numeric', month:'short', year:'numeric' });
+
+  let url = `/api/citas?fecha_inicio=${fi}&fecha_fin=${ff}`;
+  const data = await api(url);
+  citasData = Array.isArray(data) ? data : [];
+
+  renderCalendario(dias);
+}
+
+function renderCalendario(dias) {
+  const hoy = new Date().toISOString().split('T')[0];
+  const horas = ['08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00','20:00'];
+  const diasNombres = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+
+  let html = `<div class="hora-label"></div>`;
+  dias.forEach((d, i) => {
+    const fechaStr = d.toISOString().split('T')[0];
+    const esHoy = fechaStr === hoy;
+    html += `<div class="dia-header ${esHoy ? 'hoy' : ''}">
+      <div class="dia-nombre">${diasNombres[i]}</div>
+      <div class="dia-num">${d.getDate()}</div>
+    </div>`;
+  });
+
+  horas.forEach(hora => {
+    html += `<div class="hora-label">${hora}</div>`;
+    dias.forEach(d => {
+      const fechaStr = d.toISOString().split('T')[0];
+      const citasDia = citasData.filter(c => c.fecha === fechaStr && c.hora_inicio && c.hora_inicio.startsWith(hora.split(':')[0]));
+      let citasHtml = citasDia.map(c => `
+        <div class="cita-bloque ${c.estado}" onclick="verCita(${c.id})">
+          <div class="cita-hora">${c.hora_inicio?.slice(0,5)} ${c.hora_fin ? '– '+c.hora_fin.slice(0,5) : ''}</div>
+          <div class="cita-nombre">${c.contacto_nombre || 'Sin clienta'}</div>
+          <div class="cita-tecnica">${c.tecnica_nombre || ''}</div>
+        </div>
+      `).join('');
+      html += `<div class="celda" onclick="abrirModalCita('${fechaStr}','${hora}')">${citasHtml}</div>`;
+    });
+  });
+
+  document.getElementById('semanaGrid').innerHTML = html;
+}
+
+function abrirModalCita(fecha = '', hora = '') {
+  document.getElementById('citaFecha').value = fecha || new Date().toISOString().split('T')[0];
+  document.getElementById('citaHoraInicio').value = hora;
+  document.getElementById('citaHoraFin').value = '';
+  document.getElementById('citaNotas').value = '';
+  cargarContactosModal();
+  document.getElementById('modalCita').classList.add('open');
+}
+
+async function cargarContactosModal() {
+  if (!contactosData.length) {
+    const data = await api('/api/contactos');
+    contactosData = Array.isArray(data) ? data : (data.contactos || []);
+  }
+  document.getElementById('citaContacto').innerHTML =
+    '<option value="">Sin asignar</option>' +
+    contactosData.map(c => `<option value="${c.id}">${c.nombre || c.telefono}</option>`).join('');
+}
+
+async function guardarCita() {
+  const body = {
+    contacto_id: document.getElementById('citaContacto').value || null,
+    tecnica_id: document.getElementById('citaTecnica').value || null,
+    fecha: document.getElementById('citaFecha').value,
+    hora_inicio: document.getElementById('citaHoraInicio').value,
+    hora_fin: document.getElementById('citaHoraFin').value || null,
+    servicio: document.getElementById('citaServicio').value,
+    notas: document.getElementById('citaNotas').value
+  };
+  if (!body.fecha || !body.hora_inicio) { alert('Fecha y hora de inicio son requeridas'); return; }
+  const r = await api('/api/citas', { method: 'POST', body: JSON.stringify(body) });
+  if (r.ok) { cerrarModal('modalCita'); cargarCitas(); }
+  else alert('Error: ' + r.error);
+}
+
+function verCita(id) {
+  const c = citasData.find(x => x.id === id);
+  if (!c) return;
+  alert(`📅 ${c.servicio || 'Cita'}\n👤 ${c.contacto_nombre || 'Sin clienta'}\n💆 Técnica: ${c.tecnica_nombre || '—'}\n🕐 ${c.hora_inicio?.slice(0,5)} – ${c.hora_fin?.slice(0,5) || '?'}\n📝 ${c.notas || ''}\nEstado: ${c.estado}`);
+}
+
+// ── CHATS ──
+async function cargarChats() {
+  const data = await api('/api/contactos');
+  todosLosChats = Array.isArray(data) ? data : (data.contactos || []);
+
+  const receps = await api('/api/usuarios');
+  const selRecep = document.getElementById('filtroRecepcionista');
+  const recepcionistas = receps.filter ? receps.filter(u => u.rol === 'recepcionista') : [];
+  selRecep.innerHTML = '<option value="">Todas las recepcionistas</option>' +
+    recepcionistas.map(r => `<option value="${r.id}">${r.nombre}</option>`).join('');
+
+  renderChats(todosLosChats);
+}
+
+function filtrarChats() {
+  const q = document.getElementById('buscarChat').value.toLowerCase();
+  const filtrados = todosLosChats.filter(c =>
+    (c.nombre || '').toLowerCase().includes(q) || (c.telefono || '').includes(q)
+  );
+  renderChats(filtrados);
+}
+
+function renderChats(lista) {
+  const el = document.getElementById('chatsLista');
+  if (!lista.length) { el.innerHTML = '<div class="empty-state">Sin chats</div>'; return; }
+  el.innerHTML = lista.map(c => `
+    <div class="chat-item ${chatActivo === c.id ? 'active' : ''}" onclick="abrirChat(${c.id}, '${(c.nombre||c.telefono||'').replace(/'/g,"\\'")}')">
+      <div class="chat-meta">
+        <span class="chat-nombre">${c.nombre || c.telefono || '—'}</span>
+        <span class="chat-tiempo">${c.etapa || ''}</span>
+      </div>
+      <div class="chat-preview">${c.telefono || ''}</div>
+    </div>
+  `).join('');
+}
+
+async function abrirChat(id, nombre) {
+  chatActivo = id;
+  filtrarChats();
+  const contacto = todosLosChats.find(c => c.id === id);
+  const msgs = await api(`/api/mensajes/${contacto?.telefono}`);
+  const mensajes = Array.isArray(msgs) ? msgs : [];
+
+  document.getElementById('chatVista').innerHTML = `
+    <div class="chat-vista-header">
+      <div class="chat-avatar">${nombre.charAt(0).toUpperCase()}</div>
+      <div>
+        <div style="font-weight:600">${nombre}</div>
+        <div style="font-size:12px;color:#8696a0">${contacto?.telefono || ''} · ${contacto?.etapa || ''}</div>
+      </div>
+    </div>
+    <div class="chat-mensajes" id="mensajesContainer">
+      ${mensajes.length ? mensajes.map(m => `
+        <div class="msg ${m.direccion === 'saliente' ? 'saliente' : 'entrante'}">
+          ${m.mensaje || ''}
+          <div class="msg-tiempo">${new Date(m.timestamp).toLocaleTimeString('es-MX', {hour:'2-digit',minute:'2-digit'})}</div>
+        </div>
+      `).join('') : '<div class="empty-state">Sin mensajes</div>'}
+    </div>
+  `;
+  const mc = document.getElementById('mensajesContainer');
+  if (mc) mc.scrollTop = mc.scrollHeight;
+}
+
+// ── USUARIOS ──
+async function cargarUsuarios() {
+  const data = await api('/api/usuarios');
+  usuariosData = Array.isArray(data) ? data : [];
+  const tbody = document.getElementById('tablaUsuarios');
+  const rolesBadge = { admin:'#005c4b', supervisor:'#1a2e3d', recepcionista:'#2a3942', tecnica:'#2e1f3d' };
+  tbody.innerHTML = usuariosData.map(u => `
+    <tr>
+      <td>${u.nombre || '—'}</td>
+      <td>${u.email || '—'}</td>
+      <td><span class="badge" style="background:${rolesBadge[u.rol]||'#2a3942'};color:#e9edef">${u.rol}</span></td>
+      <td>${u.sucursal || '—'}</td>
+      <td>
+        <button class="btn-edit" onclick="editarUsuario(${u.id})">Editar</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function abrirModalUsuario() {
+  editandoUsuarioId = null;
+  document.getElementById('modalUsuarioTitulo').textContent = '👤 Nuevo usuario';
+  ['uNombre','uEmail','uPassword','uSucursal'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('uRol').value = 'recepcionista';
+  document.getElementById('modalUsuario').classList.add('open');
+}
+
+function editarUsuario(id) {
+  const u = usuariosData.find(x => x.id === id);
+  if (!u) return;
+  editandoUsuarioId = id;
+  document.getElementById('modalUsuarioTitulo').textContent = '✏️ Editar usuario';
+  document.getElementById('uNombre').value = u.nombre || '';
+  document.getElementById('uEmail').value = u.email || '';
+  document.getElementById('uPassword').value = '';
+  document.getElementById('uRol').value = u.rol || 'recepcionista';
+  document.getElementById('uSucursal').value = u.sucursal || '';
+  document.getElementById('modalUsuario').classList.add('open');
+}
+
+async function guardarUsuario() {
+  const body = {
+    nombre: document.getElementById('uNombre').value,
+    email: document.getElementById('uEmail').value,
+    password: document.getElementById('uPassword').value,
+    rol: document.getElementById('uRol').value,
+    sucursal: document.getElementById('uSucursal').value
+  };
+  if (!body.nombre || !body.email) { alert('Nombre y email son requeridos'); return; }
+  let r;
+  if (editandoUsuarioId) {
+    r = await api(`/api/usuarios/${editandoUsuarioId}`, { method: 'PUT', body: JSON.stringify(body) });
+  } else {
+    if (!body.password) { alert('La contraseña es requerida para usuarios nuevos'); return; }
+    r = await api('/api/usuarios', { method: 'POST', body: JSON.stringify(body) });
+  }
+  if (r.ok) { cerrarModal('modalUsuario'); cargarUsuarios(); }
+  else alert('Error: ' + r.error);
+}
+
+function cerrarModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// Init
+cargarMetricas();
+</script>
+</body>
+</html>

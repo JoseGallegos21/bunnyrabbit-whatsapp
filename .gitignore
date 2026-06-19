@@ -1,6 +1,7 @@
+node_modules/
 whatsapp.db
 .env
-node_modules/
-public/uploads/
-public/fonts/
 *.log
+*.bak
+*.bak2
+public/uploads/

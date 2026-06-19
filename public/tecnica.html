@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BunnyRabbit — Técnica</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e9edef; min-height: 100vh; }
+
+  .topbar { background: #1f2c34; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #2a3942; position: sticky; top: 0; z-index: 100; }
+  .topbar-left { display: flex; align-items: center; gap: 12px; }
+  .logo { font-size: 20px; font-weight: 700; color: #00a884; }
+  .badge-rol { background: #2e1f3d; color: #a855f7; font-size: 11px; padding: 2px 10px; border-radius: 20px; font-weight: 600; }
+  .topbar-right { display: flex; align-items: center; gap: 16px; }
+  .btn-logout { background: transparent; border: 1px solid #2a3942; color: #8696a0; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .btn-logout:hover { border-color: #a855f7; color: #a855f7; }
+
+  .tabs { background: #1f2c34; display: flex; border-bottom: 1px solid #2a3942; padding: 0 24px; }
+  .tab { padding: 14px 20px; cursor: pointer; font-size: 14px; color: #8696a0; border-bottom: 2px solid transparent; transition: all 0.2s; }
+  .tab.active { color: #a855f7; border-bottom-color: #a855f7; }
+  .tab:hover { color: #e9edef; }
+
+  .content { padding: 24px; max-width: 1200px; margin: 0 auto; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* Hoy */
+  .hoy-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+  .fecha-grande { font-size: 28px; font-weight: 700; }
+  .fecha-sub { font-size: 14px; color: #8696a0; margin-top: 2px; }
+  .resumen-chips { display: flex; gap: 12px; flex-wrap: wrap; }
+  .chip { background: #1f2c34; border: 1px solid #2a3942; border-radius: 20px; padding: 6px 16px; font-size: 13px; }
+  .chip span { color: #a855f7; font-weight: 700; margin-right: 4px; }
+
+  .citas-lista { display: flex; flex-direction: column; gap: 12px; }
+  .cita-card { background: #1f2c34; border-radius: 12px; border: 1px solid #2a3942; padding: 16px 20px; display: flex; align-items: center; gap: 16px; transition: border-color 0.2s; }
+  .cita-card:hover { border-color: #a855f7; }
+  .cita-card.cancelada { opacity: 0.5; border-color: #e74c3c44; }
+  .cita-card.completada { border-color: #3d85c844; }
+  .hora-bloque { text-align: center; min-width: 70px; }
+  .hora-inicio { font-size: 22px; font-weight: 700; color: #a855f7; }
+  .hora-fin { font-size: 12px; color: #8696a0; }
+  .cita-info { flex: 1; }
+  .cita-clienta { font-size: 16px; font-weight: 600; }
+  .cita-telefono { font-size: 12px; color: #8696a0; margin-top: 2px; }
+  .cita-servicio { font-size: 13px; color: #8696a0; margin-top: 6px; }
+  .cita-notas { font-size: 12px; color: #667781; margin-top: 4px; font-style: italic; }
+  .estado-badge { padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .estado-pendiente { background: #2a1f00; color: #f39c12; }
+  .estado-completada { background: #1a2e3d; color: #3d85c8; }
+  .estado-cancelada { background: #3d1a1a; color: #e74c3c; }
+  .btn-completar { background: #2e1f3d; border: 1px solid #a855f7; color: #a855f7; padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 600; }
+  .btn-completar:hover { background: #a855f7; color: #fff; }
+
+  /* Semana */
+  .semana-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+  .nav-btns { display: flex; align-items: center; gap: 12px; }
+  .btn-nav { background: #2a3942; border: none; color: #e9edef; width: 36px; height: 36px; border-radius: 8px; cursor: pointer; font-size: 18px; }
+  .btn-nav:hover { background: #3d4f58; }
+  .semana-titulo { font-size: 18px; font-weight: 600; min-width: 240px; text-align: center; }
+  .btn-hoy { background: #2e1f3d; border: 1px solid #a855f7; color: #a855f7; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; }
+
+  .dias-semana { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+  .dia-col { background: #1f2c34; border-radius: 10px; border: 1px solid #2a3942; overflow: hidden; min-height: 120px; }
+  .dia-col.hoy { border-color: #a855f7; }
+  .dia-col-header { padding: 10px; text-align: center; border-bottom: 1px solid #2a3942; }
+  .dia-col-header .dn { font-size: 11px; color: #8696a0; text-transform: uppercase; }
+  .dia-col-header .dd { font-size: 20px; font-weight: 700; }
+  .dia-col.hoy .dia-col-header .dd { color: #a855f7; }
+  .dia-citas { padding: 6px; display: flex; flex-direction: column; gap: 4px; }
+  .mini-cita { background: #2e1f3d; border-left: 3px solid #a855f7; border-radius: 4px; padding: 4px 6px; }
+  .mini-cita .mc-hora { font-size: 10px; color: #a855f7; }
+  .mini-cita .mc-nombre { font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mini-cita.completada { background: #1a2e3d; border-left-color: #3d85c8; }
+  .mini-cita.cancelada { opacity: 0.5; }
+
+  /* Google Calendar */
+  .gcal-section { background: #1f2c34; border-radius: 12px; border: 1px solid #2a3942; padding: 20px; margin-top: 16px; }
+  .gcal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .gcal-titulo { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .gcal-badge { background: #1a2e3d; color: #4285f4; font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+  .gcal-evento { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; border-bottom: 1px solid #2a3942; }
+  .gcal-evento:last-child { border-bottom: none; }
+  .gcal-hora { font-size: 12px; color: #4285f4; min-width: 80px; font-weight: 600; }
+  .gcal-nombre { font-size: 13px; font-weight: 600; }
+  .gcal-desc { font-size: 12px; color: #8696a0; margin-top: 2px; }
+  .gcal-empty { color: #8696a0; font-size: 13px; text-align: center; padding: 20px; }
+  .gcal-no-config { text-align: center; padding: 20px; }
+  .gcal-no-config p { color: #8696a0; font-size: 13px; }
+
+  .section-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+  .section-title::before { content: ''; width: 3px; height: 18px; background: #a855f7; border-radius: 2px; display: inline-block; }
+  .loading { text-align: center; padding: 40px; color: #8696a0; }
+  .empty-state { text-align: center; padding: 40px; color: #8696a0; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-left">
+    <span class="logo">🐰 BunnyRabbit</span>
+    <span class="badge-rol">TÉCNICA</span>
+  </div>
+  <div class="topbar-right">
+    <span style="font-size:13px;color:#8696a0" id="nombreUsuario">—</span>
+    <button class="btn-logout" onclick="logout()">Cerrar sesión</button>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('hoy', this)">📋 Mis citas de hoy</div>
+  <div class="tab" onclick="switchTab('semana', this)">📅 Mi semana</div>
+</div>
+
+<div class="content">
+
+  <!-- TAB HOY -->
+  <div class="tab-panel active" id="tab-hoy">
+    <div class="hoy-header">
+      <div>
+        <div class="fecha-grande" id="fechaHoyTitulo">—</div>
+        <div class="fecha-sub" id="sucursalNombre">—</div>
+      </div>
+      <div class="resumen-chips" id="resumenChips"></div>
+    </div>
+
+    <div class="section-title">Citas programadas</div>
+    <div class="citas-lista" id="citasHoy">
+      <div class="loading">Cargando citas...</div>
+    </div>
+
+    <div class="gcal-section" id="gcalSection" style="display:none">
+      <div class="gcal-header">
+        <div class="gcal-titulo">📆 Google Calendar <span class="gcal-badge">Sincronizado</span></div>
+      </div>
+      <div id="gcalEventos"><div class="loading">Cargando eventos...</div></div>
+    </div>
+  </div>
+
+  <!-- TAB SEMANA -->
+  <div class="tab-panel" id="tab-semana">
+    <div class="semana-nav">
+      <div class="nav-btns">
+        <button class="btn-nav" onclick="navegarSemana(-1)">‹</button>
+        <span class="semana-titulo" id="semanaTitulo">—</span>
+        <button class="btn-nav" onclick="navegarSemana(1)">›</button>
+      </div>
+      <button class="btn-hoy" onclick="irAHoy()">Esta semana</button>
+    </div>
+    <div class="dias-semana" id="diasSemana">
+      <div class="loading" style="grid-column:1/-1">Cargando semana...</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const TOKEN = localStorage.getItem('token');
+const USER = JSON.parse(localStorage.getItem('user') || '{}');
+let semanaOffset = 0;
+let citasSemana = [];
+
+if (!TOKEN) window.location.href = '/';
+if (USER.rol !== 'tecnica' && USER.rol !== 'admin') window.location.href = '/';
+
+document.getElementById('nombreUsuario').textContent = USER.nombre || 'Técnica';
+document.getElementById('sucursalNombre').textContent = USER.sucursal || 'Sin sucursal asignada';
+
+const hoy = new Date();
+document.getElementById('fechaHoyTitulo').textContent = hoy.toLocaleDateString('es-MX', {
+  weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+});
+
+function api(path, opts = {}) {
+  return fetch(path, {
+    ...opts,
+    headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json', ...(opts.headers || {}) }
+  }).then(r => r.json());
+}
+
+function logout() { localStorage.clear(); window.location.href = '/'; }
+
+function switchTab(tab, el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('tab-' + tab).classList.add('active');
+  if (tab === 'hoy') cargarHoy();
+  if (tab === 'semana') cargarSemana();
+}
+
+// ── HOY ──
+async function cargarHoy() {
+  const fechaHoy = new Date().toISOString().split('T')[0];
+  const citas = await api(`/api/citas?fecha_inicio=${fechaHoy}&fecha_fin=${fechaHoy}`);
+  const lista = Array.isArray(citas) ? citas : [];
+
+  const pendientes = lista.filter(c => c.estado === 'pendiente').length;
+  const completadas = lista.filter(c => c.estado === 'completada').length;
+  const canceladas = lista.filter(c => c.estado === 'cancelada').length;
+
+  document.getElementById('resumenChips').innerHTML = `
+    <div class="chip"><span>${lista.length}</span> citas totales</div>
+    <div class="chip"><span style="color:#f39c12">${pendientes}</span> pendientes</div>
+    <div class="chip"><span style="color:#3d85c8">${completadas}</span> completadas</div>
+  `;
+
+  const el = document.getElementById('citasHoy');
+  if (!lista.length) {
+    el.innerHTML = '<div class="empty-state">🎉 No hay citas programadas para hoy</div>';
+  } else {
+    el.innerHTML = lista.map(c => `
+      <div class="cita-card ${c.estado}" id="card-${c.id}">
+        <div class="hora-bloque">
+          <div class="hora-inicio">${c.hora_inicio?.slice(0,5) || '—'}</div>
+          <div class="hora-fin">${c.hora_fin ? '→ ' + c.hora_fin.slice(0,5) : ''}</div>
+        </div>
+        <div class="cita-info">
+          <div class="cita-clienta">${c.contacto_nombre || 'Sin clienta asignada'}</div>
+          ${c.telefono ? `<div class="cita-telefono">📱 ${c.telefono}</div>` : ''}
+          <div class="cita-servicio">✂️ ${c.servicio || 'Sin especificar'}</div>
+          ${c.notas ? `<div class="cita-notas">📝 ${c.notas}</div>` : ''}
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+          <span class="estado-badge estado-${c.estado}">${c.estado}</span>
+          ${c.estado === 'pendiente' ? `<button class="btn-completar" onclick="marcarCompletada(${c.id})">✓ Marcar completada</button>` : ''}
+        </div>
+      </div>
+    `).join('');
+  }
+
+  // Cargar Google Calendar
+  cargarGoogleCalendar(fechaHoy, fechaHoy);
+}
+
+async function marcarCompletada(id) {
+  const cita = { estado: 'completada' };
+  // Obtener datos actuales de la cita
+  const fechaHoy = new Date().toISOString().split('T')[0];
+  const citas = await api(`/api/citas?fecha_inicio=${fechaHoy}&fecha_fin=${fechaHoy}`);
+  const c = (Array.isArray(citas) ? citas : []).find(x => x.id === id);
+  if (!c) return;
+
+  const r = await api(`/api/citas/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      contacto_id: c.contacto_id,
+      tecnica_id: c.tecnica_id,
+      fecha: c.fecha,
+      hora_inicio: c.hora_inicio,
+      hora_fin: c.hora_fin,
+      servicio: c.servicio,
+      notas: c.notas,
+      estado: 'completada'
+    })
+  });
+  if (r.ok) cargarHoy();
+  else alert('Error: ' + r.error);
+}
+
+async function cargarGoogleCalendar(fi, ff) {
+  const data = await api(`/api/google-calendar/eventos?fecha_inicio=${fi}&fecha_fin=${ff}`);
+  const section = document.getElementById('gcalSection');
+  const el = document.getElementById('gcalEventos');
+
+  if (!data.configurado) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+
+  if (!data.eventos || !data.eventos.length) {
+    el.innerHTML = '<div class="gcal-empty">Sin eventos en Google Calendar para hoy</div>'; return;
+  }
+
+  el.innerHTML = data.eventos.map(e => {
+    const inicio = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString('es-MX', {hour:'2-digit',minute:'2-digit'}) : (e.start?.date || '');
+    const fin = e.end?.dateTime ? new Date(e.end.dateTime).toLocaleTimeString('es-MX', {hour:'2-digit',minute:'2-digit'}) : '';
+    return `
+      <div class="gcal-evento">
+        <div class="gcal-hora">${inicio}${fin ? ' – ' + fin : ''}</div>
+        <div>
+          <div class="gcal-nombre">${e.summary || 'Sin título'}</div>
+          ${e.description ? `<div class="gcal-desc">${e.description}</div>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ── SEMANA ──
+function getSemanaFechas() {
+  const base = new Date();
+  base.setDate(base.getDate() + semanaOffset * 7);
+  const lunes = new Date(base);
+  lunes.setDate(base.getDate() - ((base.getDay() + 6) % 7));
+  const dias = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(lunes);
+    d.setDate(lunes.getDate() + i);
+    dias.push(d);
+  }
+  return dias;
+}
+
+function irAHoy() { semanaOffset = 0; cargarSemana(); }
+function navegarSemana(dir) { semanaOffset += dir; cargarSemana(); }
+
+async function cargarSemana() {
+  const dias = getSemanaFechas();
+  const fi = dias[0].toISOString().split('T')[0];
+  const ff = dias[6].toISOString().split('T')[0];
+  const hoyStr = new Date().toISOString().split('T')[0];
+  const diasNombres = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+
+  document.getElementById('semanaTitulo').textContent =
+    dias[0].toLocaleDateString('es-MX', {day:'numeric', month:'short'}) + ' – ' +
+    dias[6].toLocaleDateString('es-MX', {day:'numeric', month:'short', year:'numeric'});
+
+  const citas = await api(`/api/citas?fecha_inicio=${fi}&fecha_fin=${ff}`);
+  citasSemana = Array.isArray(citas) ? citas : [];
+
+  // Cargar también Google Calendar para la semana
+  const gcal = await api(`/api/google-calendar/eventos?fecha_inicio=${fi}&fecha_fin=${ff}`);
+  const eventosGcal = gcal.configurado ? (gcal.eventos || []) : [];
+
+  const el = document.getElementById('diasSemana');
+  el.innerHTML = dias.map((d, i) => {
+    const fechaStr = d.toISOString().split('T')[0];
+    const esHoy = fechaStr === hoyStr;
+    const citasDia = citasSemana.filter(c => c.fecha === fechaStr);
+    const gcalDia = eventosGcal.filter(e => {
+      const f = e.start?.dateTime?.split('T')[0] || e.start?.date;
+      return f === fechaStr;
+    });
+
+    const citasHtml = citasDia.map(c => `
+      <div class="mini-cita ${c.estado}">
+        <div class="mc-hora">${c.hora_inicio?.slice(0,5) || ''}</div>
+        <div class="mc-nombre">${c.contacto_nombre || 'Sin clienta'}</div>
+      </div>
+    `).join('');
+
+    const gcalHtml = gcalDia.map(e => {
+      const hora = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}) : '';
+      return `<div class="mini-cita" style="background:#1a2e3d;border-left-color:#4285f4">
+        <div class="mc-hora" style="color:#4285f4">${hora}</div>
+        <div class="mc-nombre">${e.summary || 'Evento GCal'}</div>
+      </div>`;
+    }).join('');
+
+    return `
+      <div class="dia-col ${esHoy ? 'hoy' : ''}">
+        <div class="dia-col-header">
+          <div class="dn">${diasNombres[i]}</div>
+          <div class="dd">${d.getDate()}</div>
+        </div>
+        <div class="dia-citas">
+          ${citasHtml || ''}
+          ${gcalHtml || ''}
+          ${!citasDia.length && !gcalDia.length ? '<div style="font-size:11px;color:#667781;text-align:center;padding:8px">Libre</div>' : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// Init
+cargarHoy();
+</script>
+</body>
+</html>

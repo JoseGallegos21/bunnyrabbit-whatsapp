@@ -91,6 +91,7 @@ tr:last-child td{border-bottom:none}
     <div class="tab" onclick="showTab('reportes',this)">Reportes</div>
         <div class="tab" onclick="showTab('biblioteca',this)">Biblioteca</div>
         <div class="tab" onclick="showTab('facebook',this)">&#128279; Facebook CAPI</div>
+        <div class="tab" onclick="showTab('sucursales',this)">🏢 Sucursales</div>
   </div>
 
   <div class="content">
@@ -104,10 +105,11 @@ tr:last-child td{border-bottom:none}
           <div class="form-group"><label>Contrasena</label><input type="password" id="u_pass" placeholder="Minimo 6 caracteres"></div>
         </div>
         <div class="form-row">
-          <div class="form-group"><label>Sucursal</label><input type="text" id="u_sucursal" placeholder="Nombre de la sucursal"></div>
+          <div class="form-group"><label>Sucursal</label><select id="u_sucursal"><option value="">Sin sucursal</option></select></div>
           <div class="form-group"><label>Phone Number ID</label><input type="text" id="u_numero" placeholder="ID del numero de WhatsApp"></div>
+          <div class="form-group"><label>Teléfono personal (notificaciones)</label><input type="text" id="u_telefono" placeholder="Ej: 5512345678"></div>
           <div class="form-group"><label>Rol</label>
-            <select id="u_rol"><option value="recepcionista">Recepcionista</option><option value="supervisor">Supervisor</option></select>
+            <select id="u_rol"><option value="recepcionista">Recepcionista</option><option value="tecnica">Técnica</option><option value="supervisor">Supervisor</option><option value="admin">Admin</option></select>
           </div>
         </div>
         <button class="btn btn-primary" id="btnCrearUsuario">Crear usuario</button>
@@ -115,6 +117,15 @@ tr:last-child td{border-bottom:none}
       </div>
       <div class="card">
         <h2>Usuarios registrados</h2>
+      <div style="margin-bottom:12px">
+        <select id="filtroRol" onchange="renderTablaUsuarios(todosLosUsuarios)" style="background:#2a3942;border:1px solid #3d4f58;color:#e9edef;padding:6px 12px;border-radius:8px;font-size:13px;outline:none;">
+          <option value="">Todos los roles</option>
+          <option value="admin">Admin</option>
+          <option value="supervisor">Supervisor</option>
+          <option value="recepcionista">Recepcionista</option>
+          <option value="tecnica">Técnica</option>
+        </select>
+      </div>
         <table><thead><tr><th>Nombre</th><th>Email</th><th>Sucursal</th><th>Phone ID</th><th>Rol</th><th>Acciones</th></tr></thead>
         <tbody id="tablaUsuarios"></tbody></table>
       </div>
@@ -319,6 +330,57 @@ tr:last-child td{border-bottom:none}
       </div>
     </div>
 
+    <div class="section" id="sec-sucursales">
+      <h2>Sucursales</h2>
+      <div style="margin-bottom:24px;background:#f8f9fa;border-radius:12px;padding:20px;border:1px solid #e0e0e0">
+        <h3 style="margin-bottom:16px;font-size:15px">Agregar sucursal</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Nombre</label>
+            <input id="suc_nombre" type="text" placeholder="Ej: Caralinda Insurgentes" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
+          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Dirección</label>
+            <input id="suc_direccion" type="text" placeholder="Dirección completa" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Phone Number ID de WhatsApp</label>
+            <select id="suc_phone" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;background:#fff">
+              <option value="">Sin número asignado</option>
+            </select></div>
+          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Logo</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <div id="suc_logo_preview" style="width:48px;height:48px;border-radius:8px;background:#e8f5e9;border:1px solid #ddd;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">🏢</div>
+              <input id="suc_logo" type="hidden">
+              <button type="button" onclick="abrirBibliotecaLogo()" style="background:#f0f0f0;border:1px solid #ddd;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px">📷 Seleccionar de biblioteca</button>
+            </div></div>
+        </div>
+        <button onclick="crearSucursal()" style="background:#1f5c4a;color:#fff;border:none;padding:10px 24px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">Crear sucursal</button>
+        <span id="sucMsg" style="margin-left:12px;font-size:13px"></span>
+      </div>
+
+      <div id="listaSucursales"><p style="color:#999;text-align:center;padding:20px">Cargando sucursales...</p></div>
+
+      <div style="margin-top:24px;background:#f8f9fa;border-radius:12px;padding:20px;border:1px solid #e0e0e0">
+        <h3 style="margin-bottom:16px;font-size:15px">➕ Agregar número de WhatsApp a sucursal</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Sucursal</label>
+            <select id="num_sucursal" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;background:#fff">
+              <option value="">Seleccionar sucursal</option>
+            </select></div>
+          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Nombre del número</label>
+            <input id="num_nombre" type="text" placeholder="Ej: Caralinda Insurgentes" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
+          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Phone Number ID</label>
+            <input id="num_phone_id" type="text" placeholder="ID de Meta" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Token de WhatsApp</label>
+            <input id="num_token" type="text" placeholder="Token permanente" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
+          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Nombre visible en sistema</label>
+            <input id="num_display" type="text" placeholder="Ej: WA Insurgentes" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
+        </div>
+        <button onclick="agregarNumeroSucursal()" style="background:#1f5c4a;color:#fff;border:none;padding:10px 24px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">Agregar número</button>
+        <span id="numSucMsg" style="margin-left:12px;font-size:13px"></span>
+      </div>
+    </div>
+
     <div class="section" id="sec-facebook">
           <h2 style="margin-bottom:16px;font-size:18px;color:#1877F2">&#128279; Facebook Conversions API</h2>
 
@@ -448,7 +510,7 @@ tr:last-child td{border-bottom:none}
     <div class="form-row">
       <div class="form-group"><label>Phone Number ID</label><input type="text" id="edit_numero"></div>
       <div class="form-group"><label>Rol</label>
-        <select id="edit_rol"><option value="recepcionista">Recepcionista</option><option value="supervisor">Supervisor</option></select>
+        <select id="edit_rol"><option value="recepcionista">Recepcionista</option><option value="tecnica">Técnica</option><option value="supervisor">Supervisor</option><option value="admin">Admin</option></select>
       </div>
     </div>
     <div class="form-group"><label>Nueva contrasena (dejar vacio para no cambiar)</label><input type="password" id="edit_pass" placeholder="Nueva contrasena"></div>
@@ -486,25 +548,217 @@ document.getElementById('btnLogin').addEventListener('click',function(){
   fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:e,password:p})})
   .then(function(r){return r.json()})
   .then(function(d){
-    if(d.token&&d.usuario.rol==='supervisor'){
+    if(d.token&&(d.usuario.rol==='supervisor'||d.usuario.rol==='admin')){
       token=d.token;
+      localStorage.setItem('token', d.token);
+      localStorage.setItem('user', JSON.stringify(d.usuario));
+      // Admin va directo al panel admin, supervisor puede ir a supervisor.html
+      if(d.usuario.rol==='supervisor'){
+        window.location.href='/supervisor.html'; return;
+      }
       document.getElementById('loginWrap').style.display='none';
       document.getElementById('adminApp').style.display='block';
       document.getElementById('adminUser').textContent=d.usuario.nombre;
       cargarTodo();
     } else {
-      document.getElementById('loginErr').textContent=d.error||'Solo supervisores pueden acceder';
+      document.getElementById('loginErr').textContent=d.error||'Sin acceso. Solo admin o supervisor';
     }
   });
 });
 
+function cargarNumerosEnSelectSucursal(){
+  fetch('/api/numeros',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    var sel = document.getElementById('suc_phone');
+    if(!sel||!Array.isArray(d)) return;
+    sel.innerHTML='<option value="">Sin número asignado</option>'+
+      d.map(function(n){ return '<option value="'+n.phone_number_id+'">'+h(n.nombre||n.sucursal)+' — '+n.phone_number_id+'</option>'; }).join('');
+  });
+}
 function logout(){token='';location.reload();}
+
+// ============================================
+// SUCURSALES
+// ============================================
+var sucursalesData = [];
+
+function cargarSucursales(){
+  fetch('/api/sucursales',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    sucursalesData = Array.isArray(d) ? d : [];
+    renderSucursales(sucursalesData);
+  });
+}
+
+function renderSucursales(lista){
+  var el = document.getElementById('listaSucursales');
+  if(!lista.length){
+    el.innerHTML='<p style="color:#999;text-align:center;padding:20px">No hay sucursales registradas</p>';
+    return;
+  }
+  el.innerHTML = lista.map(function(s){
+    return '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:12px;padding:16px 20px;margin-bottom:12px;display:flex;align-items:center;gap:16px">'+
+      (s.logo_url ? '<img src="'+s.logo_url+'" style="width:48px;height:48px;border-radius:8px;object-fit:cover">' : '<div style="width:48px;height:48px;border-radius:8px;background:#e8f5e9;display:flex;align-items:center;justify-content:center;font-size:22px">🏢</div>')+
+      '<div style="flex:1">'+
+        '<div style="font-weight:600;font-size:15px">'+h(s.nombre)+'</div>'+
+        (s.direccion ? '<div style="font-size:12px;color:#666;margin-top:2px">📍 '+h(s.direccion)+'</div>' : '')+
+        (s.phone_number_id ? '<div style="font-size:12px;color:#1f5c4a;margin-top:2px">📱 '+h(s.phone_number_id)+'</div>' : '<div style="font-size:12px;color:#e74c3c;margin-top:2px">⚠️ Sin número WhatsApp asignado</div>')+
+      '</div>'+
+      '<div style="display:flex;gap:8px">'+
+        '<button class="btn btn-edit btn-sm" onclick="verUsuariosSucursal('+s.id+')">👥 Ver equipo</button>'+
+        '<button class="btn btn-edit btn-sm" onclick="editarSucursal('+s.id+')">Editar</button>'+
+        '<button class="btn btn-danger btn-sm" onclick="eliminarSucursal('+s.id+')">Eliminar</button>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+}
+
+function crearSucursal(){
+  var nombre = document.getElementById('suc_nombre').value.trim();
+  var direccion = document.getElementById('suc_direccion').value.trim();
+  var phone_number_id = document.getElementById('suc_phone').value;
+  var logo_url = document.getElementById('suc_logo').value.trim();
+  var msg = document.getElementById('sucMsg');
+  if(!nombre){ msg.textContent='El nombre es requerido'; msg.style.color='#e74c3c'; return; }
+  fetch('/api/sucursales',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    body:JSON.stringify({nombre:nombre,direccion:direccion,phone_number_id:phone_number_id,logo_url:logo_url})})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(d.ok){
+      msg.textContent='✓ Sucursal creada'; msg.style.color='#1f5c4a';
+      document.getElementById('suc_nombre').value='';
+      document.getElementById('suc_direccion').value='';
+      document.getElementById('suc_logo').value='';
+      document.getElementById('suc_phone').value='';
+      cargarSucursales();
+      setTimeout(function(){ msg.textContent=''; }, 3000);
+    } else { msg.textContent='Error: '+d.error; msg.style.color='#e74c3c'; }
+  });
+}
+
+function editarSucursal(id){
+  var s = sucursalesData.find(function(x){ return x.id===id; });
+  if(!s) return;
+  var nombre = prompt('Nombre de la sucursal:', s.nombre);
+  if(!nombre) return;
+  var direccion = prompt('Dirección:', s.direccion||'');
+  var logo_url = prompt('Logo URL:', s.logo_url||'');
+  fetch('/api/sucursales/'+id,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    body:JSON.stringify({nombre:nombre,direccion:direccion,phone_number_id:s.phone_number_id,logo_url:logo_url})})
+  .then(function(r){return r.json()})
+  .then(function(d){ if(d.ok) cargarSucursales(); });
+}
+
+function eliminarSucursal(id){
+  if(!confirm('¿Eliminar esta sucursal?')) return;
+  fetch('/api/sucursales/'+id,{method:'DELETE',headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){ if(d.ok) cargarSucursales(); });
+}
+
+function verUsuariosSucursal(id){
+  var s=sucursalesData.find(function(x){return x.id===id;});
+  var nombre=s?s.nombre:'Sucursal';
+  fetch('/api/sucursales/'+id+'/usuarios',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(!Array.isArray(d)||!d.length){
+      alert('No hay usuarios asignados a '+nombre+'. Asigna usuarios editando su sucursal en el tab Usuarios.');
+      return;
+    }
+    var lista = d.map(function(u){ return u.nombre+' ('+u.rol+')'; }).join(', ');
+    alert('Equipo de '+nombre+': '+lista);
+  });
+}
+
+// ============================================
+// SUCURSALES
+// ============================================
+var sucursalesData = [];
+
+function cargarSucursales(){
+  fetch('/api/sucursales',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    sucursalesData = Array.isArray(d) ? d : [];
+    renderSucursales(sucursalesData);
+  });
+}
+
+function renderSucursales(lista){
+  var el = document.getElementById('listaSucursales');
+  if(!lista.length){
+    el.innerHTML='<p style="color:#999;text-align:center;padding:20px">No hay sucursales registradas</p>';
+    return;
+  }
+  el.innerHTML = lista.map(function(s){
+    return '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:12px;padding:16px 20px;margin-bottom:12px;display:flex;align-items:center;gap:16px">'+
+      (s.logo_url ? '<img src="'+s.logo_url+'" style="width:48px;height:48px;border-radius:8px;object-fit:cover">' : '<div style="width:48px;height:48px;border-radius:8px;background:#e8f5e9;display:flex;align-items:center;justify-content:center;font-size:22px">🏢</div>')+
+      '<div style="flex:1">'+
+        '<div style="font-weight:600;font-size:15px">'+h(s.nombre)+'</div>'+
+        (s.direccion ? '<div style="font-size:12px;color:#666;margin-top:2px">📍 '+h(s.direccion)+'</div>' : '')+
+        (s.phone_number_id ? '<div style="font-size:12px;color:#1f5c4a;margin-top:2px">📱 '+h(s.phone_number_id)+'</div>' : '<div style="font-size:12px;color:#e74c3c;margin-top:2px">⚠️ Sin número WhatsApp asignado</div>')+
+      '</div>'+
+      '<div style="display:flex;gap:8px">'+
+        '<button class="btn btn-edit btn-sm" onclick="verUsuariosSucursal('+s.id+')">👥 Ver equipo</button>'+
+        '<button class="btn btn-edit btn-sm" onclick="editarSucursal('+s.id+')">Editar</button>'+
+        '<button class="btn btn-danger btn-sm" onclick="eliminarSucursal('+s.id+')">Eliminar</button>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+}
+
+function crearSucursal(){
+  var nombre = document.getElementById('suc_nombre').value.trim();
+  var direccion = document.getElementById('suc_direccion').value.trim();
+  var phone_number_id = document.getElementById('suc_phone').value;
+  var logo_url = document.getElementById('suc_logo').value.trim();
+  var msg = document.getElementById('sucMsg');
+  if(!nombre){ msg.textContent='El nombre es requerido'; msg.style.color='#e74c3c'; return; }
+  fetch('/api/sucursales',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    body:JSON.stringify({nombre:nombre,direccion:direccion,phone_number_id:phone_number_id,logo_url:logo_url})})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(d.ok){
+      msg.textContent='✓ Sucursal creada'; msg.style.color='#1f5c4a';
+      document.getElementById('suc_nombre').value='';
+      document.getElementById('suc_direccion').value='';
+      document.getElementById('suc_logo').value='';
+      document.getElementById('suc_phone').value='';
+      cargarSucursales();
+      setTimeout(function(){ msg.textContent=''; }, 3000);
+    } else { msg.textContent='Error: '+d.error; msg.style.color='#e74c3c'; }
+  });
+}
+
+function editarSucursal(id){
+  var s = sucursalesData.find(function(x){ return x.id===id; });
+  if(!s) return;
+  var nombre = prompt('Nombre de la sucursal:', s.nombre);
+  if(!nombre) return;
+  var direccion = prompt('Dirección:', s.direccion||'');
+  var logo_url = prompt('Logo URL:', s.logo_url||'');
+  fetch('/api/sucursales/'+id,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    body:JSON.stringify({nombre:nombre,direccion:direccion,phone_number_id:s.phone_number_id,logo_url:logo_url})})
+  .then(function(r){return r.json()})
+  .then(function(d){ if(d.ok) cargarSucursales(); });
+}
+
+function eliminarSucursal(id){
+  if(!confirm('¿Eliminar esta sucursal?')) return;
+  fetch('/api/sucursales/'+id,{method:'DELETE',headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){ if(d.ok) cargarSucursales(); });
+}
 
 function showTab(id,el){
   document.querySelectorAll('.section').forEach(function(s){s.classList.remove('active');});
   document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active');});
   document.getElementById('sec-'+id).classList.add('active');
   el.classList.add('active');
+  if(id==='sucursales'){cargarSucursales();cargarNumerosEnSelectSucursal();}
   if(id==='reportes')cargarReportes();
     if(id==='biblioteca')cargarBiblioteca();
     if(id==='facebook'){setTimeout(function(){fbLoadNumeros();fbLoadStats();},100);}
@@ -512,7 +766,21 @@ function showTab(id,el){
 
 function h(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):''}
 
-function cargarTodo(){cargarUsuarios();cargarPlantillas();cargarNumeros();cargarDifusiones();cargarNumerosEnSelectores();}
+function cargarTodo(){cargarUsuarios();cargarPlantillas();cargarNumeros();cargarDifusiones();cargarNumerosEnSelectores();cargarSucursalesEnSelect();}
+function cargarSucursalesEnSelect(){
+  fetch('/api/sucursales',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(!Array.isArray(d)) return;
+    var opts = '<option value="">Sin sucursal</option>'+
+      d.map(function(s){ return '<option value="'+s.nombre+'">'+s.nombre+'</option>'; }).join('');
+    var selU = document.getElementById('u_sucursal');
+    if(selU) selU.innerHTML = opts;
+    var selN = document.getElementById('num_sucursal');
+    if(selN) selN.innerHTML = '<option value="">Seleccionar sucursal</option>'+
+      d.map(function(s){ return '<option value="'+s.nombre+'">'+s.nombre+'</option>'; }).join('');
+  });
+}
 
     function cargarBiblioteca(){
       fetch('/api/biblioteca',{headers:{Authorization:'Bearer '+token}})
@@ -617,29 +885,47 @@ function cargarTodo(){cargarUsuarios();cargarPlantillas();cargarNumeros();cargar
       });
     });
 
+var todosLosUsuarios=[];
 function cargarUsuarios(){
   fetch('/api/usuarios',{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
   .then(function(d){
-    document.getElementById('tablaUsuarios').innerHTML=d.map(function(u){
-      return '<tr><td>'+h(u.nombre)+'</td><td>'+h(u.email)+'</td><td>'+h(u.sucursal)+'</td><td style="font-size:11px;color:#667781">'+h(u.numero_id)+'</td>'+
-        '<td><span class="badge badge-'+u.rol+'">'+u.rol+'</span></td>'+
-        '<td><button class="btn btn-edit btn-sm" data-uid="'+u.id+'" data-un="'+h(u.nombre)+'" data-us="'+h(u.sucursal)+'" data-num="'+h(u.numero_id)+'" data-rol="'+u.rol+'" onclick="editarUsuarioData(this)">Editar</button> '+
-        '<button class="btn btn-danger btn-sm" data-uid="'+u.id+'" data-un="'+h(u.nombre)+'" onclick="eliminarUsuarioData(this)">Eliminar</button></td></tr>';
-    }).join('');
+    todosLosUsuarios=Array.isArray(d)?d:[];
+    renderTablaUsuarios(todosLosUsuarios);
   });
+}
+function renderTablaUsuarios(lista){
+  var filtro=document.getElementById('filtroRol')?document.getElementById('filtroRol').value:'';
+  var filtrada=filtro?lista.filter(function(u){return u.rol===filtro;}):lista;
+  var colores={admin:'#005c4b',supervisor:'#1a2e3d',recepcionista:'#2a3942',tecnica:'#2e1f3d'};
+  var textColors={admin:'#00a884',supervisor:'#3d85c8',recepcionista:'#8696a0',tecnica:'#a855f7'};
+  document.getElementById('tablaUsuarios').innerHTML=filtrada.map(function(u){
+    var bg=colores[u.rol]||'#2a3942';
+    var tc=textColors[u.rol]||'#e9edef';
+    return '<tr><td>'+h(u.nombre||'—')+'</td><td>'+h(u.email||'—')+'</td><td>'+h(u.sucursal||'—')+'</td><td style="font-size:11px;color:#667781">'+h(u.numero_id||'—')+'</td>'+
+      '<td><span class="badge badge-'+u.rol+'" style="background:'+bg+';color:'+tc+';padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">'+u.rol+'</span></td>'+
+      '<td><button class="btn btn-edit btn-sm" data-uid="'+u.id+'" data-un="'+h(u.nombre)+'" data-us="'+h(u.sucursal)+'" data-num="'+h(u.numero_id)+'" data-rol="'+u.rol+'" onclick="editarUsuarioData(this)">Editar</button> '+
+      '<button class="btn btn-danger btn-sm" onclick="confirmarEliminar('+u.id+')">Eliminar</button></td></tr>';
+  }).join('')||'<tr><td colspan="6" style="text-align:center;color:#8696a0;padding:20px">Sin usuarios con este rol</td></tr>';
+}
+function confirmarEliminar(id){
+  if(confirm('¿Eliminar este usuario? Esta acción no se puede deshacer.')){
+    fetch('/api/usuarios/'+id,{method:'DELETE',headers:{Authorization:'Bearer '+token}})
+    .then(function(r){return r.json()})
+    .then(function(){cargarUsuarios();});
+  }
 }
 
 document.getElementById('btnCrearUsuario').addEventListener('click',function(){
   var data={nombre:document.getElementById('u_nombre').value,email:document.getElementById('u_email').value,
     password:document.getElementById('u_pass').value,sucursal:document.getElementById('u_sucursal').value,
-    numero_id:document.getElementById('u_numero').value,rol:document.getElementById('u_rol').value};
+    numero_id:document.getElementById('u_numero').value,rol:document.getElementById('u_rol').value,telefono:document.getElementById('u_telefono').value};
   fetch('/api/usuarios',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(data)})
   .then(function(r){return r.json()})
   .then(function(d){
     var msg=document.getElementById('msgUsuario');
     if(d.id){msg.textContent='Usuario creado correctamente';msg.style.color='#2e7d32';cargarUsuarios();
-      ['u_nombre','u_email','u_pass','u_sucursal','u_numero'].forEach(function(id){document.getElementById(id).value='';});
+      ['u_nombre','u_email','u_pass','u_sucursal','u_numero','u_telefono'].forEach(function(id){document.getElementById(id).value='';});
     } else {msg.textContent=d.error||'Error';msg.style.color='red';}
   });
 });
@@ -1446,7 +1732,86 @@ function fbLoadLogs(filtroNumero) {
       document.getElementById('fb-logs-body').innerHTML = html;
     });
 }
+function abrirBibliotecaLogo(){
+  document.getElementById('modalBibliotecaLogo').style.display='flex';
+  fetch('/api/biblioteca',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    var imgs = Array.isArray(d)?d:(d.imagenes||[]);
+    var grid = document.getElementById('bibliotecaLogoGrid');
+    if(!imgs.length){ grid.innerHTML='<div style="text-align:center;color:#999;padding:40px;grid-column:1/-1">No hay imágenes en la biblioteca</div>'; return; }
+    grid.innerHTML = imgs.map(function(img){
+      var src = img.thumbnail||img.url;
+      return '<div onclick="seleccionarLogo(this)" data-url="'+img.url+'" style="cursor:pointer;border:2px solid transparent;border-radius:8px;overflow:hidden">'+
+        '<img src="'+src+'" style="width:100%;height:100px;object-fit:cover;display:block">'+
+        '<div style="font-size:11px;padding:4px 6px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+( img.nombre||'Sin nombre')+'</div>'+
+      '</div>';
+    }).join('');
+  });
+}
+
+function seleccionarLogo(el){
+  var url = el.dataset ? el.dataset.url : el;
+  document.getElementById('suc_logo').value = url;
+  document.getElementById('suc_logo_preview').innerHTML = '<img src="'+url+'" style="width:48px;height:48px;object-fit:cover;border-radius:8px">';
+  cerrarBibliotecaLogo();
+}
+
+function cerrarBibliotecaLogo(){
+  document.getElementById('modalBibliotecaLogo').style.display='none';
+}
+
+function agregarNumeroSucursal(){
+  var sucursal = document.getElementById('num_sucursal').value;
+  var nombre = document.getElementById('num_nombre').value.trim();
+  var phone_number_id = document.getElementById('num_phone_id').value.trim();
+  var token_wa = document.getElementById('num_token').value.trim();
+  var display = document.getElementById('num_display').value.trim();
+  var msg = document.getElementById('numSucMsg');
+
+  if(!sucursal||!nombre||!phone_number_id||!token_wa){
+    msg.textContent='Completa todos los campos requeridos';
+    msg.style.color='#e74c3c'; return;
+  }
+
+  fetch('/api/numeros/nuevo',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    body:JSON.stringify({nombre:display||nombre, sucursal:sucursal, phone_number_id:phone_number_id, token:token_wa})})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(d.ok||d.id){
+      // También actualizar phone_number_id en sucursal si no tiene
+      var suc = sucursalesData.find(function(s){ return s.nombre===sucursal; });
+      if(suc && !suc.phone_number_id){
+        fetch('/api/sucursales/'+suc.id,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+          body:JSON.stringify({nombre:suc.nombre,direccion:suc.direccion,phone_number_id:phone_number_id,logo_url:suc.logo_url})});
+      }
+      msg.textContent='✓ Número agregado correctamente';
+      msg.style.color='#1f5c4a';
+      ['num_nombre','num_phone_id','num_token','num_display'].forEach(function(id){ document.getElementById(id).value=''; });
+      document.getElementById('num_sucursal').value='';
+      cargarSucursales();
+      cargarNumeros();
+      setTimeout(function(){ msg.textContent=''; }, 3000);
+    } else {
+      msg.textContent='Error: '+(d.error||'No se pudo agregar');
+      msg.style.color='#e74c3c';
+    }
+  });
+}
 </script>
+
+<!-- Modal Biblioteca Logo -->
+<div id="modalBibliotecaLogo" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:16px;padding:24px;width:700px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h3 style="font-size:16px">📷 Seleccionar logo de biblioteca</h3>
+      <button onclick="cerrarBibliotecaLogo()" style="background:none;border:none;font-size:20px;cursor:pointer">✕</button>
+    </div>
+    <div id="bibliotecaLogoGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px;overflow-y:auto;flex:1;padding:4px">
+      <div style="text-align:center;color:#999;padding:40px;grid-column:1/-1">Cargando imágenes...</div>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>

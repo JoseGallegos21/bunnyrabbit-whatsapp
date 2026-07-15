@@ -23,19 +23,37 @@ git rev-parse HEAD > "$BACKUP_DIR/.version-anterior"
 echo "    anterior: $(git log -1 --format='%h %s')"
 
 echo "==> Trayendo '$REF' desde GitHub"
-git fetch --tags --prune origin
+# --force: si una etiqueta se movio en el remoto, actualizarla en vez de abortar
+git fetch --tags --force --prune origin
 
-if ! git rev-parse -q --verify "${REF}^{commit}" >/dev/null 2>&1; then
+# Resolver a que commit exacto corresponde: rama remota, etiqueta o commit
+if git rev-parse -q --verify "refs/remotes/origin/$REF^{commit}" >/dev/null 2>&1; then
+  TARGET=$(git rev-parse "refs/remotes/origin/$REF^{commit}")
+  ES_RAMA=1
+elif git rev-parse -q --verify "${REF}^{commit}" >/dev/null 2>&1; then
+  TARGET=$(git rev-parse "${REF}^{commit}")
+  ES_RAMA=0
+else
   echo "!! La version '$REF' no existe."
   echo "   Ramas y etiquetas disponibles:"
-  { git branch -a --format='%(refname:short)'; git tag -l; } | sed "s/^/     /"
+  { git branch -r --format='%(refname:short)'; git tag -l; } | sed "s/^/     /"
   exit 1
 fi
 
-git checkout -q "$REF"
-# Si es una rama, avanzar al ultimo commit remoto
-if git show-ref -q --verify "refs/heads/$REF" 2>/dev/null; then
-  git merge -q --ff-only "origin/$REF" || echo "    (sin cambios nuevos)"
+# Situarse exactamente en ese commit. --force descarta cambios locales en
+# archivos versionados (produccion no debe editarse a mano: se despliega).
+if [ "$ES_RAMA" = "1" ]; then
+  git checkout -q --force -B "$REF" "$TARGET"
+else
+  git checkout -q --force --detach "$TARGET"
+fi
+
+# Comprobar que de verdad estamos donde queriamos: si el checkout no hizo lo
+# esperado, abortamos en vez de reiniciar con una version equivocada.
+ACTUAL=$(git rev-parse HEAD)
+if [ "$ACTUAL" != "$TARGET" ]; then
+  echo "!! No se pudo situar en $TARGET (HEAD esta en $ACTUAL). Se aborta sin tocar la app."
+  exit 1
 fi
 echo "    nueva:    $(git log -1 --format='%h %s')"
 

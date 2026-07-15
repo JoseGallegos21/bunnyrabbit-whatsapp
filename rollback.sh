@@ -23,7 +23,8 @@ if [ -z "$DEST" ]; then
 fi
 
 # Traer etiquetas por si la version se creo despues del ultimo fetch
-git fetch -q --tags origin 2>/dev/null || true
+# --force para que una etiqueta movida no aborte el rollback
+git fetch -q --tags --force origin 2>/dev/null || true
 
 # Validar la referencia ANTES de tocar la app
 if ! git rev-parse -q --verify "${DEST}^{commit}" >/dev/null 2>&1; then

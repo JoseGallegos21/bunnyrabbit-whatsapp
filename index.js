@@ -53,6 +53,18 @@ db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS facebook_capi_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, contacto_nombre TEXT, contacto_telefono TEXT, evento_tipo TEXT, etapa TEXT, event_id TEXT, status_code INTEGER, respuesta TEXT, numero_id TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
   db.run(`CREATE TABLE IF NOT EXISTS google_calendar_config (id INTEGER PRIMARY KEY AUTOINCREMENT, sucursal TEXT UNIQUE, calendar_id TEXT, access_token TEXT, refresh_token TEXT, activo INTEGER DEFAULT 1)`);
 
+  // Tarifas de Meta por pais y categoria (USD por mensaje entregado).
+  // Editables: Meta actualiza su tarifario y dejarlas fijas seria garantizar numeros viejos.
+  db.run(`CREATE TABLE IF NOT EXISTS tarifas_meta (id INTEGER PRIMARY KEY AUTOINCREMENT, pais TEXT, categoria TEXT, precio_usd REAL, actualizado DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(pais, categoria))`);
+  db.run(`CREATE TABLE IF NOT EXISTS configuracion (clave TEXT PRIMARY KEY, valor TEXT)`);
+  // Semillas. Solo MARKETING trae precio: es el unico que pude verificar contra el
+  // tarifario de Meta. Los demas quedan sin precio a proposito, para que se
+  // configuren desde el panel en vez de inventar una cifra que salga mal en los reportes.
+  db.run(`INSERT OR IGNORE INTO tarifas_meta (pais, categoria, precio_usd) VALUES ('MX','MARKETING',0.0305)`);
+  db.run(`INSERT OR IGNORE INTO tarifas_meta (pais, categoria, precio_usd) VALUES ('MX','UTILITY',NULL)`);
+  db.run(`INSERT OR IGNORE INTO tarifas_meta (pais, categoria, precio_usd) VALUES ('MX','AUTHENTICATION',NULL)`);
+  db.run(`INSERT OR IGNORE INTO configuracion (clave, valor) VALUES ('tipo_cambio_usd_mxn','')`);
+
   // Auto-reparar columnas faltantes en bases creadas con esquemas antiguos (idempotente)
   const ensureColumns = (tabla, columnas) => {
     db.all(`PRAGMA table_info(${tabla})`, [], (err, cols) => {
@@ -67,7 +79,13 @@ db.serialize(() => {
   };
   ensureColumns('usuarios', [['telefono', 'TEXT']]);
   ensureColumns('plantillas', [['idioma', "TEXT DEFAULT 'es'"]]);
-  ensureColumns('mensajes', [['origen', 'TEXT']]);
+  ensureColumns('mensajes', [
+    ['origen', 'TEXT'],
+    ['tipo', 'TEXT'],            // texto | plantilla
+    ['categoria', 'TEXT'],       // MARKETING | UTILITY | AUTHENTICATION
+    ['facturable', 'INTEGER DEFAULT 0'],
+    ['costo_usd', 'REAL DEFAULT 0']
+  ]);
   ensureColumns('contactos', [['origen', 'TEXT']]);
   ensureColumns('etiquetas', [['usuario_id', 'INTEGER']]);
   ensureColumns('numeros', [
@@ -76,6 +94,65 @@ db.serialize(() => {
     ['capi_test_code', 'TEXT'], ['capi_activo', 'INTEGER DEFAULT 0'], ['capi_triggers', "TEXT DEFAULT '[]'"]
   ]);
 });
+
+// ==================== COSTOS DE META ====================
+// Modelo por mensaje desde el 1-jul-2025:
+//   MARKETING          -> siempre se cobra
+//   UTILITY / AUTH     -> gratis dentro de la ventana de servicio, se cobran fuera
+//   texto y servicio   -> gratis (fuera de ventana Meta ni siquiera los permite)
+// Documentacion: developers.facebook.com/documentation/business-messaging/whatsapp/pricing
+
+function paisDeTelefono(tel) {
+  const t = String(tel || '').replace(/\D/g, '');
+  if (t.startsWith('52')) return 'MX';
+  if (t.startsWith('1')) return 'US';
+  return 'OTRO';
+}
+
+// Ventana de servicio: 24h desde el ultimo mensaje que envio el cliente
+function ventanaAbierta(contacto) {
+  return new Promise((resolve) => {
+    db.get(`SELECT MAX(timestamp) t FROM mensajes WHERE contacto=? AND direccion='entrante'`, [contacto], (e, r) => {
+      if (!r || !r.t) return resolve(false);
+      const ultimo = new Date(String(r.t).replace(' ', 'T') + 'Z').getTime(); // SQLite guarda UTC
+      resolve(!isNaN(ultimo) && (Date.now() - ultimo) < 24 * 3600 * 1000);
+    });
+  });
+}
+
+function tarifa(pais, categoria) {
+  return new Promise((resolve) => {
+    db.get('SELECT precio_usd FROM tarifas_meta WHERE pais=? AND categoria=?', [pais, categoria], (e, r) => {
+      resolve(r && r.precio_usd != null ? r.precio_usd : null);
+    });
+  });
+}
+
+// Calcula si un envio se cobra y cuanto. Devuelve tarifa_configurada=false cuando
+// no hay precio cargado, para no reportar 0 y hacer creer que fue gratis.
+async function calcularCosto(telefono, categoria) {
+  const cat = String(categoria || '').toUpperCase();
+  const pais = paisDeTelefono(telefono);
+  let facturable = false;
+  if (cat === 'MARKETING') facturable = true;
+  else if (cat === 'UTILITY' || cat === 'AUTHENTICATION') facturable = !(await ventanaAbierta(telefono));
+
+  if (!facturable) return { facturable: 0, costo_usd: 0, pais, categoria: cat || null, tarifa_configurada: true };
+  const precio = await tarifa(pais, cat);
+  return {
+    facturable: 1,
+    costo_usd: precio != null ? precio : 0,
+    pais,
+    categoria: cat,
+    tarifa_configurada: precio != null
+  };
+}
+
+function configGet(clave) {
+  return new Promise((resolve) => {
+    db.get('SELECT valor FROM configuracion WHERE clave=?', [clave], (e, r) => resolve(r ? r.valor : null));
+  });
+}
 
 // Resuelve el número desde el que se envía.
 // - recepcionista/técnica: siempre el suyo
@@ -678,6 +755,112 @@ app.get('/api/reportes/etapas', auth, (req, res) => {
   db.all('SELECT etapa, COUNT(*) as total FROM contactos GROUP BY etapa', [], (err, rows) => res.json(rows || []));
 });
 
+// ==================== REPORTES FINANCIEROS ====================
+
+// Tarifas y tipo de cambio
+app.get('/api/tarifas', auth, requireRole('admin', 'supervisor'), async (req, res) => {
+  const tarifas = await new Promise(r => db.all('SELECT pais, categoria, precio_usd, actualizado FROM tarifas_meta ORDER BY pais, categoria', [], (e, x) => r(x || [])));
+  res.json({
+    tarifas,
+    tipo_cambio_usd_mxn: await configGet('tipo_cambio_usd_mxn'),
+    sin_configurar: tarifas.filter(t => t.precio_usd == null).map(t => t.pais + '/' + t.categoria)
+  });
+});
+
+app.put('/api/tarifas', auth, requireRole('admin'), async (req, res) => {
+  const { tarifas, tipo_cambio_usd_mxn } = req.body;
+  try {
+    for (const t of (tarifas || [])) {
+      await new Promise((resolve, reject) => db.run(
+        `INSERT INTO tarifas_meta (pais, categoria, precio_usd, actualizado) VALUES (?,?,?,CURRENT_TIMESTAMP)
+         ON CONFLICT(pais, categoria) DO UPDATE SET precio_usd=excluded.precio_usd, actualizado=CURRENT_TIMESTAMP`,
+        [t.pais, String(t.categoria).toUpperCase(), t.precio_usd === '' || t.precio_usd == null ? null : Number(t.precio_usd)],
+        e => e ? reject(e) : resolve()));
+    }
+    if (tipo_cambio_usd_mxn !== undefined) {
+      await new Promise(resolve => db.run(
+        `INSERT INTO configuracion (clave, valor) VALUES ('tipo_cambio_usd_mxn', ?)
+         ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor`, [String(tipo_cambio_usd_mxn)], () => resolve()));
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Estimador: cuanto costaria una difusion ANTES de lanzarla
+app.post('/api/difusion/estimar', auth, requireRole('admin', 'supervisor'), async (req, res) => {
+  const { filtro_etapa, plantilla_id } = req.body;
+  try {
+    const plantilla = plantilla_id
+      ? await new Promise(r => db.get('SELECT nombre, categoria, estado_meta FROM plantillas WHERE id=?', [plantilla_id], (e, x) => r(x)))
+      : null;
+
+    let q = 'SELECT DISTINCT telefono FROM contactos WHERE 1=1';
+    const p = [];
+    if (filtro_etapa) { q += ' AND etapa=?'; p.push(filtro_etapa); }
+    const contactos = await new Promise(r => db.all(q, p, (e, x) => r(x || [])));
+
+    const categoria = plantilla ? String(plantilla.categoria || '').toUpperCase() : 'MARKETING';
+    let facturables = 0, total_usd = 0, sin_tarifa = 0;
+    const porPais = {};
+    for (const c of contactos) {
+      const costo = await calcularCosto(c.telefono, categoria);
+      porPais[costo.pais] = (porPais[costo.pais] || 0) + 1;
+      if (costo.facturable) { facturables++; total_usd += costo.costo_usd; }
+      if (costo.facturable && !costo.tarifa_configurada) sin_tarifa++;
+    }
+
+    const tc = parseFloat(await configGet('tipo_cambio_usd_mxn'));
+    const avisos = [];
+    if (plantilla && plantilla.estado_meta !== 'aprobada') avisos.push(`La plantilla "${plantilla.nombre}" no esta aprobada por Meta (${plantilla.estado_meta}); Meta rechazara el envio.`);
+    if (sin_tarifa) avisos.push(`${sin_tarifa} envio(s) sin tarifa configurada: el costo real sera mayor que el estimado.`);
+    if (!plantilla) avisos.push('Sin plantilla: la difusion manda texto y Meta solo lo permite dentro de la ventana de 24h.');
+
+    res.json({
+      ok: true,
+      total_contactos: contactos.length,
+      facturables,
+      gratis: contactos.length - facturables,
+      categoria,
+      costo_usd: Number(total_usd.toFixed(4)),
+      costo_mxn: tc ? Number((total_usd * tc).toFixed(2)) : null,
+      tipo_cambio: tc || null,
+      por_pais: porPais,
+      avisos
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Gasto historico por numero / sucursal
+app.get('/api/reportes/gasto', auth, requireRole('admin', 'supervisor'), async (req, res) => {
+  const dias = parseInt(req.query.dias) || 30;
+  try {
+    const filas = await new Promise(r => db.all(
+      `SELECT m.numero_id,
+              COALESCE(s.nombre, n.sucursal, 'Sin sucursal') sucursal,
+              COALESCE(m.categoria,'-') categoria,
+              COUNT(*) enviados,
+              SUM(m.facturable) facturables,
+              ROUND(SUM(m.costo_usd), 4) costo_usd
+       FROM mensajes m
+       LEFT JOIN numeros n ON n.phone_number_id = m.numero_id
+       LEFT JOIN sucursales s ON s.phone_number_id = m.numero_id
+       WHERE m.direccion='saliente' AND m.timestamp >= datetime('now', '-' || ? || ' days')
+       GROUP BY m.numero_id, categoria
+       ORDER BY costo_usd DESC`, [dias], (e, x) => r(x || [])));
+
+    const tc = parseFloat(await configGet('tipo_cambio_usd_mxn'));
+    const total_usd = filas.reduce((a, f) => a + (f.costo_usd || 0), 0);
+    res.json({
+      ok: true,
+      dias,
+      filas: filas.map(f => ({ ...f, costo_mxn: tc ? Number((f.costo_usd * tc).toFixed(2)) : null })),
+      total_usd: Number(total_usd.toFixed(4)),
+      total_mxn: tc ? Number((total_usd * tc).toFixed(2)) : null,
+      tipo_cambio: tc || null
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // app.listen moved to end
 
 // ==================== FACEBOOK CONVERSIONS API ====================
@@ -896,9 +1079,11 @@ app.post('/api/enviar-plantilla', auth, async (req, res) => {
         },
         { headers: { Authorization: 'Bearer ' + num.token } }
       );
-      db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion) VALUES (?,?,?,?)',
-        [num.phone_number_id, telefono, '[Plantilla: ' + plantilla.nombre + ']', 'saliente']);
-      res.json({ ok: true });
+      // Registrar el coste: es lo unico que Meta factura de verdad
+      const c = await calcularCosto(telefono, plantilla.categoria);
+      db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, tipo, categoria, facturable, costo_usd) VALUES (?,?,?,?,?,?,?,?)',
+        [num.phone_number_id, telefono, '[Plantilla: ' + plantilla.nombre + ']', 'saliente', 'plantilla', c.categoria, c.facturable, c.costo_usd]);
+      res.json({ ok: true, costo_usd: c.costo_usd, facturable: !!c.facturable });
     } catch(e) {
       const msg = e.response?.data?.error?.message || e.message;
       res.json({ ok: false, error: msg });
@@ -910,11 +1095,16 @@ app.post('/api/enviar-plantilla', auth, async (req, res) => {
 // ============================================
 // MIDDLEWARE DE ROLES
 // ============================================
-const requireRole = (...roles) => (req, res, next) => {
-  if (!req.user) return res.status(401).json({ error: 'No autorizado' });
-  if (!roles.includes(req.user.rol)) return res.status(403).json({ error: 'Sin permiso para esta acción' });
-  next();
-};
+// Declarada como funcion (no como const) a proposito: asi se eleva y puede usarse
+// en rutas definidas mas arriba en el archivo. Con `const` fallaba al arrancar con
+// "Cannot access 'requireRole' before initialization".
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: 'No autorizado' });
+    if (!roles.includes(req.user.rol)) return res.status(403).json({ error: 'Sin permiso para esta acción' });
+    next();
+  };
+}
 
 // ============================================
 // ENDPOINTS DE USUARIOS / ROLES

@@ -4,10 +4,12 @@
 # Si algo falla, avisa para ejecutar ./rollback.sh
 set -euo pipefail
 
-APP_DIR=/root/bunnyrabbit-whatsapp
-BACKUP_DIR=/root/backups-bunnyrabbit
-PM2_NAME=bunnyrabbit
-PUERTO=3000
+# Por defecto actua sobre produccion. Para probar en staging:
+#   APP_DIR=/root/bunnyrabbit-staging PM2_NAME=bunnyrabbit-staging PUERTO=3001 ./deploy.sh dev
+APP_DIR="${APP_DIR:-/root/bunnyrabbit-whatsapp}"
+BACKUP_DIR="${BACKUP_DIR:-/root/backups-bunnyrabbit}"
+PM2_NAME="${PM2_NAME:-bunnyrabbit}"
+PUERTO="${PUERTO:-3000}"
 REF="${1:-main}"
 
 cd "$APP_DIR"
@@ -22,6 +24,14 @@ echo "    anterior: $(git log -1 --format='%h %s')"
 
 echo "==> Trayendo '$REF' desde GitHub"
 git fetch --tags --prune origin
+
+if ! git rev-parse -q --verify "${REF}^{commit}" >/dev/null 2>&1; then
+  echo "!! La version '$REF' no existe."
+  echo "   Ramas y etiquetas disponibles:"
+  { git branch -a --format='%(refname:short)'; git tag -l; } | sed "s/^/     /"
+  exit 1
+fi
+
 git checkout -q "$REF"
 # Si es una rama, avanzar al ultimo commit remoto
 if git show-ref -q --verify "refs/heads/$REF" 2>/dev/null; then

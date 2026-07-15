@@ -3,10 +3,12 @@
 # Sin argumento vuelve a la version que habia antes del ultimo ./deploy.sh
 set -euo pipefail
 
-APP_DIR=/root/bunnyrabbit-whatsapp
-BACKUP_DIR=/root/backups-bunnyrabbit
-PM2_NAME=bunnyrabbit
-PUERTO=3000
+# Por defecto actua sobre produccion. Para probar en staging:
+#   APP_DIR=/root/bunnyrabbit-staging PM2_NAME=bunnyrabbit-staging PUERTO=3001 ./rollback.sh <ref>
+APP_DIR="${APP_DIR:-/root/bunnyrabbit-whatsapp}"
+BACKUP_DIR="${BACKUP_DIR:-/root/backups-bunnyrabbit}"
+PM2_NAME="${PM2_NAME:-bunnyrabbit}"
+PUERTO="${PUERTO:-3000}"
 
 cd "$APP_DIR"
 
@@ -18,6 +20,19 @@ if [ -z "$DEST" ]; then
     exit 1
   fi
   DEST=$(cat "$BACKUP_DIR/.version-anterior")
+fi
+
+# Traer etiquetas por si la version se creo despues del ultimo fetch
+git fetch -q --tags origin 2>/dev/null || true
+
+# Validar la referencia ANTES de tocar la app
+if ! git rev-parse -q --verify "${DEST}^{commit}" >/dev/null 2>&1; then
+  echo "!! La version '$DEST' no existe en este repo."
+  echo "   Versiones disponibles:"
+  git tag -l | sed "s/^/     /" | tail -10
+  echo "   Ultimos commits:"
+  git log --oneline -5 | sed "s/^/     /"
+  exit 1
 fi
 
 echo "==> Volviendo a: $DEST"

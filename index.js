@@ -1026,19 +1026,63 @@ app.get('/api/citas', auth, (req, res) => {
 });
 
 // Crear cita
-app.post('/api/citas', auth, requireRole('admin', 'supervisor', 'recepcionista'), (req, res) => {
+app.post('/api/citas', auth, requireRole('admin', 'supervisor', 'recepcionista'), async (req, res) => {
   const { contacto_id, tecnica_id, fecha, hora_inicio, hora_fin, servicio, notas, numero_id } = req.body;
   if (!fecha || !hora_inicio) return res.status(400).json({ error: 'Fecha y hora son requeridas' });
-  const sucursal = req.body.sucursal || req.user.sucursal;
+  // Si no la mandan, deducir la sucursal del numero de WhatsApp del chat
+  const sucursal = req.body.sucursal || await resolverSucursal(numero_id, req.user.sucursal);
   db.run(
     `INSERT INTO citas (contacto_id, tecnica_id, recepcionista_id, numero_id, sucursal, fecha, hora_inicio, hora_fin, servicio, notas, estado)
      VALUES (?,?,?,?,?,?,?,?,?,?,'pendiente')`,
     [contacto_id || null, tecnica_id || null, req.user.id, numero_id || null, sucursal, fecha, hora_inicio, hora_fin || null, servicio || null, notas || null],
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
-      res.json({ ok: true, id: this.lastID });
+      const citaId = this.lastID;
+      // Avisar por WhatsApp a la tecnica (no bloquea la respuesta ni la tumba si falla)
+      if (tecnica_id) {
+        notificarTecnicaCitaNueva(citaId).catch(e => console.error('[NOTIF] cita', citaId, e.message));
+      }
+      res.json({ ok: true, id: citaId, sucursal });
     }
   );
+});
+
+// Resuelve a que sucursal pertenece un numero de WhatsApp.
+// La sucursal la define el numero al que escribio el cliente, no quien atiende.
+function resolverSucursal(numero_id, fallback) {
+  return new Promise((resolve) => {
+    if (!numero_id) return resolve(fallback || null);
+    db.get('SELECT nombre FROM sucursales WHERE phone_number_id=? AND activo=1', [numero_id], (e, suc) => {
+      if (suc && suc.nombre) return resolve(suc.nombre);
+      db.get('SELECT sucursal FROM numeros WHERE phone_number_id=?', [numero_id], (e2, num) => {
+        resolve((num && num.sucursal) || fallback || null);
+      });
+    });
+  });
+}
+
+// Contexto para agendar desde un chat: sucursal del chat y tecnicas de esa sucursal
+app.get('/api/agenda/contexto', auth, async (req, res) => {
+  const telefono = req.query.telefono;
+  if (!telefono) return res.status(400).json({ error: 'Falta el telefono' });
+  try {
+    const contacto = await new Promise((resolve) =>
+      db.get('SELECT id, nombre, numero_id FROM contactos WHERE telefono=?', [telefono], (e, row) => resolve(row)));
+    const numero_id = (contacto && contacto.numero_id) || req.user.numero_id || null;
+    const sucursal = await resolverSucursal(numero_id, req.user.sucursal);
+    const tecnicas = await new Promise((resolve) =>
+      db.all(`SELECT id, nombre FROM usuarios WHERE rol='tecnica' AND sucursal=? ORDER BY nombre`,
+        [sucursal], (e, rows) => resolve(rows || [])));
+    res.json({
+      contacto_id: contacto ? contacto.id : null,
+      contacto_nombre: contacto ? contacto.nombre : null,
+      numero_id,
+      sucursal,
+      tecnicas
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Actualizar cita

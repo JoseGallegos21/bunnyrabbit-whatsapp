@@ -1326,6 +1326,7 @@ function abrirChat(tel){
     header.innerHTML=
       '<div class="chat-header-avatar">'+tel.slice(-2)+'</div>'+
       '<div class="chat-header-info"><h3>'+(p.nombre||'+'+tel)+'</h3><p>+'+tel+'</p></div>'+
+      '<button class="btn-perfil" id="btnAgendarCita" style="margin-right:8px"><i class="bx bx-calendar-plus"></i> Agendar</button>'+
       '<button class="btn-perfil" id="btnAbrirPerfil">Perfil</button>';
     var mensajesDiv=document.getElementById('mensajesArea');
     mensajesDiv.style.display='flex';
@@ -1350,6 +1351,7 @@ function abrirChat(tel){
       '<input type="text" id="msgInput" placeholder="Escribe un mensaje..." style="flex:1;padding:9px 14px;border:none;border-radius:8px;background:#2a3942;font-size:13px;outline:none;color:#e9edef">'+
       '<button id="btnEnviar" style="flex-shrink:0;background:#00a884;color:white;border:none;border-radius:50%;width:40px;height:40px;cursor:pointer;display:flex;align-items:center;justify-content:center"><i class="bx bx-send" style="font-size:16px"></i></button>';
     document.getElementById('btnAbrirPerfil').addEventListener('click',function(){abrirPerfil(tel);});
+    document.getElementById('btnAgendarCita').addEventListener('click',function(){abrirAgendarCita(tel);});
     iniciarAtajoRespuestas();
     document.getElementById('msgInput').addEventListener('keypress',function(e){if(e.key==='Enter')enviar();});
     document.getElementById('btnEnviar').addEventListener('click',function(){enviar();});
@@ -1709,6 +1711,114 @@ function guardarPerfil(tel){
 }
 </script>
 <script>
+// ===== AGENDAR CITA DESDE EL CHAT =====
+// La sucursal se deduce del numero de WhatsApp al que escribio el cliente,
+// y solo se ofrecen las tecnicas de esa sucursal.
+var _agEstilo = 'width:100%;padding:8px 10px;background:#2a3942;border:none;border-radius:6px;color:#e9edef;font-size:13px;outline:none;box-sizing:border-box';
+var _agLabel = 'display:block;color:#8696a0;font-size:12px;margin:10px 0 4px';
+
+function abrirAgendarCita(tel){
+  var previo = document.getElementById('agendarModal');
+  if(previo) previo.remove();
+  var modal = document.createElement('div');
+  modal.id = 'agendarModal';
+  modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999';
+  modal.innerHTML =
+    '<div style="background:#111b21;border-radius:12px;width:420px;max-width:94vw;max-height:90vh;overflow-y:auto;padding:18px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'+
+        '<span style="color:#e9edef;font-size:16px;font-weight:500">Agendar cita</span>'+
+        '<button id="ag_cerrar" style="background:none;border:none;color:#8696a0;font-size:22px;cursor:pointer;line-height:1">&times;</button>'+
+      '</div>'+
+      '<div id="ag_body" style="color:#8696a0;font-size:13px;text-align:center;padding:24px">Cargando...</div>'+
+    '</div>';
+  document.body.appendChild(modal);
+  document.getElementById('ag_cerrar').onclick = function(){ modal.remove(); };
+  modal.onclick = function(e){ if(e.target === modal) modal.remove(); };
+
+  fetch('/api/agenda/contexto?telefono='+encodeURIComponent(tel), {headers:{Authorization:'Bearer '+token}})
+  .then(function(r){ return r.json(); })
+  .then(function(ctx){
+    var hoy = new Date().toISOString().split('T')[0];
+    var body = document.getElementById('ag_body');
+    if(!body) return;
+    var avisos = '';
+    if(!ctx.sucursal) avisos += '<div style="background:#3a2a12;color:#f0b429;padding:8px 10px;border-radius:6px;font-size:12px;margin-bottom:10px">Este chat no tiene sucursal asignada. Revisa el numero en el panel de admin.</div>';
+    if(!ctx.tecnicas.length) avisos += '<div style="background:#3a2a12;color:#f0b429;padding:8px 10px;border-radius:6px;font-size:12px;margin-bottom:10px">No hay tecnicas dadas de alta en '+(ctx.sucursal||'esta sucursal')+'. Puedes agendar sin asignar y hacerlo despues.</div>';
+
+    body.style.textAlign = 'left';
+    body.style.padding = '0';
+    body.innerHTML = avisos +
+      '<div style="color:#e9edef;font-size:13px;background:#0b141a;border-radius:8px;padding:10px;margin-bottom:4px">'+
+        '<div><span style="color:#8696a0">Cliente:</span> '+(ctx.contacto_nombre || ('+'+tel))+'</div>'+
+        '<div style="margin-top:4px"><span style="color:#8696a0">Sucursal:</span> '+(ctx.sucursal || 'sin asignar')+'</div>'+
+      '</div>'+
+      '<label style="'+_agLabel+'">Tecnica</label>'+
+      '<select id="ag_tecnica" style="'+_agStyleSel()+'">'+
+        '<option value="">Sin asignar</option>'+
+        ctx.tecnicas.map(function(t){ return '<option value="'+t.id+'">'+t.nombre+'</option>'; }).join('')+
+      '</select>'+
+      '<div style="display:flex;gap:8px">'+
+        '<div style="flex:1"><label style="'+_agLabel+'">Fecha</label><input type="date" id="ag_fecha" value="'+hoy+'" min="'+hoy+'" style="'+_agEstilo+'"></div>'+
+        '<div style="width:100px"><label style="'+_agLabel+'">Hora</label><input type="time" id="ag_hora" value="10:00" style="'+_agEstilo+'"></div>'+
+        '<div style="width:100px"><label style="'+_agLabel+'">Fin</label><input type="time" id="ag_hora_fin" style="'+_agEstilo+'"></div>'+
+      '</div>'+
+      '<label style="'+_agLabel+'">Servicio</label>'+
+      '<input type="text" id="ag_servicio" placeholder="Ej: Manicure" style="'+_agEstilo+'">'+
+      '<label style="'+_agLabel+'">Notas</label>'+
+      '<textarea id="ag_notas" rows="2" placeholder="Opcional" style="'+_agEstilo+';resize:vertical"></textarea>'+
+      '<button id="ag_guardar" style="width:100%;margin-top:14px;padding:10px;background:#00a884;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">Agendar</button>'+
+      '<p id="ag_msg" style="font-size:12px;text-align:center;margin:8px 0 0;min-height:16px"></p>';
+
+    document.getElementById('ag_guardar').onclick = function(){
+      guardarCitaChat(tel, ctx, modal);
+    };
+  })
+  .catch(function(){
+    var b = document.getElementById('ag_body');
+    if(b) b.innerHTML = '<div style="color:#f15c6d;padding:20px;text-align:center">Error cargando los datos de la sucursal</div>';
+  });
+}
+
+function _agStyleSel(){ return _agEstilo + ';cursor:pointer'; }
+
+function guardarCitaChat(tel, ctx, modal){
+  var msg = document.getElementById('ag_msg');
+  var btn = document.getElementById('ag_guardar');
+  var fecha = document.getElementById('ag_fecha').value;
+  var hora = document.getElementById('ag_hora').value;
+  if(!fecha || !hora){ msg.textContent='Fecha y hora son obligatorias'; msg.style.color='#f15c6d'; return; }
+
+  var datos = {
+    contacto_id: ctx.contacto_id,
+    tecnica_id: document.getElementById('ag_tecnica').value || null,
+    fecha: fecha,
+    hora_inicio: hora,
+    hora_fin: document.getElementById('ag_hora_fin').value || null,
+    servicio: document.getElementById('ag_servicio').value || null,
+    notas: document.getElementById('ag_notas').value || null,
+    numero_id: ctx.numero_id,
+    sucursal: ctx.sucursal || null
+  };
+  btn.disabled = true;
+  msg.textContent = 'Agendando...'; msg.style.color='#f0b429';
+
+  fetch('/api/citas', {method:'POST', headers:{'Content-Type':'application/json', Authorization:'Bearer '+token}, body:JSON.stringify(datos)})
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    if(d.ok){
+      msg.textContent = 'Cita agendada'; msg.style.color='#00a884';
+      setTimeout(function(){ modal.remove(); }, 900);
+    } else {
+      btn.disabled = false;
+      msg.textContent = d.error || 'No se pudo agendar'; msg.style.color='#f15c6d';
+    }
+  })
+  .catch(function(){
+    btn.disabled = false;
+    msg.textContent = 'Error de conexion'; msg.style.color='#f15c6d';
+  });
+}
+
 function abrirPlantillasChat() {
   var m = document.getElementById('attachMenu');
   if(m) m.classList.remove('open');

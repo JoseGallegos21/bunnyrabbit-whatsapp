@@ -12,7 +12,9 @@ const path = require('path');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// Guardar el cuerpo crudo: la firma de Meta se calcula sobre los bytes exactos
+// recibidos, no sobre el JSON reserializado.
+app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(require('express').static('public'));
 
 const multerStorage = multer.diskStorage({
@@ -508,7 +510,39 @@ function origenDelMensaje(msg, texto) {
   return null;
 }
 
-app.post('/webhook', (req, res) => {
+// Comprueba que el webhook lo manda Meta de verdad: HMAC-SHA256 del cuerpo
+// con el App Secret de la app de Meta. Sin esto cualquiera que conozca la URL
+// puede inyectar mensajes y contactos falsos.
+//
+// Si META_APP_SECRET no esta configurado, deja pasar y avisa en el log: activarlo
+// a ciegas dejaria de recibir leads en cuanto se despliegue. Con el secreto
+// puesto, rechaza todo lo que no venga firmado por Meta.
+let _avisoFirmaDado = false;
+function verificarFirmaMeta(req, res, next) {
+  const secreto = process.env.META_APP_SECRET;
+  if (!secreto) {
+    if (!_avisoFirmaDado) {
+      console.warn('[SEGURIDAD] META_APP_SECRET sin configurar: el webhook acepta peticiones de cualquiera. Configuralo en .env');
+      _avisoFirmaDado = true;
+    }
+    return next();
+  }
+  const firma = req.get('X-Hub-Signature-256') || '';
+  if (!firma.startsWith('sha256=') || !req.rawBody) {
+    console.warn('[SEGURIDAD] webhook sin firma valida, rechazado');
+    return res.sendStatus(403);
+  }
+  const esperado = 'sha256=' + require('crypto').createHmac('sha256', secreto).update(req.rawBody).digest('hex');
+  const a = Buffer.from(firma), b = Buffer.from(esperado);
+  // timingSafeEqual evita filtrar la firma por el tiempo de comparacion
+  if (a.length !== b.length || !require('crypto').timingSafeEqual(a, b)) {
+    console.warn('[SEGURIDAD] webhook con firma invalida, rechazado');
+    return res.sendStatus(403);
+  }
+  next();
+}
+
+app.post('/webhook', verificarFirmaMeta, (req, res) => {
   const entry = req.body.entry?.[0]?.changes?.[0]?.value;
   if (entry?.messages) {
     const msg = entry.messages[0];

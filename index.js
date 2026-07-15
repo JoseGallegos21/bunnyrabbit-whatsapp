@@ -441,12 +441,6 @@ app.post('/api/enviar', auth, async (req, res) => {
   } catch (e) { console.error('Error enviar:', JSON.stringify(e.response?.data || e.message)); res.status(500).json({ error: e.response?.data?.error?.message || e.message }); }
 });
 
-app.get('/api/contactos', auth, (req, res) => {
-  const numero_id = req.user.rol === 'supervisor' ? req.query.numero_id || null : req.user.numero_id;
-  const where = numero_id ? 'WHERE c.numero_id = ?' : '';
-  const params = numero_id ? [numero_id] : [];
-  db.all(`SELECT c.*, GROUP_CONCAT(e.nombre) as etiquetas, GROUP_CONCAT(e.color) as etiqueta_colores FROM contactos c LEFT JOIN contacto_etiquetas ce ON c.id = ce.contacto_id LEFT JOIN etiquetas e ON ce.etiqueta_id = e.id ${where} GROUP BY c.id ORDER BY c.created_at DESC`, params, (err, rows) => res.json(rows || []));
-});
 
 app.get('/api/contactos/:telefono', auth, (req, res) => {
   db.get('SELECT * FROM contactos WHERE telefono = ?', [req.params.telefono], (err, contacto) => {
@@ -477,18 +471,7 @@ app.put('/api/contactos/:telefono', auth, (req, res) => {
     });
 });
 
-app.get('/api/etiquetas', auth, (req, res) => {
-  db.all('SELECT * FROM etiquetas', [], (err, rows) => res.json(rows || []));
-});
 
-app.post('/api/etiquetas', auth, (req, res) => {
-  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
-  const { nombre, color } = req.body;
-  db.run('INSERT INTO etiquetas (nombre, color) VALUES (?, ?)', [nombre, color || '#075e54'], function(err) {
-    if (err) return res.status(400).json({ error: 'Etiqueta ya existe' });
-    res.json({ id: this.lastID, nombre, color });
-  });
-});
 
 
 app.put('/api/leer/:contacto', auth, (req, res) => {
@@ -556,11 +539,21 @@ app.post('/webhook', verificarFirmaMeta, (req, res) => {
   res.sendStatus(200);
 });
 
+const ROLES_VALIDOS = ['admin', 'supervisor', 'recepcionista', 'tecnica'];
+
 app.post('/api/usuarios', auth, async (req, res) => {
-  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
+  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
   const { nombre, email, password, numero_id, sucursal, rol, telefono } = req.body;
+  const rolPedido = rol || 'recepcionista';
+  // El rol venia del body sin validar: un supervisor podia crearse una cuenta
+  // de admin y quedarse con el sistema entero.
+  if (!ROLES_VALIDOS.includes(rolPedido)) return res.status(400).json({ error: 'Rol inválido' });
+  if (req.user.rol === 'supervisor' && (rolPedido === 'admin' || rolPedido === 'supervisor')) {
+    return res.status(403).json({ error: 'Un supervisor solo puede crear recepcionistas o técnicas' });
+  }
+  if (!nombre || !email || !password) return res.status(400).json({ error: 'Faltan campos requeridos' });
   const hash = await bcrypt.hash(password, 10);
-  db.run('INSERT INTO usuarios (nombre, email, password, numero_id, sucursal, rol, telefono) VALUES (?, ?, ?, ?, ?, ?, ?)', [nombre, email, hash, numero_id, sucursal, rol || 'recepcionista', telefono || null], function(err) {
+  db.run('INSERT INTO usuarios (nombre, email, password, numero_id, sucursal, rol, telefono) VALUES (?, ?, ?, ?, ?, ?, ?)', [nombre, email, hash, numero_id, sucursal, rolPedido, telefono || null], function(err) {
     if (err) return res.status(400).json({ error: 'Email ya existe' });
     res.json({ id: this.lastID });
   });
@@ -586,8 +579,16 @@ app.put('/api/usuarios/:id', auth, async (req, res) => {
 });
 
 app.delete('/api/usuarios/:id', auth, (req, res) => {
-  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
-  db.run('DELETE FROM usuarios WHERE id=?', [req.params.id], (err) => res.json({ ok: !err }));
+  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
+  if (String(req.user.id) === String(req.params.id)) return res.status(400).json({ error: 'No puedes borrar tu propio usuario' });
+  db.get('SELECT rol FROM usuarios WHERE id=?', [req.params.id], (e, destino) => {
+    if (!destino) return res.status(404).json({ error: 'Usuario no encontrado' });
+    // Un supervisor no puede eliminar admins ni a otros supervisores
+    if (req.user.rol === 'supervisor' && (destino.rol === 'admin' || destino.rol === 'supervisor')) {
+      return res.status(403).json({ error: 'Un supervisor no puede eliminar admins ni supervisores' });
+    }
+    db.run('DELETE FROM usuarios WHERE id=?', [req.params.id], (err) => res.json({ ok: !err }));
+  });
 });
 
 app.get('/api/plantillas', auth, (req, res) => {
@@ -1145,58 +1146,12 @@ function requireRole(...roles) {
 // ============================================
 
 // Obtener todos los usuarios (admin/supervisor)
-app.get('/api/usuarios', auth, requireRole('admin', 'supervisor'), (req, res) => {
-  const sucursal = req.user.rol === 'supervisor' ? req.user.sucursal : null;
-  const query = sucursal
-    ? `SELECT id, nombre, email, rol, sucursal, numero_id FROM usuarios WHERE sucursal = ?`
-    : `SELECT id, nombre, email, rol, sucursal, numero_id FROM usuarios`;
-  const params = sucursal ? [sucursal] : [];
-  db.all(query, params, (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
-  });
-});
 
 // Crear usuario nuevo (solo admin)
-app.post('/api/usuarios', auth, requireRole('admin'), (req, res) => {
-  const { nombre, email, password, rol, sucursal, numero_id } = req.body;
-  if (!nombre || !email || !password || !rol) return res.status(400).json({ error: 'Faltan campos requeridos' });
-  const validRoles = ['admin', 'supervisor', 'recepcionista', 'tecnica'];
-  if (!validRoles.includes(rol)) return res.status(400).json({ error: 'Rol inválido' });
-  const bcrypt = require('bcrypt');
-  bcrypt.hash(password, 10, (err, hash) => {
-    if (err) return res.status(500).json({ error: err.message });
-    db.run(
-      `INSERT INTO usuarios (nombre, email, password, rol, sucursal, numero_id) VALUES (?,?,?,?,?,?)`,
-      [nombre, email, hash, rol, sucursal || null, numero_id || null],
-      function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ ok: true, id: this.lastID });
-      }
-    );
-  });
-});
 
 // Actualizar usuario (solo admin)
-app.put('/api/usuarios/:id', auth, requireRole('admin'), (req, res) => {
-  const { nombre, email, rol, sucursal, numero_id } = req.body;
-  db.run(
-    `UPDATE usuarios SET nombre=?, email=?, rol=?, sucursal=?, numero_id=? WHERE id=?`,
-    [nombre, email, rol, sucursal || null, numero_id || null, req.params.id],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ ok: true });
-    }
-  );
-});
 
 // Eliminar usuario (solo admin)
-app.delete('/api/usuarios/:id', auth, requireRole('admin'), (req, res) => {
-  db.run(`DELETE FROM usuarios WHERE id=?`, [req.params.id], function(err) {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ ok: true });
-  });
-});
 
 // ============================================
 // ENDPOINTS DE CITAS
@@ -1333,42 +1288,6 @@ app.delete('/api/citas/:id', auth, requireRole('admin', 'supervisor', 'recepcion
 // ============================================
 // MÉTRICAS PARA SUPERVISOR / ADMIN
 // ============================================
-app.get('/api/metricas', auth, requireRole('admin', 'supervisor'), (req, res) => {
-  const sucursal = req.user.rol === 'supervisor' ? req.user.sucursal : req.query.sucursal || null;
-
-  const filtroSucursal = sucursal ? `WHERE u.sucursal = '${sucursal}'` : '';
-  const filtroMensajes = sucursal ? `AND m.numero_id IN (SELECT numero_id FROM usuarios WHERE sucursal = '${sucursal}')` : '';
-
-  const hoy = new Date().toISOString().split('T')[0];
-
-  db.all(`
-    SELECT
-      u.id, u.nombre, u.sucursal,
-      COUNT(DISTINCT c.id) as total_contactos,
-      SUM(CASE WHEN m.timestamp >= datetime('now', '-1 day') THEN 1 ELSE 0 END) as mensajes_hoy,
-      SUM(CASE WHEN m.timestamp >= datetime('now', '-7 days') THEN 1 ELSE 0 END) as mensajes_semana
-    FROM usuarios u
-    LEFT JOIN mensajes m ON m.numero_id = u.numero_id AND m.direccion = 'saliente' ${filtroMensajes ? filtroMensajes.replace('AND ', 'AND ') : ''}
-    LEFT JOIN citas c ON c.recepcionista_id = u.id
-    WHERE u.rol = 'recepcionista' ${sucursal ? `AND u.sucursal = '${sucursal}'` : ''}
-    GROUP BY u.id
-  `, [], (err, recepcionistas) => {
-    if (err) return res.status(500).json({ error: err.message });
-
-    db.get(`
-      SELECT
-        COUNT(*) as total_citas_hoy,
-        SUM(CASE WHEN estado = 'pendiente' THEN 1 ELSE 0 END) as pendientes,
-        SUM(CASE WHEN estado = 'completada' THEN 1 ELSE 0 END) as completadas,
-        SUM(CASE WHEN estado = 'cancelada' THEN 1 ELSE 0 END) as canceladas
-      FROM citas WHERE fecha = ?
-      ${sucursal ? `AND sucursal = '${sucursal}'` : ''}
-    `, [hoy], (err2, citasHoy) => {
-      if (err2) return res.status(500).json({ error: err2.message });
-      res.json({ recepcionistas, citasHoy });
-    });
-  });
-});
 
 // ============================================
 // GOOGLE CALENDAR — Lectura de eventos
@@ -1750,51 +1669,11 @@ cron.schedule('0 7 * * *', async () => {
 // ENDPOINTS DE SUCURSALES
 // ============================================
 
-app.get('/api/sucursales', auth, (req, res) => {
-  db.all(`SELECT s.*, n.token FROM sucursales s
-          LEFT JOIN numeros n ON n.phone_number_id = s.phone_number_id
-          WHERE s.activo = 1 ORDER BY s.nombre`, [], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows || []);
-  });
-});
 
-app.post('/api/sucursales', auth, requireRole('admin'), (req, res) => {
-  const { nombre, direccion, phone_number_id, logo_url } = req.body;
-  if (!nombre) return res.status(400).json({ error: 'Nombre requerido' });
-  db.run(`INSERT INTO sucursales (nombre, direccion, phone_number_id, logo_url) VALUES (?,?,?,?)`,
-    [nombre, direccion || null, phone_number_id || null, logo_url || null],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ ok: true, id: this.lastID });
-    });
-});
 
-app.put('/api/sucursales/:id', auth, requireRole('admin'), (req, res) => {
-  const { nombre, direccion, phone_number_id, logo_url } = req.body;
-  db.run(`UPDATE sucursales SET nombre=?, direccion=?, phone_number_id=?, logo_url=? WHERE id=?`,
-    [nombre, direccion || null, phone_number_id || null, logo_url || null, req.params.id],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ ok: true });
-    });
-});
 
-app.delete('/api/sucursales/:id', auth, requireRole('admin'), (req, res) => {
-  db.run(`UPDATE sucursales SET activo=0 WHERE id=?`, [req.params.id], function(err) {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ ok: true });
-  });
-});
 
 // Usuarios por sucursal
-app.get('/api/sucursales/:id/usuarios', auth, requireRole('admin', 'supervisor'), (req, res) => {
-  db.get(`SELECT nombre FROM sucursales WHERE id=?`, [req.params.id], (err, suc) => {
-    if (!suc) return res.status(404).json({ error: 'Sucursal no encontrada' });
-    db.all(`SELECT id, nombre, email, rol, numero_id FROM usuarios WHERE sucursal=?`,
-      [suc.nombre], (err, rows) => res.json(rows || []));
-  });
-});
 
 // HOST permite que staging escuche solo en local (HOST=127.0.0.1) y no quede expuesto a internet.
 // Sin HOST definido se comporta como siempre (0.0.0.0), para no cambiar produccion.

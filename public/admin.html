@@ -106,7 +106,7 @@ tr:last-child td{border-bottom:none}
         </div>
         <div class="form-row">
           <div class="form-group"><label>Sucursal</label><select id="u_sucursal"><option value="">Sin sucursal</option></select></div>
-          <div class="form-group"><label>Phone Number ID</label><input type="text" id="u_numero" placeholder="ID del numero de WhatsApp"></div>
+          <div class="form-group"><label>Número de WhatsApp</label><select id="u_numero"><option value="">Sin número (ve todo)</option></select></div>
           <div class="form-group"><label>Teléfono personal (notificaciones)</label><input type="text" id="u_telefono" placeholder="Ej: 5512345678"></div>
           <div class="form-group"><label>Rol</label>
             <select id="u_rol"><option value="recepcionista">Recepcionista</option><option value="tecnica">Técnica</option><option value="supervisor">Supervisor</option><option value="admin">Admin</option></select>
@@ -511,7 +511,7 @@ tr:last-child td{border-bottom:none}
       <div class="form-group"><label>Sucursal</label><input type="text" id="edit_sucursal"></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Phone Number ID</label><input type="text" id="edit_numero"></div>
+      <div class="form-group"><label>Número de WhatsApp</label><select id="edit_numero"><option value="">Sin número (ve todo)</option></select></div>
       <div class="form-group"><label>Rol</label>
         <select id="edit_rol"><option value="recepcionista">Recepcionista</option><option value="tecnica">Técnica</option><option value="supervisor">Supervisor</option><option value="admin">Admin</option></select>
       </div>
@@ -1240,6 +1240,21 @@ function cargarNumerosEnSelectores(){
     var pNum=document.getElementById('p_numero_id');
     if(rNum)rNum.innerHTML=opts;
     if(pNum)pNum.innerHTML=optsP;
+
+    // Numero asignado al usuario: desplegable, no texto libre. Escribir el
+    // telefono (+1 555...) en vez del Phone Number ID deja al usuario sin ver
+    // ningun mensaje, porque el filtro no casa con nada.
+    var optsU='<option value="">Sin número (ve todo)</option>';
+    d.forEach(function(n){
+      optsU+='<option value="'+n.phone_number_id+'">'+n.nombre+' ('+n.sucursal+') — '+n.phone_number_id+'</option>';
+    });
+    ['u_numero','edit_numero'].forEach(function(id){
+      var el=document.getElementById(id);
+      if(!el) return;
+      var actual=el.value;           // conservar la seleccion al recargar
+      el.innerHTML=optsU;
+      if(actual) el.value=actual;
+    });
   });
 }
 

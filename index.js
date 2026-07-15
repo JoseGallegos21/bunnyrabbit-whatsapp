@@ -1528,4 +1528,7 @@ app.get('/api/sucursales/:id/usuarios', auth, requireRole('admin', 'supervisor')
   });
 });
 
-app.listen(process.env.PORT, () => console.log(`Sistema WhatsApp corriendo en puerto ${process.env.PORT}`));
+// HOST permite que staging escuche solo en local (HOST=127.0.0.1) y no quede expuesto a internet.
+// Sin HOST definido se comporta como siempre (0.0.0.0), para no cambiar produccion.
+const HOST = process.env.HOST || '0.0.0.0';
+app.listen(process.env.PORT, HOST, () => console.log(`Sistema WhatsApp corriendo en ${HOST}:${process.env.PORT}`));

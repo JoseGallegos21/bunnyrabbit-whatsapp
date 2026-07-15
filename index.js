@@ -35,13 +35,64 @@ const upload = multer({
 const db = new sqlite3.Database('./whatsapp.db');
 
 db.serialize(() => {
-  db.run(`CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY, nombre TEXT, email TEXT UNIQUE, password TEXT, numero_id TEXT, sucursal TEXT, rol TEXT DEFAULT 'recepcionista')`);
-  db.run(`CREATE TABLE IF NOT EXISTS mensajes (id INTEGER PRIMARY KEY, numero_id TEXT, contacto TEXT, mensaje TEXT, direccion TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, leido INTEGER DEFAULT 0)`);
-  db.run(`CREATE TABLE IF NOT EXISTS numeros (id INTEGER PRIMARY KEY, nombre TEXT, sucursal TEXT, phone_number_id TEXT UNIQUE, token TEXT)`);
-  db.run(`CREATE TABLE IF NOT EXISTS contactos (id INTEGER PRIMARY KEY, telefono TEXT UNIQUE, nombre TEXT, notas TEXT, etapa TEXT DEFAULT 'Nuevo', prioridad TEXT DEFAULT 'Media', sucursal TEXT, numero_id TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
-  db.run(`CREATE TABLE IF NOT EXISTS etiquetas (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, color TEXT DEFAULT '#075e54')`);
+  db.run(`CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY, nombre TEXT, email TEXT UNIQUE, password TEXT, numero_id TEXT, sucursal TEXT, rol TEXT DEFAULT 'recepcionista', telefono TEXT)`);
+  db.run(`CREATE TABLE IF NOT EXISTS mensajes (id INTEGER PRIMARY KEY, numero_id TEXT, contacto TEXT, mensaje TEXT, direccion TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, leido INTEGER DEFAULT 0, origen TEXT)`);
+  db.run(`CREATE TABLE IF NOT EXISTS numeros (id INTEGER PRIMARY KEY, nombre TEXT, sucursal TEXT, phone_number_id TEXT UNIQUE, token TEXT, waba_id TEXT, pixel_id TEXT, capi_token TEXT, capi_version TEXT DEFAULT 'v21.0', capi_test_code TEXT, capi_activo INTEGER DEFAULT 0, capi_triggers TEXT DEFAULT '[]')`);
+  db.run(`CREATE TABLE IF NOT EXISTS contactos (id INTEGER PRIMARY KEY, telefono TEXT UNIQUE, nombre TEXT, notas TEXT, etapa TEXT DEFAULT 'Nuevo', prioridad TEXT DEFAULT 'Media', sucursal TEXT, numero_id TEXT, origen TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  db.run(`CREATE TABLE IF NOT EXISTS etiquetas (id INTEGER PRIMARY KEY, nombre TEXT UNIQUE, color TEXT DEFAULT '#075e54', usuario_id INTEGER)`);
   db.run(`CREATE TABLE IF NOT EXISTS contacto_etiquetas (contacto_id INTEGER, etiqueta_id INTEGER, PRIMARY KEY (contacto_id, etiqueta_id))`);
+
+  // Tablas adicionales que usa la app (antes no se creaban al arrancar)
+  db.run(`CREATE TABLE IF NOT EXISTS plantillas (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, categoria TEXT DEFAULT 'General', contenido TEXT, phone_number_id TEXT, estado_meta TEXT DEFAULT 'pendiente', meta_template_id TEXT, idioma TEXT DEFAULT 'es', created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  db.run(`CREATE TABLE IF NOT EXISTS difusiones (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, mensaje TEXT, filtro_etapa TEXT, total INTEGER DEFAULT 0, enviados INTEGER DEFAULT 0, estado TEXT DEFAULT 'pendiente', phone_number_id TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  db.run(`CREATE TABLE IF NOT EXISTS citas (id INTEGER PRIMARY KEY AUTOINCREMENT, contacto_id INTEGER, tecnica_id INTEGER, recepcionista_id INTEGER, numero_id TEXT, sucursal TEXT, fecha TEXT, hora_inicio TEXT, hora_fin TEXT, servicio TEXT, notas TEXT, estado TEXT DEFAULT 'pendiente', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  db.run(`CREATE TABLE IF NOT EXISTS sucursales (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, direccion TEXT, phone_number_id TEXT, logo_url TEXT, activo INTEGER DEFAULT 1)`);
+  db.run(`CREATE TABLE IF NOT EXISTS biblioteca_imagenes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, url TEXT, subido_por INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  db.run(`CREATE TABLE IF NOT EXISTS respuestas_rapidas (id INTEGER PRIMARY KEY AUTOINCREMENT, usuario_id INTEGER, titulo TEXT, contenido TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  db.run(`CREATE TABLE IF NOT EXISTS facebook_capi_config (id INTEGER PRIMARY KEY AUTOINCREMENT, pixel_id TEXT, access_token TEXT, test_event_code TEXT, api_version TEXT DEFAULT 'v21.0', triggers TEXT DEFAULT '[]', activo INTEGER DEFAULT 1, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  db.run(`CREATE TABLE IF NOT EXISTS facebook_capi_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, contacto_nombre TEXT, contacto_telefono TEXT, evento_tipo TEXT, etapa TEXT, event_id TEXT, status_code INTEGER, respuesta TEXT, numero_id TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  db.run(`CREATE TABLE IF NOT EXISTS google_calendar_config (id INTEGER PRIMARY KEY AUTOINCREMENT, sucursal TEXT UNIQUE, calendar_id TEXT, access_token TEXT, refresh_token TEXT, activo INTEGER DEFAULT 1)`);
+
+  // Auto-reparar columnas faltantes en bases creadas con esquemas antiguos (idempotente)
+  const ensureColumns = (tabla, columnas) => {
+    db.all(`PRAGMA table_info(${tabla})`, [], (err, cols) => {
+      if (err || !cols) return;
+      const existentes = cols.map(c => c.name);
+      columnas.forEach(([col, tipo]) => {
+        if (!existentes.includes(col)) {
+          db.run(`ALTER TABLE ${tabla} ADD COLUMN ${col} ${tipo}`, [], () => {});
+        }
+      });
+    });
+  };
+  ensureColumns('usuarios', [['telefono', 'TEXT']]);
+  ensureColumns('plantillas', [['idioma', "TEXT DEFAULT 'es'"]]);
+  ensureColumns('mensajes', [['origen', 'TEXT']]);
+  ensureColumns('contactos', [['origen', 'TEXT']]);
+  ensureColumns('etiquetas', [['usuario_id', 'INTEGER']]);
+  ensureColumns('numeros', [
+    ['waba_id', 'TEXT'],
+    ['pixel_id', 'TEXT'], ['capi_token', 'TEXT'], ['capi_version', "TEXT DEFAULT 'v21.0'"],
+    ['capi_test_code', 'TEXT'], ['capi_activo', 'INTEGER DEFAULT 0'], ['capi_triggers', "TEXT DEFAULT '[]'"]
+  ]);
 });
+
+// Resuelve el número desde el que se envía.
+// - recepcionista/técnica: siempre el suyo
+// - admin/supervisor: el que indiquen, o el suyo, o el único configurado si solo hay uno
+function resolverNumeroEnvio(req, numeroIdBody) {
+  return new Promise((resolve) => {
+    const mando = req.user.rol === 'supervisor' || req.user.rol === 'admin';
+    const nid = mando ? (numeroIdBody || req.user.numero_id) : req.user.numero_id;
+    if (nid) {
+      db.get('SELECT * FROM numeros WHERE phone_number_id=?', [nid], (e, row) => resolve(row || null));
+    } else if (mando) {
+      db.all('SELECT * FROM numeros WHERE token IS NOT NULL AND token!=""', [], (e, rows) => {
+        resolve(rows && rows.length === 1 ? rows[0] : null);
+      });
+    } else resolve(null);
+  });
+}
 
 const auth = (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1];
@@ -98,11 +149,11 @@ app.delete('/api/biblioteca/:id', auth, (req, res) => {
 // ===== CONTACTOS =====
 app.get('/api/contactos', auth, (req, res) => {
   const numero_id = req.user.rol === 'supervisor' ? req.query.numero_id || null : req.user.numero_id;
-  if(numero_id) {
-    db.all('SELECT * FROM contactos WHERE numero_id=? ORDER BY nombre, telefono', [numero_id], (err, rows) => res.json(rows || []));
-  } else {
-    db.all('SELECT * FROM contactos ORDER BY nombre, telefono', [], (err, rows) => res.json(rows || []));
-  }
+  const cond = [], params = [];
+  if (numero_id) { cond.push('numero_id=?'); params.push(numero_id); }
+  if (req.query.incluir_formulario !== '1') cond.push("(origen IS NULL OR origen != 'formulario_ads')");
+  const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
+  db.all(`SELECT * FROM contactos ${where} ORDER BY nombre, telefono`, params, (err, rows) => res.json(rows || []));
 });
 
 app.put('/api/contactos/:id', auth, async (req, res) => {
@@ -277,9 +328,13 @@ app.post('/api/login', (req, res) => {
 
 app.get('/api/mensajes', auth, (req, res) => {
   const numero_id = req.user.rol === 'supervisor' ? req.query.numero_id : req.user.numero_id;
-  const query = numero_id ? 'SELECT * FROM mensajes WHERE numero_id = ? ORDER BY timestamp DESC LIMIT 100' : 'SELECT * FROM mensajes ORDER BY timestamp DESC LIMIT 200';
-  const params = numero_id ? [numero_id] : [];
-  db.all(query, params, (err, rows) => res.json(rows || []));
+  const cond = [], params = [];
+  if (numero_id) { cond.push('numero_id = ?'); params.push(numero_id); }
+  // Los leads autogenerados por anuncios se ocultan salvo que se pidan con ?incluir_formulario=1
+  if (req.query.incluir_formulario !== '1') cond.push("(origen IS NULL OR origen != 'formulario_ads')");
+  const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
+  const limit = numero_id ? 100 : 200;
+  db.all(`SELECT * FROM mensajes ${where} ORDER BY timestamp DESC LIMIT ${limit}`, params, (err, rows) => res.json(rows || []));
 });
 
 app.get('/api/numeros', auth, (req, res) => {
@@ -296,15 +351,15 @@ app.get('/api/metricas', auth, (req, res) => {
 
 app.post('/api/enviar', auth, async (req, res) => {
   const { telefono, mensaje, numero_id } = req.body;
-  const nid = req.user.rol === 'supervisor' ? numero_id : req.user.numero_id;
-  db.get('SELECT * FROM numeros WHERE phone_number_id = ?', [nid], async (err, num) => {
-    if (!num) return res.status(404).json({ error: 'Número no encontrado' });
-    try {
-      await axios.post(`https://graph.facebook.com/v18.0/${nid}/messages`, { messaging_product: 'whatsapp', to: telefono, type: 'text', text: { body: mensaje } }, { headers: { Authorization: `Bearer ${num.token}` } });
-      db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion) VALUES (?, ?, ?, ?)', [nid, telefono, mensaje, 'saliente']);
-      res.json({ ok: true });
-    } catch (e) { console.error('Error enviar:', JSON.stringify(e.response?.data || e.message)); res.status(500).json({ error: e.response?.data || e.message }); }
-  });
+  const num = await resolverNumeroEnvio(req, numero_id);
+  if (!num) return res.status(404).json({ error: 'No hay un número de WhatsApp configurado para enviar. Asigna uno en el panel de administración.' });
+  if (!num.token) return res.status(400).json({ error: 'El número ' + num.phone_number_id + ' no tiene token de WhatsApp configurado.' });
+  const nid = num.phone_number_id;
+  try {
+    await axios.post(`https://graph.facebook.com/v18.0/${nid}/messages`, { messaging_product: 'whatsapp', to: telefono, type: 'text', text: { body: mensaje } }, { headers: { Authorization: `Bearer ${num.token}` } });
+    db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion) VALUES (?, ?, ?, ?)', [nid, telefono, mensaje, 'saliente']);
+    res.json({ ok: true });
+  } catch (e) { console.error('Error enviar:', JSON.stringify(e.response?.data || e.message)); res.status(500).json({ error: e.response?.data?.error?.message || e.message }); }
 });
 
 app.get('/api/contactos', auth, (req, res) => {
@@ -367,14 +422,25 @@ app.get('/webhook', (req, res) => {
   res.status(403).send('Token inválido');
 });
 
+// Detecta mensajes autogenerados por anuncios con formulario (Meta los redacta por el lead).
+// Señal principal: `referral` (Meta lo incluye cuando el chat nace de un anuncio).
+// Respaldo: el texto de plantilla que Meta usa al enviarlos.
+function origenDelMensaje(msg, texto) {
+  if (msg.referral) return 'formulario_ads';
+  if (/Complet[eé] el formulario|I filled out your form/i.test(texto || '')) return 'formulario_ads';
+  return null;
+}
+
 app.post('/webhook', (req, res) => {
   const entry = req.body.entry?.[0]?.changes?.[0]?.value;
   if (entry?.messages) {
     const msg = entry.messages[0];
     const numero_id = entry.metadata.phone_number_id;
     const telefono = msg.from;
-    db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion) VALUES (?, ?, ?, ?)', [numero_id, telefono, msg.text?.body || '[media]', 'entrante']);
-    db.run(`INSERT INTO contactos (telefono, numero_id, etapa, prioridad) VALUES (?, ?, 'Nuevo', 'Media') ON CONFLICT(telefono) DO NOTHING`, [telefono, numero_id]);
+    const texto = msg.text?.body || '[media]';
+    const origen = origenDelMensaje(msg, texto);
+    db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, origen) VALUES (?, ?, ?, ?, ?)', [numero_id, telefono, texto, 'entrante', origen]);
+    db.run(`INSERT INTO contactos (telefono, numero_id, etapa, prioridad, origen) VALUES (?, ?, 'Nuevo', 'Media', ?) ON CONFLICT(telefono) DO NOTHING`, [telefono, numero_id, origen]);
   }
   res.sendStatus(200);
 });
@@ -414,7 +480,7 @@ app.delete('/api/usuarios/:id', auth, (req, res) => {
 });
 
 app.get('/api/plantillas', auth, (req, res) => {
-  if (req.user.rol === 'supervisor') {
+  if (req.user.rol === 'supervisor' || req.user.rol === 'admin') {
     db.all('SELECT * FROM plantillas ORDER BY categoria, nombre', [], (err, rows) => res.json(rows || []));
   } else {
     db.all('SELECT * FROM plantillas WHERE phone_number_id=? OR phone_number_id IS NULL ORDER BY categoria, nombre', [req.user.numero_id], (err, rows) => res.json(rows || []));
@@ -433,9 +499,10 @@ app.post('/api/plantillas', auth, async (req, res) => {
         const numRow = await new Promise((resolve, reject) => {
           db.get('SELECT * FROM numeros WHERE phone_number_id=?', [numId], (e, row) => e ? reject(e) : resolve(row));
         });
-        if (numRow && numRow.token) {
+        // Meta exige el WABA ID (no el phone_number_id) para el edge message_templates
+        if (numRow && numRow.token && numRow.waba_id) {
           const metaRes = await require('axios').post(
-            `https://graph.facebook.com/v18.0/${numId}/message_templates`,
+            `https://graph.facebook.com/v18.0/${numRow.waba_id}/message_templates`,
             {
               name: nombre.toLowerCase().replace(/\s+/g, '_'),
               category: categoria === 'Marketing' ? 'MARKETING' : 'UTILITY',
@@ -451,8 +518,6 @@ app.post('/api/plantillas', auth, async (req, res) => {
         db.run('UPDATE plantillas SET estado_meta=? WHERE id=?', ['error_envio', plantillaId]);
       }
       res.json({ ok: true, id: plantillaId });
-    if (err) return res.status(400).json({ error: err.message });
-    res.json({ id: this.lastID, nombre, categoria, contenido });
   });
 });
 
@@ -463,6 +528,103 @@ app.put('/api/plantillas/:id', auth, (req, res) => {
 
 app.delete('/api/plantillas/:id', auth, (req, res) => {
   db.run('DELETE FROM plantillas WHERE id=?', [req.params.id], (err) => res.json({ ok: !err }));
+});
+
+// ===== SINCRONIZAR ESTADO DE PLANTILLAS CON META =====
+// Mapea los estados de Meta a los que usa el frontend
+const META_STATUS_MAP = {
+  APPROVED: 'aprobada', PENDING: 'pendiente', REJECTED: 'rechazada',
+  PAUSED: 'pausada', DISABLED: 'deshabilitada', IN_APPEAL: 'en_apelacion',
+  PENDING_DELETION: 'pendiente_baja', DELETED: 'eliminada', LIMIT_EXCEEDED: 'limite_excedido'
+};
+
+app.post('/api/plantillas/sync', auth, async (req, res) => {
+  try {
+    let importadas = 0, actualizadas = 0, errores = 0, sin_meta_id = 0;
+    const avisos = [];
+    const vistas = new Set(); // ids locales ya sincronizados desde el WABA
+
+    // --- FASE 1: importar/actualizar desde el Administrador comercial (WABA) ---
+    const wabas = await new Promise((resolve, reject) => {
+      db.all(`SELECT phone_number_id, waba_id, token, nombre FROM numeros
+              WHERE waba_id IS NOT NULL AND waba_id!='' AND token IS NOT NULL AND token!=''`,
+        [], (e, rows) => e ? reject(e) : resolve(rows || []));
+    });
+
+    for (const n of wabas) {
+      let next = `https://graph.facebook.com/v18.0/${n.waba_id}/message_templates?fields=id,name,status,category,language,components&limit=200`;
+      try {
+        while (next) {
+          const r = await axios.get(next, { headers: { Authorization: 'Bearer ' + n.token } });
+          for (const t of (r.data.data || [])) {
+            const estado = META_STATUS_MAP[t.status] || String(t.status || '').toLowerCase() || 'pendiente';
+            const body = (t.components || []).find(c => c.type === 'BODY');
+            const contenido = (body && body.text) ? body.text : '';
+            const categoria = t.category || 'General';
+
+            // Enlazar por meta_template_id; si no, adoptar una local con el mismo nombre aún sin enlazar
+            let fila = await new Promise(resolve =>
+              db.get('SELECT id FROM plantillas WHERE meta_template_id=?', [t.id], (e, row) => resolve(row)));
+            if (!fila) {
+              fila = await new Promise(resolve =>
+                db.get('SELECT id FROM plantillas WHERE nombre=? AND (meta_template_id IS NULL OR meta_template_id="")',
+                  [t.name], (e, row) => resolve(row)));
+            }
+
+            if (fila) {
+              await new Promise(resolve => db.run(
+                `UPDATE plantillas SET meta_template_id=?, estado_meta=?, categoria=?, contenido=?, idioma=?,
+                 phone_number_id=COALESCE(phone_number_id,?) WHERE id=?`,
+                [t.id, estado, categoria, contenido, t.language || 'es', n.phone_number_id, fila.id], () => resolve()));
+              vistas.add(fila.id);
+              actualizadas++;
+            } else {
+              const nuevo = await new Promise(resolve => db.run(
+                'INSERT INTO plantillas (nombre, categoria, contenido, phone_number_id, estado_meta, meta_template_id, idioma) VALUES (?,?,?,?,?,?,?)',
+                [t.name, categoria, contenido, n.phone_number_id, estado, t.id, t.language || 'es'], function () { resolve(this.lastID); }));
+              vistas.add(nuevo);
+              importadas++;
+            }
+          }
+          next = (r.data.paging && r.data.paging.next) ? r.data.paging.next : null;
+        }
+      } catch (e) {
+        errores++;
+        avisos.push((n.nombre || n.waba_id) + ': ' + (e.response?.data?.error?.message || e.message));
+      }
+    }
+
+    // --- FASE 2: refrescar por ID las locales que no vinieron de un WABA ---
+    const restantes = await new Promise((resolve, reject) => {
+      db.all(`SELECT id, meta_template_id, phone_number_id FROM plantillas`, [], (e, rows) => e ? reject(e) : resolve(rows || []));
+    });
+    for (const p of restantes) {
+      if (vistas.has(p.id)) continue;
+      if (!p.meta_template_id) { sin_meta_id++; continue; }
+      const num = await new Promise((resolve) => {
+        if (p.phone_number_id) {
+          db.get('SELECT token FROM numeros WHERE phone_number_id=? AND token IS NOT NULL AND token!=""', [p.phone_number_id], (e, r) => resolve(r));
+        } else {
+          db.get('SELECT token FROM numeros WHERE token IS NOT NULL AND token!="" LIMIT 1', [], (e, r) => resolve(r));
+        }
+      });
+      if (!num || !num.token) continue;
+      try {
+        const r = await axios.get(`https://graph.facebook.com/v18.0/${p.meta_template_id}`, {
+          params: { fields: 'name,status,category' },
+          headers: { Authorization: 'Bearer ' + num.token }
+        });
+        const estado = META_STATUS_MAP[r.data.status] || String(r.data.status || '').toLowerCase() || 'pendiente';
+        await new Promise((resolve) => db.run('UPDATE plantillas SET estado_meta=? WHERE id=?', [estado, p.id], () => resolve()));
+        actualizadas++;
+      } catch (e) { errores++; }
+    }
+
+    if (!wabas.length) avisos.push('Ningún número tiene WABA ID + token configurado — no se pudo leer tu Administrador comercial.');
+    res.json({ ok: true, importadas, actualizadas, sin_meta_id, errores, wabas: wabas.length, avisos });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 app.post('/api/difusion', auth, async (req, res) => {
@@ -697,11 +859,11 @@ app.post('/api/numeros/:id/capi/test', auth, async (req, res) => {
 // ===== AGREGAR NUMERO NUEVO =====
 app.post('/api/numeros/nuevo', auth, (req, res) => {
   if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
-  const { nombre, sucursal, phone_number_id, pixel_id, capi_version, token: waToken, capi_token, capi_activo } = req.body;
+  const { nombre, sucursal, phone_number_id, waba_id, pixel_id, capi_version, token: waToken, capi_token, capi_activo } = req.body;
   if (!nombre || !phone_number_id) return res.status(400).json({ error: 'Nombre y Phone Number ID son obligatorios' });
   db.run(
-    'INSERT INTO numeros (nombre, sucursal, phone_number_id, token, pixel_id, capi_token, capi_version, capi_activo, capi_triggers) VALUES (?,?,?,?,?,?,?,?,?)',
-    [nombre, sucursal||nombre, phone_number_id, waToken||null, pixel_id||null, capi_token||null, capi_version||'v21.0', capi_activo?1:0, '[]'],
+    'INSERT INTO numeros (nombre, sucursal, phone_number_id, token, waba_id, pixel_id, capi_token, capi_version, capi_activo, capi_triggers) VALUES (?,?,?,?,?,?,?,?,?,?)',
+    [nombre, sucursal||nombre, phone_number_id, waToken||null, waba_id||null, pixel_id||null, capi_token||null, capi_version||'v21.0', capi_activo?1:0, '[]'],
     function(err) {
       if (err) return res.status(400).json({ ok: false, error: err.message });
       res.json({ ok: true, id: this.lastID });
@@ -715,31 +877,32 @@ app.post('/api/enviar-plantilla', auth, async (req, res) => {
   if (!telefono || !plantilla_id) return res.status(400).json({ error: 'Faltan datos' });
   db.get('SELECT * FROM plantillas WHERE id=?', [plantilla_id], async (err, plantilla) => {
     if (!plantilla) return res.status(404).json({ error: 'Plantilla no encontrada' });
-    db.get('SELECT * FROM numeros WHERE phone_number_id=?', [numero_id], async (err2, num) => {
-      if (!num) return res.status(404).json({ error: 'Numero no encontrado' });
-      try {
-        await require('axios').post(
-          'https://graph.facebook.com/v18.0/' + numero_id + '/messages',
-          {
-            messaging_product: 'whatsapp',
-            to: telefono,
-            type: 'template',
-            template: {
-              name: plantilla.nombre.toLowerCase().replace(/\s+/g, '_'),
-              language: { code: 'es' },
-              components: []
-            }
-          },
-          { headers: { Authorization: 'Bearer ' + num.token } }
-        );
-        db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion) VALUES (?,?,?,?)',
-          [numero_id, telefono, '[Plantilla: ' + plantilla.nombre + ']', 'saliente']);
-        res.json({ ok: true });
-      } catch(e) {
-        const msg = e.response?.data?.error?.message || e.message;
-        res.json({ ok: false, error: msg });
-      }
-    });
+    const num = await resolverNumeroEnvio(req, numero_id);
+    if (!num) return res.status(404).json({ error: 'No hay un número de WhatsApp configurado para enviar. Asigna uno en el panel de administración.' });
+    if (!num.token) return res.status(400).json({ error: 'El número ' + num.phone_number_id + ' no tiene token de WhatsApp configurado.' });
+    try {
+      await require('axios').post(
+        'https://graph.facebook.com/v18.0/' + num.phone_number_id + '/messages',
+        {
+          messaging_product: 'whatsapp',
+          to: telefono,
+          type: 'template',
+          template: {
+            name: plantilla.nombre.toLowerCase().replace(/\s+/g, '_'),
+            // Cada plantilla tiene su propio idioma en Meta (es, en_US...); usar el fijo hacía fallar el envío
+            language: { code: plantilla.idioma || 'es' },
+            components: []
+          }
+        },
+        { headers: { Authorization: 'Bearer ' + num.token } }
+      );
+      db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion) VALUES (?,?,?,?)',
+        [num.phone_number_id, telefono, '[Plantilla: ' + plantilla.nombre + ']', 'saliente']);
+      res.json({ ok: true });
+    } catch(e) {
+      const msg = e.response?.data?.error?.message || e.message;
+      res.json({ ok: false, error: msg });
+    }
   });
 });
 

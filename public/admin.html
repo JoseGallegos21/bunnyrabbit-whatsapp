@@ -370,12 +370,15 @@ tr:last-child td{border-bottom:none}
           <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Phone Number ID</label>
             <input id="num_phone_id" type="text" placeholder="ID de Meta" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
           <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Token de WhatsApp</label>
             <input id="num_token" type="text" placeholder="Token permanente" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
+          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">WABA ID <span style="color:#999">(para plantillas)</span></label>
+            <input id="num_waba_id" type="text" placeholder="ID de la cuenta de WhatsApp Business" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
           <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Nombre visible en sistema</label>
             <input id="num_display" type="text" placeholder="Ej: WA Insurgentes" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
         </div>
+        <p style="font-size:12px;color:#666;margin:-8px 0 14px">El <strong>WABA ID</strong> permite importar y sincronizar las plantillas de tu Administrador comercial. Lo encuentras en Administrador de WhatsApp → Configuración de la cuenta.</p>
         <button onclick="agregarNumeroSucursal()" style="background:#1f5c4a;color:#fff;border:none;padding:10px 24px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">Agregar número</button>
         <span id="numSucMsg" style="margin-left:12px;font-size:13px"></span>
       </div>
@@ -543,6 +546,38 @@ tr:last-child td{border-bottom:none}
 <script>
 var token='',numeros=[];
 
+// Abre el panel con la sesión ya cargada (al iniciar sesión y al recargar)
+function aplicarSesionAdmin(usuario){
+  if(usuario.rol==='supervisor'){ window.location.href='/supervisor.html'; return; }
+  document.getElementById('loginWrap').style.display='none';
+  document.getElementById('adminApp').style.display='block';
+  document.getElementById('adminUser').textContent=usuario.nombre;
+  cargarTodo();
+}
+
+function limpiarSesionAdmin(){
+  token='';
+  localStorage.removeItem('token'); localStorage.removeItem('user');
+}
+
+// Al recargar: si hay sesión guardada y sigue vigente, entrar sin pedir login otra vez
+function restaurarSesionAdmin(){
+  var t=localStorage.getItem('token'), u=localStorage.getItem('user');
+  if(!t||!u) return;
+  var usuario;
+  try { usuario=JSON.parse(u); } catch(err){ limpiarSesionAdmin(); return; }
+  if(usuario.rol!=='admin'&&usuario.rol!=='supervisor') return;
+  token=t;
+  // Validar el token: si caducó (24h) volvemos al login
+  fetch('/api/numeros',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){
+    if(r.status===401){ limpiarSesionAdmin(); return; }
+    aplicarSesionAdmin(usuario);
+  })
+  .catch(function(){});
+}
+window.addEventListener('load', restaurarSesionAdmin);
+
 document.getElementById('btnLogin').addEventListener('click',function(){
   var e=document.getElementById('email').value,p=document.getElementById('pass').value;
   fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:e,password:p})})
@@ -552,14 +587,7 @@ document.getElementById('btnLogin').addEventListener('click',function(){
       token=d.token;
       localStorage.setItem('token', d.token);
       localStorage.setItem('user', JSON.stringify(d.usuario));
-      // Admin va directo al panel admin, supervisor puede ir a supervisor.html
-      if(d.usuario.rol==='supervisor'){
-        window.location.href='/supervisor.html'; return;
-      }
-      document.getElementById('loginWrap').style.display='none';
-      document.getElementById('adminApp').style.display='block';
-      document.getElementById('adminUser').textContent=d.usuario.nombre;
-      cargarTodo();
+      aplicarSesionAdmin(d.usuario);
     } else {
       document.getElementById('loginErr').textContent=d.error||'Sin acceso. Solo admin o supervisor';
     }
@@ -576,7 +604,7 @@ function cargarNumerosEnSelectSucursal(){
       d.map(function(n){ return '<option value="'+n.phone_number_id+'">'+h(n.nombre||n.sucursal)+' — '+n.phone_number_id+'</option>'; }).join('');
   });
 }
-function logout(){token='';location.reload();}
+function logout(){limpiarSesionAdmin();location.reload();}
 
 // ============================================
 // SUCURSALES
@@ -1766,6 +1794,7 @@ function agregarNumeroSucursal(){
   var nombre = document.getElementById('num_nombre').value.trim();
   var phone_number_id = document.getElementById('num_phone_id').value.trim();
   var token_wa = document.getElementById('num_token').value.trim();
+  var waba_id = document.getElementById('num_waba_id').value.trim();
   var display = document.getElementById('num_display').value.trim();
   var msg = document.getElementById('numSucMsg');
 
@@ -1775,7 +1804,7 @@ function agregarNumeroSucursal(){
   }
 
   fetch('/api/numeros/nuevo',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-    body:JSON.stringify({nombre:display||nombre, sucursal:sucursal, phone_number_id:phone_number_id, token:token_wa})})
+    body:JSON.stringify({nombre:display||nombre, sucursal:sucursal, phone_number_id:phone_number_id, token:token_wa, waba_id:waba_id||null})})
   .then(function(r){return r.json()})
   .then(function(d){
     if(d.ok||d.id){
@@ -1787,7 +1816,7 @@ function agregarNumeroSucursal(){
       }
       msg.textContent='✓ Número agregado correctamente';
       msg.style.color='#1f5c4a';
-      ['num_nombre','num_phone_id','num_token','num_display'].forEach(function(id){ document.getElementById(id).value=''; });
+      ['num_nombre','num_phone_id','num_token','num_waba_id','num_display'].forEach(function(id){ var el=document.getElementById(id); if(el) el.value=''; });
       document.getElementById('num_sucursal').value='';
       cargarSucursales();
       cargarNumeros();

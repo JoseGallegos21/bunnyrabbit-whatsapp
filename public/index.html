@@ -247,7 +247,13 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
           </div>
           <!-- Tabla plantillas -->
           <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-top:20px">
-            <h2 style="margin:0 0 16px;font-size:18px;color:#111">Mis plantillas</h2>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 16px">
+              <h2 style="margin:0;font-size:18px;color:#111">Mis plantillas</h2>
+              <div style="display:flex;align-items:center;gap:10px">
+                <span id="np_syncMsg" style="font-size:12px;color:#666"></span>
+                <button onclick="sincronizarPlantillas()" style="padding:8px 14px;background:#fff;color:#075e54;border:1px solid #075e54;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">🔄 Sincronizar con Meta</button>
+              </div>
+            </div>
             <table style="width:100%;border-collapse:collapse;font-size:13px">
               <thead><tr style="border-bottom:2px solid #eee">
                 <th style="padding:8px;text-align:left">Nombre</th>
@@ -1031,25 +1037,84 @@ function mostrarFormPlantilla(){
   f.style.display = f.style.display==='none' ? 'block' : 'none';
 }
 
+// Badge de estado tipo GoHighLevel (Aprobada / Pendiente / En revisión / Rechazada...)
+function _plantillaBadge(estado){
+  var map = {
+    aprobada:{t:'Aprobada',c:'#2e7d32',bg:'#e8f5e9'},
+    pendiente:{t:'Pendiente',c:'#b8860b',bg:'#fff8e1'},
+    enviada:{t:'En revisión',c:'#1565c0',bg:'#e3f2fd'},
+    rechazada:{t:'Rechazada',c:'#c62828',bg:'#ffebee'},
+    error_envio:{t:'Error de envío',c:'#c62828',bg:'#ffebee'},
+    pausada:{t:'Pausada',c:'#6a1b9a',bg:'#f3e5f5'},
+    deshabilitada:{t:'Deshabilitada',c:'#546e7a',bg:'#eceff1'},
+    en_apelacion:{t:'En apelación',c:'#1565c0',bg:'#e3f2fd'}
+  };
+  var s = map[estado] || {t: estado, c:'#546e7a', bg:'#eceff1'};
+  return '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;color:'+s.c+';background:'+s.bg+'">● '+s.t+'</span>';
+}
+
 function cargarPlantillasPanel(){
   fetch('/api/plantillas',{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
   .then(function(d){
+    d = d || [];
+    // Tabla principal "Mis plantillas"
+    var tbody = document.getElementById('np_tablaPlantillas');
+    if(tbody){
+      tbody.innerHTML = d.length ? d.map(function(p){
+        var est = p.estado_meta||'pendiente';
+        var cont = p.contenido||'';
+        return '<tr style="border-bottom:1px solid #f0f0f0">'+
+          '<td style="padding:10px 8px;font-weight:600">'+(p.nombre||'')+'</td>'+
+          '<td style="padding:10px 8px;color:#666">'+(p.categoria||'')+'</td>'+
+          '<td style="padding:10px 8px;color:#666;max-width:300px">'+cont.substring(0,80)+(cont.length>80?'...':'')+'</td>'+
+          '<td style="padding:10px 8px">'+_plantillaBadge(est)+'</td>'+
+        '</tr>';
+      }).join('') : '<tr><td colspan="4" style="text-align:center;color:#999;padding:20px">No tienes plantillas aún</td></tr>';
+    }
+    // Panel lateral (si está presente)
     var lista = document.getElementById('listaPlantillasPanel');
-    if(!d.length){ lista.innerHTML='<p style="color:#999;font-size:13px;text-align:center">No tienes plantillas aún</p>'; return; }
-    lista.innerHTML = d.map(function(p){
-      var estado = p.estado_meta||'pendiente';
-      var color = {pendiente:'#f39c12',enviada:'#3498db',aprobada:'#2e7d32',rechazada:'#e74c3c'}[estado]||'#999';
-      return '<div class="plantilla-card">'+
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'+
-          '<strong style="font-size:13px">'+p.nombre+'</strong>'+
-          '<span style="font-size:10px;color:'+color+'">● '+estado+'</span>'+
-        '</div>'+
-        '<div style="font-size:12px;color:#666;margin-bottom:6px">'+p.categoria+'</div>'+
-        '<div style="font-size:12px;color:#333;margin-bottom:8px">'+p.contenido.substring(0,80)+(p.contenido.length>80?'...':'')+'</div>'+
-      '</div>';
-    }).join('');
+    if(lista){
+      lista.innerHTML = d.length ? d.map(function(p){
+        var estado = p.estado_meta||'pendiente';
+        var cont = p.contenido||'';
+        return '<div class="plantilla-card">'+
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:4px">'+
+            '<strong style="font-size:13px">'+(p.nombre||'')+'</strong>'+_plantillaBadge(estado)+
+          '</div>'+
+          '<div style="font-size:12px;color:#666;margin-bottom:6px">'+(p.categoria||'')+'</div>'+
+          '<div style="font-size:12px;color:#333;margin-bottom:8px">'+cont.substring(0,80)+(cont.length>80?'...':'')+'</div>'+
+        '</div>';
+      }).join('') : '<p style="color:#999;font-size:13px;text-align:center">No tienes plantillas aún</p>';
+    }
   });
+}
+
+// Consulta a Meta el estado real de aprobación de cada plantilla y refresca la lista
+function sincronizarPlantillas(){
+  var m = document.getElementById('np_syncMsg');
+  if(m){ m.textContent='Sincronizando con Meta...'; m.style.color='#b8860b'; }
+  fetch('/api/plantillas/sync',{method:'POST',headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(d.ok){
+      var partes=[];
+      if(d.importadas) partes.push(d.importadas+' importada'+(d.importadas===1?'':'s')+' de Meta');
+      partes.push(d.actualizadas+' actualizada'+(d.actualizadas===1?'':'s'));
+      if(d.sin_meta_id) partes.push(d.sin_meta_id+' sin enviar a Meta');
+      if(d.errores) partes.push(d.errores+' con error');
+      if(m){
+        m.textContent='✓ '+partes.join(' · ');
+        m.style.color = d.errores ? '#c62828' : '#2e7d32';
+        m.title = (d.avisos && d.avisos.length) ? d.avisos.join('\n') : '';
+      }
+      if(d.avisos && d.avisos.length && !d.importadas && !d.actualizadas){
+        if(m){ m.textContent='⚠ '+d.avisos[0]; m.style.color='#b8860b'; }
+      }
+      cargarPlantillasPanel();
+    } else if(m){ m.textContent=d.error||'Error al sincronizar'; m.style.color='#c62828'; }
+  })
+  .catch(function(){ if(m){ m.textContent='Error de conexión'; m.style.color='#c62828'; } });
 }
 
 function guardarPlantillaPanel(){
@@ -1113,6 +1178,45 @@ document.getElementById('btnEnviarDifPanel').addEventListener('click', function(
 
 
 
+// Abre la app con la sesión ya cargada en `token`/`usuario` (usado al iniciar sesión y al recargar)
+function aplicarSesion(){
+  // Redirigir según rol
+  if(usuario.rol === 'supervisor'){ window.location.href = '/supervisor.html'; return; }
+  if(usuario.rol === 'tecnica'){ window.location.href = '/tecnica.html'; return; }
+  // recepcionista y admin se quedan en el chat principal
+  document.getElementById('loginBox').style.display='none';
+  document.getElementById('app').style.display='block';
+  document.getElementById('userInfo').textContent=usuario.nombre+' - '+(usuario.sucursal||'');
+  var sub = document.getElementById('userSubtitle');
+  if(sub) sub.textContent = usuario.nombre + ' · ' + (usuario.sucursal||'');
+  fetch('/api/respuestas',{headers:{Authorization:'Bearer '+token}}).then(function(r){return r.json()}).then(function(d){misRespuestas=d;});
+  setTimeout(iniciarAtajoRespuestas, 500);
+  cargarEtiquetas();cargarMensajes();
+  clearInterval(iv); iv=setInterval(cargarMensajes,5000);
+}
+
+// Borra la sesión del navegador (al salir o si el token ya no sirve)
+function limpiarSesion(){
+  clearInterval(iv); token=''; usuario={};
+  localStorage.removeItem('token'); localStorage.removeItem('user');
+}
+
+// Al recargar: si hay sesión guardada y el token sigue vigente, entrar directo sin pedir login
+function restaurarSesion(){
+  var t = localStorage.getItem('token'), u = localStorage.getItem('user');
+  if(!t || !u) return;
+  try { usuario = JSON.parse(u); } catch(err){ limpiarSesion(); return; }
+  token = t;
+  // Validar contra el servidor: si el token caducó (24h) volvemos al login
+  fetch('/api/plantillas',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){
+    if(r.status === 401){ limpiarSesion(); return; }
+    aplicarSesion();
+  })
+  .catch(function(){ /* sin conexión: se queda en el login */ });
+}
+window.addEventListener('load', restaurarSesion);
+
 document.getElementById('btnLogin').addEventListener('click',function(){
   var e=document.getElementById('email').value;
   var p=document.getElementById('pass').value;
@@ -1123,20 +1227,7 @@ document.getElementById('btnLogin').addEventListener('click',function(){
       token=d.token;usuario=d.usuario;
       localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(usuario));
-      // Redirigir según rol
-      if(usuario.rol === 'supervisor' || usuario.rol === 'admin'){
-        if(usuario.rol === 'supervisor'){ window.location.href = '/supervisor.html'; return; }
-      }
-      if(usuario.rol === 'tecnica'){ window.location.href = '/tecnica.html'; return; }
-      // recepcionista y admin se quedan en el chat principal
-      document.getElementById('loginBox').style.display='none';
-      document.getElementById('app').style.display='block';
-      document.getElementById('userInfo').textContent=usuario.nombre+' - '+(usuario.sucursal||'');
-  fetch('/api/respuestas',{headers:{Authorization:'Bearer '+token}}).then(function(r){return r.json()}).then(function(d){misRespuestas=d;});
-  setTimeout(iniciarAtajoRespuestas, 500);
-  var sub = document.getElementById('userSubtitle');
-  if(sub) sub.textContent = usuario.nombre + ' · ' + (usuario.sucursal||'');
-      cargarEtiquetas();cargarMensajes();iv=setInterval(cargarMensajes,5000);
+      aplicarSesion();
     } else {
       document.getElementById('loginError').textContent=d.error||'Error';
     }
@@ -1144,7 +1235,8 @@ document.getElementById('btnLogin').addEventListener('click',function(){
 });
 
 document.getElementById('btnLogout').addEventListener('click',function(){
-  clearInterval(iv);token='';location.reload();
+  limpiarSesion();
+  location.reload();
 });
 
 document.getElementById('btnCerrarPerfil').addEventListener('click',function(){

@@ -5,3 +5,4 @@ whatsapp.db
 *.bak
 *.bak2
 public/uploads/
+*.bak.*

@@ -88,6 +88,13 @@ db.serialize(() => {
     ['facturable', 'INTEGER DEFAULT 0'],
     ['costo_usd', 'REAL DEFAULT 0']
   ]);
+  ensureColumns('difusiones', [
+    ['plantilla_id', 'INTEGER'],
+    ['categoria', 'TEXT'],
+    ['fallidos', 'INTEGER DEFAULT 0'],
+    ['costo_usd', 'REAL DEFAULT 0'],
+    ['errores', 'TEXT']          // JSON con los errores agrupados, para que sean visibles
+  ]);
   ensureColumns('contactos', [['origen', 'TEXT']]);
   ensureColumns('etiquetas', [['usuario_id', 'INTEGER']]);
   ensureColumns('numeros', [
@@ -739,34 +746,88 @@ app.post('/api/plantillas/sync', auth, async (req, res) => {
   }
 });
 
-app.post('/api/difusion', auth, async (req, res) => {
-  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
-  const { nombre, mensaje, filtro_etapa, numero_id } = req.body;
-  let query = 'SELECT DISTINCT telefono FROM contactos WHERE 1=1';
-  const params = [];
-  if (filtro_etapa) { query += ' AND etapa=?'; params.push(filtro_etapa); }
-  db.all(query, params, async (err, contactos) => {
-    if (err) return res.status(500).json({ error: err.message });
-    db.run('INSERT INTO difusiones (nombre, mensaje, filtro_etapa, total, estado, phone_number_id) VALUES (?, ?, ?, ?, ?, ?)',
-      [nombre, mensaje, filtro_etapa, contactos.length, 'enviando', numero_id], function(difErr, difId) {
-      const id = this.lastID;
-      db.get('SELECT * FROM numeros WHERE phone_number_id=?', [numero_id], async (err2, num) => {
-        if (!num) return res.status(404).json({ error: 'Numero no encontrado' });
-        let enviados = 0;
-        for (const c of contactos) {
-          try {
-            await require('axios').post('https://graph.facebook.com/v18.0/' + numero_id + '/messages',
-              { messaging_product: 'whatsapp', to: c.telefono, type: 'text', text: { body: mensaje } },
-              { headers: { Authorization: 'Bearer ' + num.token } });
-            db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion) VALUES (?, ?, ?, ?)', [numero_id, c.telefono, mensaje, 'saliente']);
-            enviados++;
-          } catch(e) {}
-          await new Promise(r => setTimeout(r, 500));
-        }
-        db.run('UPDATE difusiones SET enviados=?, estado=? WHERE id=?', [enviados, 'completado', id]);
-      });
+// Envia una difusion en segundo plano: manda la PLANTILLA (unica forma que Meta
+// permite fuera de la ventana de 24h), registra el costo de cada envio y guarda
+// los errores agrupados para que se vean, en vez de tragarselos.
+async function ejecutarDifusion(difId, num, plantilla, contactos) {
+  const nombrePlantilla = plantilla.nombre.toLowerCase().replace(/\s+/g, '_');
+  const idioma = plantilla.idioma || 'es';
+  let enviados = 0, fallidos = 0, costo = 0;
+  const errores = {}; // mensaje de error -> cuantas veces
+
+  for (const c of contactos) {
+    try {
+      await require('axios').post(
+        'https://graph.facebook.com/v18.0/' + num.phone_number_id + '/messages',
+        { messaging_product: 'whatsapp', to: c.telefono, type: 'template',
+          template: { name: nombrePlantilla, language: { code: idioma }, components: [] } },
+        { headers: { Authorization: 'Bearer ' + num.token } });
+      const costoMsg = await calcularCosto(c.telefono, plantilla.categoria);
+      db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, tipo, categoria, facturable, costo_usd) VALUES (?,?,?,?,?,?,?,?)',
+        [num.phone_number_id, c.telefono, '[Difusión: ' + plantilla.nombre + ']', 'saliente', 'plantilla', costoMsg.categoria, costoMsg.facturable, costoMsg.costo_usd]);
+      enviados++; costo += costoMsg.costo_usd;
+    } catch (e) {
+      fallidos++;
+      const msg = e.response?.data?.error?.message || e.message || 'Error desconocido';
+      errores[msg] = (errores[msg] || 0) + 1;
+    }
+    // Progreso cada 10 envios, para poder seguirlo en vivo
+    if ((enviados + fallidos) % 10 === 0) {
+      db.run('UPDATE difusiones SET enviados=?, fallidos=?, costo_usd=? WHERE id=?', [enviados, fallidos, Number(costo.toFixed(4)), difId]);
+    }
+    await new Promise(r => setTimeout(r, 250)); // ritmo para no saturar la API de Meta
+  }
+
+  const listaErrores = Object.entries(errores).map(([mensaje, veces]) => ({ mensaje, veces }));
+  db.run('UPDATE difusiones SET enviados=?, fallidos=?, costo_usd=?, estado=?, errores=? WHERE id=?',
+    [enviados, fallidos, Number(costo.toFixed(4)), 'completado', JSON.stringify(listaErrores), difId]);
+  console.log(`[DIFUSION ${difId}] ${enviados} enviados, ${fallidos} fallidos, $${costo.toFixed(4)} USD`);
+}
+
+app.post('/api/difusion', auth, requireRole('admin', 'supervisor'), async (req, res) => {
+  const { nombre, filtro_etapa, numero_id, plantilla_id } = req.body;
+  // El remarketing solo funciona con plantillas: el texto libre lo rechaza Meta
+  // fuera de la ventana de 24h. Por eso ahora la plantilla es obligatoria.
+  if (!plantilla_id) return res.status(400).json({ error: 'Selecciona una plantilla. La difusión por texto no llega a contactos fuera de la ventana de 24h.' });
+  try {
+    const plantilla = await new Promise(r => db.get('SELECT * FROM plantillas WHERE id=?', [plantilla_id], (e, x) => r(x)));
+    if (!plantilla) return res.status(404).json({ error: 'Plantilla no encontrada' });
+    if (plantilla.estado_meta !== 'aprobada') {
+      return res.status(400).json({ error: `La plantilla "${plantilla.nombre}" no está aprobada por Meta (estado: ${plantilla.estado_meta}). Meta rechazará el envío.` });
+    }
+    const num = await resolverNumeroEnvio(req, numero_id);
+    if (!num) return res.status(404).json({ error: 'No hay un número de WhatsApp configurado para enviar.' });
+    if (!num.token) return res.status(400).json({ error: 'El número no tiene token de WhatsApp configurado.' });
+
+    let query = 'SELECT DISTINCT telefono FROM contactos WHERE 1=1';
+    const params = [];
+    if (filtro_etapa) { query += ' AND etapa=?'; params.push(filtro_etapa); }
+    const contactos = await new Promise(r => db.all(query, params, (e, x) => r(x || [])));
+    if (!contactos.length) return res.status(400).json({ error: 'No hay contactos que cumplan el filtro' });
+
+    const difId = await new Promise((resolve, reject) => db.run(
+      'INSERT INTO difusiones (nombre, mensaje, filtro_etapa, total, estado, phone_number_id, plantilla_id, categoria) VALUES (?,?,?,?,?,?,?,?)',
+      [nombre || plantilla.nombre, '[Plantilla: ' + plantilla.nombre + ']', filtro_etapa || null, contactos.length, 'enviando', num.phone_number_id, plantilla_id, plantilla.categoria],
+      function (e) { e ? reject(e) : resolve(this.lastID); }));
+
+    // Responder ya; el envio corre en segundo plano y el frontend consulta el progreso
+    res.json({ ok: true, difusion_id: difId, total: contactos.length });
+    ejecutarDifusion(difId, num, plantilla, contactos).catch(e => {
+      console.error('[DIFUSION ' + difId + '] error fatal:', e.message);
+      db.run('UPDATE difusiones SET estado=?, errores=? WHERE id=?', ['error', JSON.stringify([{ mensaje: e.message, veces: 1 }]), difId]);
     });
-    res.json({ ok: true, total: contactos.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Progreso de una difusion (para seguirla en vivo)
+app.get('/api/difusion/:id', auth, (req, res) => {
+  db.get('SELECT * FROM difusiones WHERE id=?', [req.params.id], (e, d) => {
+    if (!d) return res.status(404).json({ error: 'No encontrada' });
+    let errores = [];
+    try { errores = JSON.parse(d.errores || '[]'); } catch (x) {}
+    res.json({ ...d, errores });
   });
 });
 

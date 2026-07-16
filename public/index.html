@@ -310,11 +310,17 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
                 </select>
               </div>
             </div>
-            <div style="margin-bottom:16px">
-              <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Mensaje</label>
-              <textarea id="dif_mensaje" placeholder="Escribe el mensaje de difusión..." style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;min-height:120px;box-sizing:border-box;resize:none"></textarea>
+            <div style="margin-bottom:12px">
+              <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Plantilla aprobada</label>
+              <select id="dif_plantilla" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px">
+                <option value="">Cargando plantillas...</option>
+              </select>
+              <p style="font-size:11px;color:#888;margin:6px 0 0">Solo se pueden difundir plantillas aprobadas por Meta. El texto libre no llega a contactos fuera de la ventana de 24h.</p>
             </div>
+            <div id="dif_preview" style="display:none;background:#f0f2f5;border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;color:#333;white-space:pre-wrap"></div>
+            <div id="dif_estimacion" style="display:none;background:#e8f5e9;border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px"></div>
             <button id="btnEnviarDifPanel" style="width:100%;padding:10px;background:#075e54;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px">📢 Enviar difusión</button>
+            <div id="dif_progreso" style="display:none;margin-top:12px"></div>
             <p id="msgDifPanel" style="font-size:13px;margin-top:8px;text-align:center"></p>
           </div>
           <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08)">
@@ -1018,7 +1024,7 @@ function switchMainTab(tab, btn){
   btn.classList.add('active');
   document.getElementById('msec-'+tab).classList.add('active');
   if(tab==='plantillas'){ cargarPlantillasPanel(); cargarRespuestasRapidas(); }
-  if(tab==='difusion') cargarHistorialDifPanel();
+  if(tab==='difusion'){ cargarHistorialDifPanel(); cargarPlantillasDifusion(); }
   if(tab==='contactos') cargarContactos();
   if(tab==='etiquetas') cargarEtiquetas();
 }
@@ -1029,7 +1035,7 @@ function switchPanelTab(tab, btn){
   btn.classList.add('active');
   document.getElementById('psec-'+tab).classList.add('active');
   if(tab==='plantillas'){ cargarPlantillasPanel(); cargarRespuestasRapidas(); }
-  if(tab==='difusion') cargarHistorialDifPanel();
+  if(tab==='difusion'){ cargarHistorialDifPanel(); cargarPlantillasDifusion(); }
 }
 
 function mostrarFormPlantilla(){
@@ -1149,32 +1155,127 @@ function cargarHistorialDifPanel(){
     var h = document.getElementById('historialDifPanel');
     if(!d.length){ h.innerHTML='<p style="color:#999;font-size:12px;text-align:center">Sin difusiones aún</p>'; return; }
     h.innerHTML = '<p style="font-size:12px;font-weight:600;color:#666;margin-bottom:8px">Historial reciente</p>' +
-      d.slice(0,5).map(function(dif){
+      d.slice(0,8).map(function(dif){
+        var costo = (dif.costo_usd!=null && dif.costo_usd>0) ? ' · $'+Number(dif.costo_usd).toFixed(4)+' USD' : '';
+        var fall = dif.fallidos>0 ? ' <span style="color:#c62828">· '+dif.fallidos+' fallidos</span>' : '';
         return '<div style="border:1px solid #eee;border-radius:6px;padding:8px;margin-bottom:6px;font-size:12px">'+
           '<div style="font-weight:600">'+dif.nombre+'</div>'+
-          '<div style="color:#666">'+dif.enviados+'/'+dif.total+' enviados · '+dif.estado+'</div>'+
+          '<div style="color:#666">'+(dif.enviados||0)+'/'+dif.total+' enviados · '+dif.estado+costo+fall+'</div>'+
         '</div>';
       }).join('');
   });
 }
 
+var _difPlantillas = [];
+
+// Cargar plantillas aprobadas en el selector de difusión
+function cargarPlantillasDifusion(){
+  var sel = document.getElementById('dif_plantilla');
+  if(!sel) return;
+  fetch('/api/plantillas',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    _difPlantillas = (d||[]).filter(function(p){ return p.estado_meta==='aprobada'; });
+    if(!_difPlantillas.length){
+      sel.innerHTML='<option value="">No tienes plantillas aprobadas</option>';
+      return;
+    }
+    sel.innerHTML='<option value="">-- Elige una plantilla --</option>'+
+      _difPlantillas.map(function(p){ return '<option value="'+p.id+'">'+p.nombre+' ('+p.categoria+')</option>'; }).join('');
+  });
+}
+
+// Al elegir plantilla: mostrar vista previa y estimar costo
+document.getElementById('dif_plantilla').addEventListener('change', function(){
+  var prev = document.getElementById('dif_preview');
+  var est = document.getElementById('dif_estimacion');
+  var p = _difPlantillas.find(function(x){ return String(x.id)===this.value; }.bind(this));
+  if(!p){ prev.style.display='none'; est.style.display='none'; return; }
+  prev.style.display='block';
+  prev.textContent = p.contenido || '(sin cuerpo de texto)';
+  est.style.display='block';
+  est.innerHTML='<span style="color:#666">Calculando costo…</span>';
+  fetch('/api/difusion/estimar',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    body:JSON.stringify({filtro_etapa:document.getElementById('dif_etapa').value, plantilla_id:p.id})})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(!d.ok){ est.innerHTML='<span style="color:#c62828">'+(d.error||'Error al estimar')+'</span>'; return; }
+    var costo = d.costo_mxn!=null ? ('$'+d.costo_mxn+' MXN') : ('$'+d.costo_usd+' USD');
+    var extraMxn = d.costo_mxn!=null ? ' <span style="color:#888">($'+d.costo_usd+' USD)</span>' : ' <span style="color:#888">(configura el tipo de cambio para ver MXN)</span>';
+    est.innerHTML =
+      '<div style="font-weight:600;color:#1b5e20;margin-bottom:4px">Costo estimado: '+costo+extraMxn+'</div>'+
+      '<div style="color:#555">'+d.facturables+' de '+d.total_contactos+' mensajes se cobran · categoría '+d.categoria+'</div>'+
+      (d.avisos&&d.avisos.length ? '<div style="color:#b8860b;margin-top:6px;font-size:12px">⚠ '+d.avisos.join('<br>⚠ ')+'</div>' : '');
+  });
+});
+
+// Reestimar si cambia el filtro de etapa
+document.getElementById('dif_etapa').addEventListener('change', function(){
+  var sel=document.getElementById('dif_plantilla');
+  if(sel.value) sel.dispatchEvent(new Event('change'));
+});
+
 document.getElementById('btnEnviarDifPanel').addEventListener('click', function(){
+  var plantilla_id = document.getElementById('dif_plantilla').value;
+  var msg = document.getElementById('msgDifPanel');
+  if(!plantilla_id){ msg.textContent='Elige una plantilla aprobada'; msg.style.color='red'; return; }
+  var est = document.getElementById('dif_estimacion');
+  var resumen = est && est.textContent ? est.textContent.replace(/\s+/g,' ').trim() : '';
+  if(!confirm('¿Enviar esta difusión?\n\n'+resumen)) return;
+
   var data = {
     nombre: document.getElementById('dif_nombre').value || 'Difusión',
-    mensaje: document.getElementById('dif_mensaje').value,
     filtro_etapa: document.getElementById('dif_etapa').value,
-    numero_id: usuario.numero_id
+    numero_id: usuario.numero_id,
+    plantilla_id: plantilla_id
   };
-  var msg = document.getElementById('msgDifPanel');
-  if(!data.mensaje){ msg.textContent='Escribe un mensaje'; msg.style.color='red'; return; }
-  msg.textContent='Enviando...'; msg.style.color='#f39c12';
+  var btn = document.getElementById('btnEnviarDifPanel');
+  btn.disabled = true;
+  msg.textContent='Iniciando envío...'; msg.style.color='#f39c12';
   fetch('/api/difusion',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(data)})
   .then(function(r){return r.json()})
   .then(function(d){
-    if(d.ok){ msg.textContent='✓ Enviado a '+d.total+' contactos'; msg.style.color='#2e7d32'; cargarHistorialDifPanel(); }
-    else { msg.textContent=d.error||'Error'; msg.style.color='red'; }
-  });
+    if(d.ok){
+      msg.textContent='';
+      seguirProgresoDifusion(d.difusion_id, d.total);
+    } else {
+      btn.disabled=false;
+      msg.textContent=d.error||'Error'; msg.style.color='red';
+    }
+  })
+  .catch(function(){ btn.disabled=false; msg.textContent='Error de conexión'; msg.style.color='red'; });
 });
+
+// Sigue el envío en vivo consultando el progreso
+function seguirProgresoDifusion(id, total){
+  var cont = document.getElementById('dif_progreso');
+  var btn = document.getElementById('btnEnviarDifPanel');
+  cont.style.display='block';
+  var timer = setInterval(function(){
+    fetch('/api/difusion/'+id,{headers:{Authorization:'Bearer '+token}})
+    .then(function(r){return r.json()})
+    .then(function(d){
+      var hechos = (d.enviados||0)+(d.fallidos||0);
+      var pct = total ? Math.round(hechos*100/total) : 0;
+      cont.innerHTML =
+        '<div style="height:8px;background:#eee;border-radius:4px;overflow:hidden;margin-bottom:6px"><div style="height:100%;width:'+pct+'%;background:#00a884;transition:width .3s"></div></div>'+
+        '<div style="font-size:12px;color:#555">'+d.enviados+' enviados · '+(d.fallidos||0)+' fallidos · '+hechos+'/'+total+'</div>';
+      if(d.estado==='completado' || d.estado==='error'){
+        clearInterval(timer);
+        btn.disabled=false;
+        var m=document.getElementById('msgDifPanel');
+        m.textContent = d.estado==='error' ? 'La difusión falló' : ('✓ Terminado: '+d.enviados+' enviados, '+(d.fallidos||0)+' fallidos');
+        m.style.color = (d.fallidos>0||d.estado==='error') ? '#c62828' : '#2e7d32';
+        if(d.errores && d.errores.length){
+          cont.innerHTML += '<div style="margin-top:8px;background:#ffebee;border-radius:6px;padding:8px;font-size:12px;color:#b71c1c">'+
+            '<strong>Errores de Meta:</strong><br>'+
+            d.errores.map(function(er){ return '• '+er.mensaje+' ('+er.veces+')'; }).join('<br>')+'</div>';
+        }
+        cargarHistorialDifPanel();
+      }
+    });
+  }, 1500);
+}
 
 
 

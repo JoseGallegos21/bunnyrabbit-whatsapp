@@ -92,6 +92,7 @@ tr:last-child td{border-bottom:none}
         <div class="tab" onclick="showTab('biblioteca',this)">Biblioteca</div>
         <div class="tab" onclick="showTab('facebook',this)">&#128279; Facebook CAPI</div>
         <div class="tab" onclick="showTab('sucursales',this)">🏢 Sucursales</div>
+        <div class="tab" onclick="showTab('workflows',this)">⚡ Automatizaciones</div>
   </div>
 
   <div class="content">
@@ -382,6 +383,69 @@ tr:last-child td{border-bottom:none}
         <button onclick="agregarNumeroSucursal()" style="background:#1f5c4a;color:#fff;border:none;padding:10px 24px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">Agregar número</button>
         <span id="numSucMsg" style="margin-left:12px;font-size:13px"></span>
       </div>
+    </div>
+
+    <!-- ========== AUTOMATIZACIONES (WORKFLOWS) ========== -->
+    <div class="section" id="sec-workflows">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:10px">
+        <h2 style="margin:0;font-size:18px">⚡ Automatizaciones</h2>
+        <button onclick="wfNuevo()" style="background:#1f5c4a;color:#fff;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">+ Nueva automatización</button>
+      </div>
+      <p style="font-size:13px;color:#666;margin:0 0 18px">Un evento inscribe al contacto y éste recorre los pasos por su cuenta. Las automatizaciones nacen <strong>apagadas</strong>: no envían nada hasta que las enciendes.</p>
+
+      <!-- Lista -->
+      <div id="wf_lista"><p style="color:#999;text-align:center;padding:20px">Cargando…</p></div>
+
+      <!-- Editor -->
+      <div id="wf_editor" style="display:none;background:#f8f9fa;border:1px solid #e0e0e0;border-radius:12px;padding:20px;margin-top:18px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <h3 id="wf_editor_titulo" style="margin:0;font-size:16px">Nueva automatización</h3>
+          <button onclick="wfCerrarEditor()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#888;line-height:1">&times;</button>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+          <div>
+            <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Nombre</label>
+            <input id="wf_nombre" type="text" placeholder="Ej: Retoque a los 21 días" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Sucursal (opcional)</label>
+            <select id="wf_sucursal" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;background:#fff">
+              <option value="">Todas las sucursales</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Disparador -->
+        <div style="background:#fff;border:2px solid #1f5c4a;border-radius:10px;padding:14px;margin-bottom:4px">
+          <div style="font-size:12px;font-weight:700;color:#1f5c4a;letter-spacing:.5px;margin-bottom:8px">CUÁNDO SE DISPARA</div>
+          <select id="wf_trigger" onchange="wfRenderTriggerConfig()" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;background:#fff">
+            <option value="cita_completada">Se completa una cita</option>
+            <option value="etiqueta_agregada">Se añade una etiqueta</option>
+            <option value="etapa_cambio">El contacto cambia de etapa</option>
+          </select>
+          <div id="wf_trigger_config" style="margin-top:10px"></div>
+        </div>
+
+        <!-- Pasos -->
+        <div id="wf_pasos"></div>
+
+        <div style="text-align:center;margin:10px 0">
+          <button onclick="wfAgregarPaso()" style="background:#fff;border:1px dashed #1f5c4a;color:#1f5c4a;padding:8px 18px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">+ Añadir paso</button>
+        </div>
+
+        <div style="display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap">
+          <button onclick="wfGuardar()" style="background:#1f5c4a;color:#fff;border:none;padding:10px 24px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">Guardar</button>
+          <label style="display:flex;align-items:center;gap:6px;font-size:14px;cursor:pointer">
+            <input type="checkbox" id="wf_activo"> Encendida
+          </label>
+          <span id="wf_msg" style="font-size:13px"></span>
+        </div>
+        <p style="font-size:12px;color:#b8860b;margin:10px 0 0">⚠ Al encenderla empezará a actuar sobre contactos reales y los envíos de plantilla cuestan dinero.</p>
+      </div>
+
+      <!-- Detalle de inscripciones -->
+      <div id="wf_detalle" style="display:none;background:#fff;border:1px solid #e0e0e0;border-radius:12px;padding:20px;margin-top:18px"></div>
     </div>
 
     <div class="section" id="sec-facebook">
@@ -790,6 +854,7 @@ function showTab(id,el){
   if(id==='reportes')cargarReportes();
     if(id==='biblioteca')cargarBiblioteca();
     if(id==='facebook'){setTimeout(function(){fbLoadNumeros();fbLoadStats();},100);}
+    if(id==='workflows')wfCargar();
 }
 
 function h(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):''}
@@ -1840,6 +1905,300 @@ function agregarNumeroSucursal(){
       msg.textContent='Error: '+(d.error||'No se pudo agregar');
       msg.style.color='#e74c3c';
     }
+  });
+}
+
+// ============================================
+// AUTOMATIZACIONES (WORKFLOWS)
+// ============================================
+var wfActual = null;      // workflow en edición (null = nuevo)
+var wfPasos = [];         // pasos en edición
+var wfPlantillas = [];
+
+var WF_TRIGGERS = {
+  cita_completada:  'Se completa una cita',
+  etiqueta_agregada:'Se añade una etiqueta',
+  etapa_cambio:     'El contacto cambia de etapa'
+};
+var WF_PASOS = {
+  esperar:          {n:'⏳ Esperar',            c:'#6a1b9a'},
+  condicion:        {n:'❓ Condición',          c:'#1565c0'},
+  agregar_etiqueta: {n:'🏷 Poner etiqueta',     c:'#00695c'},
+  quitar_etiqueta:  {n:'🏷 Quitar etiqueta',    c:'#795548'},
+  cambiar_etapa:    {n:'📊 Cambiar etapa',      c:'#ef6c00'},
+  enviar_plantilla: {n:'💬 Enviar plantilla',   c:'#2e7d32'}
+};
+var WF_ETAPAS = ['Nuevo','Seguimiento','Propuesta','Cerrado'];
+var WF_INPUT = 'width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;box-sizing:border-box';
+
+function wfCargar(){
+  // plantillas aprobadas y sucursales para los selectores
+  fetch('/api/plantillas',{headers:{Authorization:'Bearer '+token}})
+    .then(function(r){return r.json()})
+    .then(function(d){ wfPlantillas=(d||[]).filter(function(p){return p.estado_meta==='aprobada'}); });
+  fetch('/api/sucursales',{headers:{Authorization:'Bearer '+token}})
+    .then(function(r){return r.json()})
+    .then(function(d){
+      var s=document.getElementById('wf_sucursal');
+      if(s) s.innerHTML='<option value="">Todas las sucursales</option>'+
+        (d||[]).map(function(x){return '<option value="'+h(x.nombre)+'">'+h(x.nombre)+'</option>'}).join('');
+    });
+
+  fetch('/api/workflows',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    var c=document.getElementById('wf_lista');
+    if(!d.length){ c.innerHTML='<p style="color:#999;text-align:center;padding:24px">Aún no hay automatizaciones. Crea la primera con el botón de arriba.</p>'; return; }
+    c.innerHTML = d.map(function(w){
+      var st=w.stats||{};
+      var estado = w.activo
+        ? '<span style="background:#e8f5e9;color:#2e7d32;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600">● Encendida</span>'
+        : '<span style="background:#eceff1;color:#546e7a;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600">○ Apagada</span>';
+      return '<div style="background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:14px;margin-bottom:10px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'+
+          '<div>'+
+            '<div style="font-weight:600;font-size:15px">'+h(w.nombre)+' '+estado+'</div>'+
+            '<div style="font-size:12px;color:#666;margin-top:3px">'+
+              (WF_TRIGGERS[w.trigger_tipo]||w.trigger_tipo)+' · '+(w.pasos||[]).length+' paso(s)'+
+              (w.sucursal?' · '+h(w.sucursal):'')+
+            '</div>'+
+            '<div style="font-size:12px;color:#888;margin-top:3px">'+
+              (st.activos||0)+' en curso · '+(st.completados||0)+' terminados · '+(st.salidos||0)+' salieron'+
+            '</div>'+
+          '</div>'+
+          '<div style="display:flex;gap:6px;flex-wrap:wrap">'+
+            '<button onclick="wfEditar('+w.id+')" style="padding:6px 12px;border:1px solid #1f5c4a;background:#fff;color:#1f5c4a;border-radius:6px;cursor:pointer;font-size:12px">Editar</button>'+
+            '<button onclick="wfVerDetalle('+w.id+')" style="padding:6px 12px;border:1px solid #ddd;background:#fff;border-radius:6px;cursor:pointer;font-size:12px">Ver actividad</button>'+
+            '<button onclick="wfToggle('+w.id+')" style="padding:6px 12px;border:none;background:'+(w.activo?'#c62828':'#1f5c4a')+';color:#fff;border-radius:6px;cursor:pointer;font-size:12px">'+(w.activo?'Apagar':'Encender')+'</button>'+
+            '<button onclick="wfEliminar('+w.id+')" style="padding:6px 10px;border:1px solid #ffcdd2;background:#fff;color:#c62828;border-radius:6px;cursor:pointer;font-size:12px">🗑</button>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
+    }).join('');
+    window._wfCache = d;
+  });
+}
+
+function wfNuevo(){
+  wfActual=null; wfPasos=[];
+  document.getElementById('wf_editor_titulo').textContent='Nueva automatización';
+  document.getElementById('wf_nombre').value='';
+  document.getElementById('wf_sucursal').value='';
+  document.getElementById('wf_trigger').value='cita_completada';
+  document.getElementById('wf_activo').checked=false;
+  document.getElementById('wf_msg').textContent='';
+  document.getElementById('wf_detalle').style.display='none';
+  wfRenderTriggerConfig(); wfRenderPasos();
+  document.getElementById('wf_editor').style.display='block';
+  document.getElementById('wf_editor').scrollIntoView({behavior:'smooth'});
+}
+
+function wfEditar(id){
+  var w=(window._wfCache||[]).find(function(x){return x.id===id});
+  if(!w) return;
+  wfActual=w; wfPasos=JSON.parse(JSON.stringify(w.pasos||[]));
+  document.getElementById('wf_editor_titulo').textContent='Editar: '+w.nombre;
+  document.getElementById('wf_nombre').value=w.nombre||'';
+  document.getElementById('wf_sucursal').value=w.sucursal||'';
+  document.getElementById('wf_trigger').value=w.trigger_tipo||'cita_completada';
+  document.getElementById('wf_activo').checked=!!w.activo;
+  document.getElementById('wf_msg').textContent='';
+  document.getElementById('wf_detalle').style.display='none';
+  wfRenderTriggerConfig(w.trigger_config||{}); wfRenderPasos();
+  document.getElementById('wf_editor').style.display='block';
+  document.getElementById('wf_editor').scrollIntoView({behavior:'smooth'});
+}
+
+function wfCerrarEditor(){ document.getElementById('wf_editor').style.display='none'; }
+
+// Configuración extra según el disparador
+function wfRenderTriggerConfig(cfg){
+  cfg=cfg||{};
+  var t=document.getElementById('wf_trigger').value;
+  var c=document.getElementById('wf_trigger_config');
+  if(t==='etiqueta_agregada'){
+    c.innerHTML='<label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Solo con esta etiqueta (vacío = cualquiera)</label>'+
+      '<input id="wf_tcfg_etiqueta" type="text" value="'+h(cfg.etiqueta||'')+'" placeholder="Ej: 25descuento" style="'+WF_INPUT+'">';
+  } else if(t==='etapa_cambio'){
+    c.innerHTML='<label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Solo al pasar a esta etapa</label>'+
+      '<select id="wf_tcfg_etapa" style="'+WF_INPUT+';background:#fff">'+
+      '<option value="">Cualquier etapa</option>'+
+      WF_ETAPAS.map(function(e){return '<option '+(cfg.etapa===e?'selected':'')+'>'+e+'</option>'}).join('')+'</select>';
+  } else {
+    c.innerHTML='<p style="font-size:12px;color:#888;margin:0">Se dispara al marcar una cita como <strong>completada</strong>.</p>';
+  }
+}
+
+function wfLeerTriggerConfig(){
+  var t=document.getElementById('wf_trigger').value, cfg={};
+  var e=document.getElementById('wf_tcfg_etiqueta'); if(e&&e.value) cfg.etiqueta=e.value.trim();
+  var s=document.getElementById('wf_tcfg_etapa');    if(s&&s.value) cfg.etapa=s.value;
+  return cfg;
+}
+
+// Dibuja los pasos como un flujo vertical
+function wfRenderPasos(){
+  var c=document.getElementById('wf_pasos');
+  if(!wfPasos.length){
+    c.innerHTML='<div style="text-align:center;color:#999;font-size:13px;padding:16px">Sin pasos todavía</div>';
+    return;
+  }
+  c.innerHTML = wfPasos.map(function(p,i){
+    var meta=WF_PASOS[p.tipo]||{n:p.tipo,c:'#666'};
+    return '<div style="text-align:center;color:#bbb;font-size:18px;line-height:1">↓</div>'+
+      '<div style="background:#fff;border-left:4px solid '+meta.c+';border:1px solid #e0e0e0;border-left:4px solid '+meta.c+';border-radius:8px;padding:12px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
+          '<span style="font-weight:600;font-size:13px;color:'+meta.c+'">'+meta.n+'</span>'+
+          '<span>'+
+            (i>0?'<button onclick="wfMoverPaso('+i+',-1)" title="Subir" style="border:none;background:none;cursor:pointer;color:#888">▲</button>':'')+
+            (i<wfPasos.length-1?'<button onclick="wfMoverPaso('+i+',1)" title="Bajar" style="border:none;background:none;cursor:pointer;color:#888">▼</button>':'')+
+            '<button onclick="wfQuitarPaso('+i+')" title="Quitar" style="border:none;background:none;cursor:pointer;color:#c62828">✕</button>'+
+          '</span>'+
+        '</div>'+
+        wfConfigPaso(p,i)+
+      '</div>';
+  }).join('');
+}
+
+// Campos de configuración de cada tipo de paso
+function wfConfigPaso(p,i){
+  var cfg=p.config||{};
+  switch(p.tipo){
+    case 'esperar':
+      return '<div style="display:flex;gap:8px;align-items:center;font-size:13px">'+
+        '<input type="number" min="0" value="'+(cfg.dias||0)+'" onchange="wfSetCfg('+i+',\'dias\',this.value)" style="width:70px;'+WF_INPUT+'"> días'+
+        '<input type="number" min="0" value="'+(cfg.horas||0)+'" onchange="wfSetCfg('+i+',\'horas\',this.value)" style="width:70px;'+WF_INPUT+'"> horas'+
+      '</div>';
+    case 'condicion':
+      return '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px">'+
+        '<select onchange="wfSetCfg('+i+',\'tipo\',this.value);wfRenderPasos()" style="'+WF_INPUT+';width:auto;background:#fff">'+
+          '<option value="tiene_cita_futura"'+(cfg.tipo==='tiene_cita_futura'?' selected':'')+'>Ya tiene otra cita agendada</option>'+
+          '<option value="tiene_etiqueta"'+(cfg.tipo==='tiene_etiqueta'?' selected':'')+'>Tiene la etiqueta…</option>'+
+          '<option value="etapa_es"'+(cfg.tipo==='etapa_es'?' selected':'')+'>Está en la etapa…</option>'+
+          '<option value="respondio"'+(cfg.tipo==='respondio'?' selected':'')+'>Ya respondió</option>'+
+        '</select>'+
+        ((cfg.tipo==='tiene_etiqueta'||cfg.tipo==='etapa_es')
+          ? '<input type="text" value="'+h(cfg.valor||'')+'" onchange="wfSetCfg('+i+',\'valor\',this.value)" placeholder="valor" style="width:150px;'+WF_INPUT+'">' : '')+
+        '<span>→ si se cumple:</span>'+
+        '<select onchange="wfSetCfg('+i+',\'si_cumple\',this.value)" style="'+WF_INPUT+';width:auto;background:#fff">'+
+          '<option value="salir"'+(cfg.si_cumple!=='continuar'?' selected':'')+'>Sacar del flujo</option>'+
+          '<option value="continuar"'+(cfg.si_cumple==='continuar'?' selected':'')+'>Continuar</option>'+
+        '</select>'+
+      '</div>';
+    case 'agregar_etiqueta':
+    case 'quitar_etiqueta':
+      return '<input type="text" value="'+h(cfg.etiqueta||'')+'" onchange="wfSetCfg('+i+',\'etiqueta\',this.value)" placeholder="Nombre de la etiqueta (se crea si no existe)" style="'+WF_INPUT+'">';
+    case 'cambiar_etapa':
+      return '<select onchange="wfSetCfg('+i+',\'etapa\',this.value)" style="'+WF_INPUT+';background:#fff">'+
+        WF_ETAPAS.map(function(e){return '<option '+(cfg.etapa===e?'selected':'')+'>'+e+'</option>'}).join('')+'</select>';
+    case 'enviar_plantilla':
+      if(!wfPlantillas.length) return '<p style="font-size:12px;color:#c62828;margin:0">No hay plantillas aprobadas. Créalas y sincronízalas con Meta primero.</p>';
+      return '<select onchange="wfSetCfg('+i+',\'plantilla_id\',this.value)" style="'+WF_INPUT+';background:#fff">'+
+        '<option value="">-- Elige plantilla --</option>'+
+        wfPlantillas.map(function(pl){return '<option value="'+pl.id+'"'+(String(cfg.plantilla_id)===String(pl.id)?' selected':'')+'>'+h(pl.nombre)+' ('+h(pl.categoria)+')</option>'}).join('')+
+        '</select><p style="font-size:11px;color:#b8860b;margin:6px 0 0">Cada envío a un contacto cuesta dinero.</p>';
+    default: return '';
+  }
+}
+
+function wfSetCfg(i,k,v){
+  wfPasos[i].config=wfPasos[i].config||{};
+  wfPasos[i].config[k]=(k==='dias'||k==='horas')?parseInt(v||0,10):v;
+}
+function wfMoverPaso(i,d){ var t=wfPasos[i]; wfPasos[i]=wfPasos[i+d]; wfPasos[i+d]=t; wfRenderPasos(); }
+function wfQuitarPaso(i){ wfPasos.splice(i,1); wfRenderPasos(); }
+
+function wfAgregarPaso(){
+  var opciones=Object.keys(WF_PASOS).map(function(k,n){return (n+1)+') '+WF_PASOS[k].n}).join('\n');
+  var r=prompt('¿Qué paso quieres añadir?\n\n'+opciones+'\n\nEscribe el número:');
+  if(!r) return;
+  var k=Object.keys(WF_PASOS)[parseInt(r,10)-1];
+  if(!k) return;
+  var cfg={};
+  if(k==='esperar') cfg={dias:1,horas:0};
+  if(k==='condicion') cfg={tipo:'tiene_cita_futura',si_cumple:'salir'};
+  if(k==='cambiar_etapa') cfg={etapa:'Seguimiento'};
+  wfPasos.push({tipo:k,config:cfg});
+  wfRenderPasos();
+}
+
+function wfGuardar(){
+  var msg=document.getElementById('wf_msg');
+  var datos={
+    nombre:document.getElementById('wf_nombre').value.trim(),
+    trigger_tipo:document.getElementById('wf_trigger').value,
+    trigger_config:wfLeerTriggerConfig(),
+    pasos:wfPasos,
+    sucursal:document.getElementById('wf_sucursal').value||null,
+    activo:document.getElementById('wf_activo').checked?1:0
+  };
+  if(!datos.nombre){ msg.textContent='Ponle un nombre'; msg.style.color='#c62828'; return; }
+  if(!datos.pasos.length){ msg.textContent='Añade al menos un paso'; msg.style.color='#c62828'; return; }
+  var envios=datos.pasos.filter(function(p){return p.tipo==='enviar_plantilla'}).length;
+  if(datos.activo && envios && !confirm('Vas a ENCENDER esta automatización.\n\nCada contacto recibirá '+envios+' plantilla(s), y cada envío cuesta dinero.\n\n¿Continuar?')) return;
+
+  msg.textContent='Guardando…'; msg.style.color='#b8860b';
+  var url='/api/workflows'+(wfActual?'/'+wfActual.id:'');
+  fetch(url,{method:wfActual?'PUT':'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify(datos)})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(d.ok){
+      msg.textContent='✓ Guardada'+(d.aviso?' — '+d.aviso:''); msg.style.color='#2e7d32';
+      wfCargar();
+      if(!wfActual) setTimeout(wfCerrarEditor,1500);
+    } else { msg.textContent=d.error||'Error'; msg.style.color='#c62828'; }
+  })
+  .catch(function(){ msg.textContent='Error de conexión'; msg.style.color='#c62828'; });
+}
+
+function wfToggle(id){
+  var w=(window._wfCache||[]).find(function(x){return x.id===id});
+  if(!w) return;
+  var envios=(w.pasos||[]).filter(function(p){return p.tipo==='enviar_plantilla'}).length;
+  if(!w.activo && envios && !confirm('Vas a ENCENDER "'+w.nombre+'".\n\nCada contacto recibirá '+envios+' plantilla(s) y cada envío cuesta dinero.\n\n¿Continuar?')) return;
+  fetch('/api/workflows/'+id,{method:'PUT',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},
+    body:JSON.stringify({nombre:w.nombre,trigger_tipo:w.trigger_tipo,trigger_config:w.trigger_config,pasos:w.pasos,sucursal:w.sucursal,activo:w.activo?0:1})})
+  .then(function(){ wfCargar(); });
+}
+
+function wfEliminar(id){
+  var w=(window._wfCache||[]).find(function(x){return x.id===id});
+  if(!confirm('¿Eliminar "'+(w?w.nombre:'')+'"?\n\nSe borra también el historial de contactos que la recorrieron.')) return;
+  fetch('/api/workflows/'+id,{method:'DELETE',headers:{Authorization:'Bearer '+token}})
+  .then(function(){ wfCargar(); document.getElementById('wf_detalle').style.display='none'; });
+}
+
+function wfVerDetalle(id){
+  var d=document.getElementById('wf_detalle');
+  d.style.display='block';
+  d.innerHTML='<p style="color:#999">Cargando…</p>';
+  fetch('/api/workflows/'+id+'/inscripciones',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(x){
+    var badge={activo:'#1565c0',completado:'#2e7d32',salido:'#795548',error:'#c62828'};
+    d.innerHTML='<h3 style="margin:0 0 12px;font-size:16px">Actividad</h3>'+
+      '<h4 style="font-size:13px;color:#666;margin:0 0 8px">Contactos ('+x.inscripciones.length+')</h4>'+
+      (x.inscripciones.length
+        ? '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="border-bottom:2px solid #eee">'+
+          '<th style="text-align:left;padding:6px">Contacto</th><th style="text-align:left;padding:6px">Estado</th>'+
+          '<th style="text-align:left;padding:6px">Paso</th><th style="text-align:left;padding:6px">Motivo salida</th></tr></thead><tbody>'+
+          x.inscripciones.map(function(i){
+            return '<tr style="border-bottom:1px solid #f5f5f5">'+
+              '<td style="padding:6px">'+h(i.contacto_nombre||i.telefono)+'</td>'+
+              '<td style="padding:6px;color:'+(badge[i.estado]||'#666')+';font-weight:600">'+i.estado+'</td>'+
+              '<td style="padding:6px">'+i.paso_actual+'</td>'+
+              '<td style="padding:6px;color:#888">'+h(i.motivo_salida||'')+'</td></tr>';
+          }).join('')+'</tbody></table>'
+        : '<p style="color:#999;font-size:13px">Todavía no ha entrado nadie.</p>')+
+      '<h4 style="font-size:13px;color:#666;margin:18px 0 8px">Registro de acciones</h4>'+
+      (x.log.length
+        ? '<div style="max-height:240px;overflow-y:auto;font-family:monospace;font-size:12px;background:#fafafa;border-radius:6px;padding:10px">'+
+          x.log.map(function(l){
+            var err=(l.resultado||'').indexOf('ERROR')===0;
+            return '<div style="color:'+(err?'#c62828':'#444')+'">'+h(l.created_at)+' · '+h(l.telefono)+' · paso '+l.paso+' · '+h(l.accion)+' → '+h(l.resultado)+'</div>';
+          }).join('')+'</div>'
+        : '<p style="color:#999;font-size:13px">Sin acciones registradas.</p>');
+    d.scrollIntoView({behavior:'smooth'});
   });
 }
 </script>

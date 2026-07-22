@@ -59,6 +59,45 @@ db.serialize(() => {
   // Editables: Meta actualiza su tarifario y dejarlas fijas seria garantizar numeros viejos.
   db.run(`CREATE TABLE IF NOT EXISTS tarifas_meta (id INTEGER PRIMARY KEY AUTOINCREMENT, pais TEXT, categoria TEXT, precio_usd REAL, actualizado DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(pais, categoria))`);
   db.run(`CREATE TABLE IF NOT EXISTS configuracion (clave TEXT PRIMARY KEY, valor TEXT)`);
+
+  // ===== WORKFLOWS =====
+  // activo=0 por defecto: un workflow recien creado NO envia nada hasta que se
+  // activa a proposito. Mandan mensajes reales y cuestan dinero.
+  db.run(`CREATE TABLE IF NOT EXISTS workflows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT,
+    activo INTEGER DEFAULT 0,
+    trigger_tipo TEXT,
+    trigger_config TEXT DEFAULT '{}',
+    pasos TEXT DEFAULT '[]',
+    sucursal TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  // Una inscripcion = un contacto recorriendo un workflow. proximo_en dice cuando
+  // toca avanzarlo; el programador solo mira las que ya vencieron.
+  db.run(`CREATE TABLE IF NOT EXISTS workflow_inscripciones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workflow_id INTEGER,
+    contacto_id INTEGER,
+    telefono TEXT,
+    paso_actual INTEGER DEFAULT 0,
+    estado TEXT DEFAULT 'activo',
+    proximo_en DATETIME DEFAULT CURRENT_TIMESTAMP,
+    motivo_salida TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_insc_pendientes ON workflow_inscripciones (estado, proximo_en)`);
+  db.run(`CREATE TABLE IF NOT EXISTS workflow_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    inscripcion_id INTEGER,
+    workflow_id INTEGER,
+    telefono TEXT,
+    paso INTEGER,
+    accion TEXT,
+    resultado TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
   // Semillas. Solo MARKETING trae precio: es el unico que pude verificar contra el
   // tarifario de Meta. Los demas quedan sin precio a proposito, para que se
   // configuren desde el panel en vez de inventar una cifra que salga mal en los reportes.
@@ -249,6 +288,8 @@ app.put('/api/contactos/:id', auth, async (req, res) => {
       [nombre, etapa||'Nuevo', prioridad||'Media', notas||'', req.params.id],
       async (err2) => {
         if (!err2 && contactoAnterior && etapa && etapa !== contactoAnterior.etapa) {
+          // Disparador de workflows: cambio de etapa
+          dispararWorkflows('etapa_cambio', { contacto_id: req.params.id, etapa });
           try {
             // Buscar triggers del numero del contacto
             const numeroId = contactoAnterior.numero_id;
@@ -351,7 +392,15 @@ app.delete('/api/etiquetas/:id', auth, (req, res) => {
 app.post('/api/contactos/:id/etiquetas', auth, (req, res) => {
   const { etiqueta_id } = req.body;
   db.run('INSERT OR IGNORE INTO contacto_etiquetas (contacto_id, etiqueta_id) VALUES (?,?)',
-    [req.params.id, etiqueta_id], (err) => res.json({ ok: !err }));
+    [req.params.id, etiqueta_id], function (err) {
+      res.json({ ok: !err });
+      // Disparador de workflows: etiqueta añadida
+      if (!err && this.changes > 0) {
+        db.get('SELECT nombre FROM etiquetas WHERE id=?', [etiqueta_id], (e, et) => {
+          if (et) dispararWorkflows('etiqueta_agregada', { contacto_id: req.params.id, etiqueta: et.nombre });
+        });
+      }
+    });
 });
 
 app.delete('/api/contactos/:id/etiquetas/:eid', auth, (req, res) => {
@@ -1334,6 +1383,10 @@ app.put('/api/citas/:id', auth, requireRole('admin', 'supervisor', 'recepcionist
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ ok: true });
+      // Disparador de workflows: cita completada (base del seguimiento de retoque)
+      if (estado === 'completada' && contacto_id) {
+        dispararWorkflows('cita_completada', { contacto_id, servicio: servicio || null });
+      }
     }
   );
 });
@@ -1620,121 +1673,288 @@ app.get('/api/sucursales/:id/usuarios', auth, requireRole('admin', 'supervisor')
 
 
 // ============================================
-// CRON + NOTIFICACIONES WHATSAPP A TÉCNICAS
+// MOTOR DE WORKFLOWS
 // ============================================
-const cron = require('node-cron');
+// Un workflow se dispara con un evento (cita completada, etiqueta, cambio de
+// etapa) e inscribe al contacto. Cada inscripcion avanza por los pasos: esperar,
+// condicion, etiquetar, cambiar etapa o enviar plantilla. El programador corre
+// cada minuto y solo toca las inscripciones cuya espera ya vencio.
+//
+// Solo actuan los workflows con activo=1: envian mensajes reales y cuestan dinero.
 
-async function enviarMensajeWhatsApp(phoneNumberId, token, telefono, mensaje) {
-  try {
-    const telefonoLimpio = telefono.replace(/\D/g, '');
-    const telefonoFinal = telefonoLimpio.startsWith('52') ? telefonoLimpio : '52' + telefonoLimpio;
-    const response = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        to: telefonoFinal,
-        type: 'text',
-        text: { body: mensaje }
-      })
-    });
-    const data = await response.json();
-    return { ok: !data.error, data };
-  } catch(e) {
-    return { ok: false, error: e.message };
+const wfGet = (q, p = []) => new Promise(r => db.get(q, p, (e, x) => r(x)));
+const wfAll = (q, p = []) => new Promise(r => db.all(q, p, (e, x) => r(x || [])));
+const wfRun = (q, p = []) => new Promise((res, rej) => db.run(q, p, function (e) { e ? rej(e) : res(this); }));
+
+function wfLog(insc, paso, accion, resultado) {
+  db.run('INSERT INTO workflow_log (inscripcion_id, workflow_id, telefono, paso, accion, resultado) VALUES (?,?,?,?,?,?)',
+    [insc.id, insc.workflow_id, insc.telefono, paso, accion, resultado]);
+}
+
+// Busca o crea la etiqueta por nombre y se la pone al contacto
+async function wfEtiquetar(contacto_id, nombreEtiqueta, quitar) {
+  let et = await wfGet('SELECT id FROM etiquetas WHERE nombre=?', [nombreEtiqueta]);
+  if (!et) {
+    if (quitar) return 'la etiqueta no existe';
+    const r = await wfRun('INSERT INTO etiquetas (nombre, color) VALUES (?,?)', [nombreEtiqueta, '#075e54']);
+    et = { id: r.lastID };
+  }
+  if (quitar) {
+    await wfRun('DELETE FROM contacto_etiquetas WHERE contacto_id=? AND etiqueta_id=?', [contacto_id, et.id]);
+    return 'etiqueta quitada: ' + nombreEtiqueta;
+  }
+  await wfRun('INSERT OR IGNORE INTO contacto_etiquetas (contacto_id, etiqueta_id) VALUES (?,?)', [contacto_id, et.id]);
+  return 'etiqueta puesta: ' + nombreEtiqueta;
+}
+
+// Evalua una condicion sobre el contacto. Devuelve true si SE CUMPLE.
+async function wfCondicion(insc, cfg) {
+  const cid = insc.contacto_id;
+  switch (cfg.tipo) {
+    case 'tiene_etiqueta': {
+      const r = await wfGet(`SELECT 1 x FROM contacto_etiquetas ce JOIN etiquetas e ON e.id=ce.etiqueta_id
+                             WHERE ce.contacto_id=? AND e.nombre=?`, [cid, cfg.valor]);
+      return !!r;
+    }
+    case 'etapa_es': {
+      const r = await wfGet('SELECT etapa FROM contactos WHERE id=?', [cid]);
+      return !!r && r.etapa === cfg.valor;
+    }
+    case 'tiene_cita_futura': {
+      const r = await wfGet(`SELECT 1 x FROM citas WHERE contacto_id=? AND estado!='cancelada'
+                             AND date(fecha) >= date('now')`, [cid]);
+      return !!r;
+    }
+    case 'respondio': {
+      // ¿escribio desde que entro al workflow?
+      const r = await wfGet(`SELECT 1 x FROM mensajes WHERE contacto=? AND direccion='entrante'
+                             AND timestamp > ?`, [insc.telefono, insc.created_at]);
+      return !!r;
+    }
+    default:
+      return false;
   }
 }
 
-async function obtenerDatosSucursal(sucursalNombre) {
-  return new Promise((resolve, reject) => {
-    db.get(`SELECT s.phone_number_id, n.token FROM sucursales s
-            LEFT JOIN numeros n ON n.phone_number_id = s.phone_number_id
-            WHERE s.nombre = ? AND s.activo = 1`, [sucursalNombre], (err, row) => {
-      if (err) reject(err); else resolve(row);
-    });
-  });
+// Ejecuta un paso. Devuelve { esperar_ms } si toca esperar, { salir, motivo } si
+// el contacto debe salir del flujo, o null para continuar al siguiente paso.
+async function wfEjecutarPaso(insc, paso) {
+  const cfg = paso.config || {};
+  switch (paso.tipo) {
+    case 'esperar': {
+      const ms = ((cfg.dias || 0) * 24 * 60 + (cfg.horas || 0) * 60 + (cfg.minutos || 0)) * 60 * 1000;
+      // Una espera de 0 no debe ceder al programador: seguiria parada hasta la
+      // siguiente vuelta del cron sin motivo. Se continua en el momento.
+      if (ms <= 0) return null;
+      wfLog(insc, insc.paso_actual, 'esperar', `${cfg.dias || 0}d ${cfg.horas || 0}h`);
+      return { esperar_ms: ms };
+    }
+    case 'condicion': {
+      const cumple = await wfCondicion(insc, cfg);
+      // si_cumple: 'salir' saca al contacto; 'continuar' lo deja seguir
+      const accion = cumple ? (cfg.si_cumple || 'continuar') : (cfg.si_no_cumple || 'continuar');
+      wfLog(insc, insc.paso_actual, 'condicion', `${cfg.tipo}=${cumple} -> ${accion}`);
+      if (accion === 'salir') return { salir: true, motivo: `condición ${cfg.tipo}` };
+      return null;
+    }
+    case 'agregar_etiqueta': {
+      const r = await wfEtiquetar(insc.contacto_id, cfg.etiqueta, false);
+      wfLog(insc, insc.paso_actual, 'agregar_etiqueta', r);
+      return null;
+    }
+    case 'quitar_etiqueta': {
+      const r = await wfEtiquetar(insc.contacto_id, cfg.etiqueta, true);
+      wfLog(insc, insc.paso_actual, 'quitar_etiqueta', r);
+      return null;
+    }
+    case 'cambiar_etapa': {
+      await wfRun('UPDATE contactos SET etapa=? WHERE id=?', [cfg.etapa, insc.contacto_id]);
+      wfLog(insc, insc.paso_actual, 'cambiar_etapa', cfg.etapa);
+      return null;
+    }
+    case 'enviar_plantilla': {
+      const p = await wfGet('SELECT * FROM plantillas WHERE id=?', [cfg.plantilla_id]);
+      if (!p) { wfLog(insc, insc.paso_actual, 'enviar_plantilla', 'ERROR: plantilla no encontrada'); return null; }
+      if (p.estado_meta !== 'aprobada') { wfLog(insc, insc.paso_actual, 'enviar_plantilla', `ERROR: plantilla no aprobada (${p.estado_meta})`); return null; }
+      const contacto = await wfGet('SELECT numero_id FROM contactos WHERE id=?', [insc.contacto_id]);
+      const num = await wfGet(`SELECT * FROM numeros WHERE phone_number_id=? AND token IS NOT NULL AND token!=''`,
+        [contacto && contacto.numero_id]);
+      if (!num) { wfLog(insc, insc.paso_actual, 'enviar_plantilla', 'ERROR: sin número con token para este contacto'); return null; }
+      try {
+        await axios.post(`https://graph.facebook.com/v18.0/${num.phone_number_id}/messages`,
+          { messaging_product: 'whatsapp', to: insc.telefono, type: 'template',
+            template: { name: p.nombre.toLowerCase().replace(/\s+/g, '_'), language: { code: p.idioma || 'es' }, components: [] } },
+          { headers: { Authorization: 'Bearer ' + num.token } });
+        const c = await calcularCosto(insc.telefono, p.categoria);
+        db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, tipo, categoria, facturable, costo_usd) VALUES (?,?,?,?,?,?,?,?)',
+          [num.phone_number_id, insc.telefono, '[Workflow: ' + p.nombre + ']', 'saliente', 'plantilla', c.categoria, c.facturable, c.costo_usd]);
+        wfLog(insc, insc.paso_actual, 'enviar_plantilla', `enviada ${p.nombre} ($${c.costo_usd})`);
+      } catch (e) {
+        wfLog(insc, insc.paso_actual, 'enviar_plantilla', 'ERROR: ' + (e.response?.data?.error?.message || e.message));
+      }
+      return null;
+    }
+    default:
+      wfLog(insc, insc.paso_actual, 'desconocido', 'tipo de paso no reconocido: ' + paso.tipo);
+      return null;
+  }
 }
 
-// CRON — Recordatorio día anterior a las 8pm
-cron.schedule('0 20 * * *', async () => {
-  console.log('[CRON] Enviando recordatorios noche...');
-  const manana = new Date();
-  manana.setDate(manana.getDate() + 1);
-  const fechaManana = manana.toISOString().split('T')[0];
+// Avanza una inscripcion todo lo que pueda hasta que toque esperar o termine
+async function wfAvanzar(insc) {
+  const wf = await wfGet('SELECT * FROM workflows WHERE id=?', [insc.workflow_id]);
+  if (!wf || !wf.activo) return; // si lo desactivaron a mitad, se queda parado
+  let pasos = [];
+  try { pasos = JSON.parse(wf.pasos || '[]'); } catch (e) { return; }
 
-  db.all(`SELECT c.*, u.nombre as tecnica_nombre, ct.nombre as contacto_nombre
-          FROM citas c
-          LEFT JOIN usuarios u ON c.tecnica_id = u.id
-          LEFT JOIN contactos ct ON c.contacto_id = ct.id
-          WHERE c.fecha = ? AND c.estado = 'pendiente' AND c.tecnica_id IS NOT NULL
-          ORDER BY c.tecnica_id, c.hora_inicio`, [fechaManana], async (err, citas) => {
-    if (err || !citas.length) return;
-
-    // Agrupar por técnica
-    const porTecnica = {};
-    citas.forEach(c => {
-      if (!porTecnica[c.tecnica_id]) porTecnica[c.tecnica_id] = { nombre: c.tecnica_nombre, sucursal: c.sucursal, citas: [] };
-      porTecnica[c.tecnica_id].citas.push(c);
-    });
-
-    for (const [tecnicaId, data] of Object.entries(porTecnica)) {
-      const tecnica = await new Promise(resolve => db.get(`SELECT numero_id FROM usuarios WHERE id=?`, [tecnicaId], (err,r) => resolve(r)));
-      if (!tecnica?.numero_id) continue;
-      const sucursal = await obtenerDatosSucursal(data.sucursal);
-      if (!sucursal?.phone_number_id || !sucursal?.token) continue;
-
-      const fechaTexto = manana.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
-      const listaCitas = data.citas.map((c, i) => `${i+1}. ${c.hora_inicio?.slice(0,5)} — ${c.contacto_nombre || 'Sin nombre'} (${c.servicio || 'Sin especificar'})`).join('\n');
-      const mensaje = `🌙 *Recordatorio para mañana*\n\nHola ${data.nombre}, mañana *${fechaTexto}* tienes *${data.citas.length} cita${data.citas.length > 1 ? 's' : ''}*:\n\n${listaCitas}\n\n¡Que tengas una excelente jornada! 🌸`;
-
-      await enviarMensajeWhatsApp(sucursal.phone_number_id, sucursal.token, tecnica.numero_id, mensaje);
+  let i = insc.paso_actual;
+  // Tope de pasos por vuelta: evita que un workflow mal hecho se cicle
+  for (let n = 0; n < 50; n++) {
+    if (i >= pasos.length) {
+      await wfRun(`UPDATE workflow_inscripciones SET estado='completado', paso_actual=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, [i, insc.id]);
+      return;
     }
-  });
-}, { timezone: 'America/Mexico_City' });
-
-// CRON — Recordatorio mismo día a las 7am
-cron.schedule('0 7 * * *', async () => {
-  console.log('[CRON] Enviando recordatorios mañana...');
-  const hoy = new Date().toISOString().split('T')[0];
-
-  db.all(`SELECT c.*, u.nombre as tecnica_nombre, ct.nombre as contacto_nombre
-          FROM citas c
-          LEFT JOIN usuarios u ON c.tecnica_id = u.id
-          LEFT JOIN contactos ct ON c.contacto_id = ct.id
-          WHERE c.fecha = ? AND c.estado = 'pendiente' AND c.tecnica_id IS NOT NULL
-          ORDER BY c.tecnica_id, c.hora_inicio`, [hoy], async (err, citas) => {
-    if (err || !citas.length) return;
-
-    const porTecnica = {};
-    citas.forEach(c => {
-      if (!porTecnica[c.tecnica_id]) porTecnica[c.tecnica_id] = { nombre: c.tecnica_nombre, sucursal: c.sucursal, citas: [] };
-      porTecnica[c.tecnica_id].citas.push(c);
-    });
-
-    for (const [tecnicaId, data] of Object.entries(porTecnica)) {
-      const tecnica = await new Promise(resolve => db.get(`SELECT numero_id FROM usuarios WHERE id=?`, [tecnicaId], (err,r) => resolve(r)));
-      if (!tecnica?.numero_id) continue;
-      const sucursal = await obtenerDatosSucursal(data.sucursal);
-      if (!sucursal?.phone_number_id || !sucursal?.token) continue;
-
-      const primera = data.citas[0];
-      const listaCitas = data.citas.map((c, i) => `${i+1}. ${c.hora_inicio?.slice(0,5)} — ${c.contacto_nombre || 'Sin nombre'} (${c.servicio || 'Sin especificar'})`).join('\n');
-      const mensaje = `🌸 *¡Buenos días ${data.nombre}!*\n\nHoy tienes *${data.citas.length} cita${data.citas.length > 1 ? 's' : ''}*:\n\n${listaCitas}\n\nTu primera cita es a las *${primera.hora_inicio?.slice(0,5)}*. ¡Mucho éxito hoy! ✨`;
-
-      await enviarMensajeWhatsApp(sucursal.phone_number_id, sucursal.token, tecnica.numero_id, mensaje);
+    insc.paso_actual = i;
+    const r = await wfEjecutarPaso(insc, pasos[i]);
+    if (r && r.salir) {
+      await wfRun(`UPDATE workflow_inscripciones SET estado='salido', motivo_salida=?, paso_actual=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+        [r.motivo, i, insc.id]);
+      return;
     }
+    if (r && r.esperar_ms != null) {
+      const seg = Math.round(r.esperar_ms / 1000);
+      await wfRun(`UPDATE workflow_inscripciones SET paso_actual=?, proximo_en=datetime('now','+' || ? || ' seconds'), updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+        [i + 1, seg, insc.id]);
+      return;
+    }
+    i++;
+  }
+  // Si llegamos aqui el workflow tiene demasiados pasos seguidos sin espera
+  await wfRun(`UPDATE workflow_inscripciones SET estado='error', motivo_salida='demasiados pasos sin espera', updated_at=CURRENT_TIMESTAMP WHERE id=?`, [insc.id]);
+}
+
+// Inscribe contactos cuando ocurre un evento
+async function dispararWorkflows(tipo, datos) {
+  try {
+    const wfs = await wfAll('SELECT * FROM workflows WHERE activo=1 AND trigger_tipo=?', [tipo]);
+    for (const wf of wfs) {
+      let cfg = {};
+      try { cfg = JSON.parse(wf.trigger_config || '{}'); } catch (e) {}
+      // Filtros del disparador
+      if (cfg.etiqueta && cfg.etiqueta !== datos.etiqueta) continue;
+      if (cfg.etapa && cfg.etapa !== datos.etapa) continue;
+      if (wf.sucursal && datos.sucursal && wf.sucursal !== datos.sucursal) continue;
+
+      const contacto = await wfGet('SELECT id, telefono FROM contactos WHERE id=?', [datos.contacto_id]);
+      if (!contacto) continue;
+      // No inscribir dos veces al mismo contacto en el mismo workflow.
+      // Ademas se respeta un enfriamiento: aunque haya salido o terminado, no se
+      // vuelve a inscribir enseguida. Sin esto, un disparador que se repite (doble
+      // clic, o marcar la misma cita completada dos veces) mete al contacto varias
+      // veces y le llegan mensajes repetidos.
+      const horasEnfriamiento = cfg.enfriamiento_horas != null ? cfg.enfriamiento_horas : 24;
+      const ya = await wfGet(
+        `SELECT id, estado FROM workflow_inscripciones
+         WHERE workflow_id=? AND contacto_id=?
+           AND (estado='activo' OR created_at > datetime('now','-' || ? || ' hours'))
+         LIMIT 1`,
+        [wf.id, contacto.id, horasEnfriamiento]);
+      if (ya) continue;
+      const r = await wfRun('INSERT INTO workflow_inscripciones (workflow_id, contacto_id, telefono) VALUES (?,?,?)',
+        [wf.id, contacto.id, contacto.telefono]);
+      console.log(`[WF] inscrito ${contacto.telefono} en "${wf.nombre}" (${tipo})`);
+      const insc = await wfGet('SELECT * FROM workflow_inscripciones WHERE id=?', [r.lastID]);
+      await wfAvanzar(insc);
+    }
+  } catch (e) {
+    console.error('[WF] error disparando', tipo, e.message);
+  }
+}
+
+// Programador: cada minuto avanza las inscripciones cuya espera vencio
+let wfCorriendo = false;
+async function wfProcesarPendientes() {
+  if (wfCorriendo) return; // evita solapamiento si una vuelta tarda
+  wfCorriendo = true;
+  try {
+    const pendientes = await wfAll(`SELECT * FROM workflow_inscripciones
+                                    WHERE estado='activo' AND proximo_en <= datetime('now') LIMIT 200`);
+    for (const insc of pendientes) await wfAvanzar(insc);
+    if (pendientes.length) console.log(`[WF] ${pendientes.length} inscripcion(es) avanzadas`);
+  } catch (e) {
+    console.error('[WF] error en el programador:', e.message);
+  } finally {
+    wfCorriendo = false;
+  }
+}
+cronJobs.schedule('* * * * *', wfProcesarPendientes, { timezone: 'America/Mexico_City' });
+
+// ===== API DE WORKFLOWS =====
+app.get('/api/workflows', auth, requireRole('admin', 'supervisor'), async (req, res) => {
+  const wfs = await wfAll('SELECT * FROM workflows ORDER BY created_at DESC');
+  for (const w of wfs) {
+    const s = await wfGet(`SELECT
+        SUM(estado='activo') activos, SUM(estado='completado') completados,
+        SUM(estado='salido') salidos, COUNT(*) total
+      FROM workflow_inscripciones WHERE workflow_id=?`, [w.id]);
+    w.stats = s || {};
+    try { w.pasos = JSON.parse(w.pasos || '[]'); } catch (e) { w.pasos = []; }
+    try { w.trigger_config = JSON.parse(w.trigger_config || '{}'); } catch (e) { w.trigger_config = {}; }
+  }
+  res.json(wfs);
+});
+
+app.post('/api/workflows', auth, requireRole('admin', 'supervisor'), async (req, res) => {
+  const { nombre, trigger_tipo, trigger_config, pasos, sucursal } = req.body;
+  if (!nombre || !trigger_tipo) return res.status(400).json({ error: 'Nombre y disparador son obligatorios' });
+  try {
+    const r = await wfRun('INSERT INTO workflows (nombre, trigger_tipo, trigger_config, pasos, sucursal, activo) VALUES (?,?,?,?,?,0)',
+      [nombre, trigger_tipo, JSON.stringify(trigger_config || {}), JSON.stringify(pasos || []), sucursal || null]);
+    // Nace desactivado a proposito
+    res.json({ ok: true, id: r.lastID, activo: 0, aviso: 'Creado desactivado. Actívalo cuando lo hayas revisado.' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/workflows/:id', auth, requireRole('admin', 'supervisor'), async (req, res) => {
+  const { nombre, trigger_tipo, trigger_config, pasos, sucursal, activo } = req.body;
+  try {
+    await wfRun(`UPDATE workflows SET nombre=?, trigger_tipo=?, trigger_config=?, pasos=?, sucursal=?, activo=? WHERE id=?`,
+      [nombre, trigger_tipo, JSON.stringify(trigger_config || {}), JSON.stringify(pasos || []), sucursal || null, activo ? 1 : 0, req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/workflows/:id', auth, requireRole('admin'), async (req, res) => {
+  await wfRun('DELETE FROM workflows WHERE id=?', [req.params.id]);
+  await wfRun('DELETE FROM workflow_inscripciones WHERE workflow_id=?', [req.params.id]);
+  res.json({ ok: true });
+});
+
+// Inscripciones y registro de un workflow (para ver que hizo con cada contacto)
+app.get('/api/workflows/:id/inscripciones', auth, requireRole('admin', 'supervisor'), async (req, res) => {
+  const insc = await wfAll(`SELECT i.*, c.nombre contacto_nombre FROM workflow_inscripciones i
+                            LEFT JOIN contactos c ON c.id=i.contacto_id
+                            WHERE i.workflow_id=? ORDER BY i.updated_at DESC LIMIT 100`, [req.params.id]);
+  const log = await wfAll('SELECT * FROM workflow_log WHERE workflow_id=? ORDER BY created_at DESC LIMIT 100', [req.params.id]);
+  res.json({ inscripciones: insc, log });
+});
+
+// Simulacion: a cuantos contactos afectaria hoy, sin enviar nada
+app.post('/api/workflows/:id/simular', auth, requireRole('admin', 'supervisor'), async (req, res) => {
+  const wf = await wfGet('SELECT * FROM workflows WHERE id=?', [req.params.id]);
+  if (!wf) return res.status(404).json({ error: 'No encontrado' });
+  let pasos = [], envios = 0;
+  try { pasos = JSON.parse(wf.pasos || '[]'); } catch (e) {}
+  for (const p of pasos) if (p.tipo === 'enviar_plantilla') envios++;
+  const activos = await wfGet(`SELECT COUNT(*) n FROM workflow_inscripciones WHERE workflow_id=? AND estado='activo'`, [req.params.id]);
+  res.json({
+    ok: true, nombre: wf.nombre, activo: !!wf.activo,
+    disparador: wf.trigger_tipo, pasos: pasos.length,
+    envios_por_contacto: envios,
+    inscripciones_activas: activos ? activos.n : 0,
+    aviso: envios ? `Cada contacto recibirá ${envios} plantilla(s). Con muchos contactos esto cuesta dinero.` : 'Este workflow no envía mensajes.'
   });
-}, { timezone: 'America/Mexico_City' });
-
-// ============================================
-// ENDPOINTS DE SUCURSALES
-// ============================================
-
-
-
-
-
-// Usuarios por sucursal
+});
 
 // HOST permite que staging escuche solo en local (HOST=127.0.0.1) y no quede expuesto a internet.
 // Sin HOST definido se comporta como siempre (0.0.0.0), para no cambiar produccion.

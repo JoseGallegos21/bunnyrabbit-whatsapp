@@ -329,6 +329,37 @@ tr:last-child td{border-bottom:none}
         <h2>Contactos por etapa del pipeline</h2>
         <div class="bar-chart" id="etapasChart"></div>
       </div>
+
+      <!-- ===== GASTO EN WHATSApp (META) ===== -->
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:6px">
+          <h2 style="margin:0">💰 Gasto en WhatsApp (Meta)</h2>
+          <button onclick="wfAbrirTarifas()" style="padding:6px 12px;border:1px solid #ddd;background:#fff;border-radius:6px;cursor:pointer;font-size:12px">⚙ Tarifas</button>
+        </div>
+        <p style="font-size:12px;color:#888;margin:0 0 12px">Solo se cobran las plantillas de Marketing y las de Utility/Auth fuera de la ventana de 24h. Los mensajes normales y las respuestas dentro de 24h son gratis.</p>
+        <div class="stat-grid" id="gastoGrid"></div>
+        <div id="gastoPorSucursal" style="margin-top:14px"></div>
+        <p id="gastoAviso" style="font-size:12px;color:#b8860b;margin:10px 0 0"></p>
+      </div>
+    </div>
+
+    <!-- Modal editor de tarifas -->
+    <div id="tarifasModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+      <div style="background:#fff;border-radius:12px;padding:22px;width:460px;max-width:94vw;max-height:90vh;overflow-y:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <h3 style="margin:0;font-size:16px">Tarifas de Meta</h3>
+          <button onclick="document.getElementById('tarifasModal').style.display='none'" style="background:none;border:none;font-size:22px;cursor:pointer;color:#888">&times;</button>
+        </div>
+        <p style="font-size:12px;color:#666;margin:0 0 14px">Precio en USD por mensaje entregado. Actualízalos con tu tarifario de Meta (Administrador de WhatsApp). Deja vacío lo que no uses.</p>
+        <div id="tarifasCampos"></div>
+        <label style="font-size:12px;color:#666;display:block;margin:14px 0 4px">Tipo de cambio USD → MXN</label>
+        <input id="tarifaTC" type="number" step="0.01" placeholder="Ej: 18.50" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;box-sizing:border-box">
+        <p style="font-size:11px;color:#888;margin:4px 0 0">Sin esto los reportes solo muestran dólares.</p>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:16px">
+          <button onclick="wfGuardarTarifas()" style="background:#1f5c4a;color:#fff;border:none;padding:10px 22px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">Guardar</button>
+          <span id="tarifaMsg" style="font-size:13px"></span>
+        </div>
+      </div>
     </div>
 
     <div class="section" id="sec-sucursales">
@@ -430,8 +461,9 @@ tr:last-child td{border-bottom:none}
         <!-- Pasos -->
         <div id="wf_pasos"></div>
 
-        <div style="text-align:center;margin:10px 0">
-          <button onclick="wfAgregarPaso()" style="background:#fff;border:1px dashed #1f5c4a;color:#1f5c4a;padding:8px 18px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">+ Añadir paso</button>
+        <div style="text-align:center;margin:10px 0;position:relative">
+          <button onclick="wfToggleMenuPaso(event)" style="background:#fff;border:1px dashed #1f5c4a;color:#1f5c4a;padding:8px 18px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">+ Añadir paso</button>
+          <div id="wf_menu_paso" style="display:none;position:absolute;left:50%;transform:translateX(-50%);top:42px;z-index:20;background:#fff;border:1px solid #ddd;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,0.15);padding:6px;min-width:220px;text-align:left"></div>
         </div>
 
         <div style="display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap">
@@ -1408,6 +1440,88 @@ function cargarReportes(){
       return '<div class="bar-row"><div class="bar-label">'+h(e.etapa)+'</div><div class="bar-track"><div class="bar-fill" style="width:'+pct+'%"></div></div><div class="bar-val">'+e.total+'</div></div>';
     }).join('')||'<p style="color:#999;text-align:center">Sin contactos</p>';
   });
+  cargarGasto();
+}
+
+// ===== GASTO FINANCIERO =====
+function cargarGasto(){
+  var dias=document.getElementById('r_dias').value;
+  fetch('/api/reportes/gasto?dias='+dias,{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(!d.ok) return;
+    var moneda = d.total_mxn!=null ? ('$'+d.total_mxn.toFixed(2)+' MXN') : ('$'+d.total_usd.toFixed(4)+' USD');
+    var facturables = d.filas.reduce(function(a,f){return a+(f.facturables||0)},0);
+    var enviados = d.filas.reduce(function(a,f){return a+(f.enviados||0)},0);
+    document.getElementById('gastoGrid').innerHTML=
+      '<div class="stat-card"><div class="num" style="color:#1b5e20">'+moneda+'</div><div class="lbl">Gasto ('+d.dias+' días)</div></div>'+
+      '<div class="stat-card"><div class="num">'+facturables+'</div><div class="lbl">Mensajes con costo</div></div>'+
+      '<div class="stat-card"><div class="num">'+enviados+'</div><div class="lbl">Plantillas enviadas</div></div>'+
+      '<div class="stat-card"><div class="num">'+(d.tipo_cambio?('$'+d.tipo_cambio):'—')+'</div><div class="lbl">Tipo de cambio</div></div>';
+
+    // Agrupar por sucursal
+    var porSuc={};
+    d.filas.forEach(function(f){
+      if(!porSuc[f.sucursal]) porSuc[f.sucursal]={usd:0,mxn:0,facturables:0};
+      porSuc[f.sucursal].usd += f.costo_usd||0;
+      porSuc[f.sucursal].mxn += f.costo_mxn||0;
+      porSuc[f.sucursal].facturables += f.facturables||0;
+    });
+    var sucs=Object.keys(porSuc).sort(function(a,b){return porSuc[b].usd-porSuc[a].usd});
+    var cont=document.getElementById('gastoPorSucursal');
+    if(!sucs.length || d.total_usd===0){
+      cont.innerHTML='<p style="color:#999;font-size:13px;text-align:center;padding:8px">Sin gasto en este periodo</p>';
+    } else {
+      cont.innerHTML='<h3 style="font-size:14px;margin:0 0 8px;color:#555">Por sucursal</h3>'+
+        '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="border-bottom:2px solid #eee">'+
+        '<th style="text-align:left;padding:6px">Sucursal</th><th style="text-align:right;padding:6px">Mensajes</th><th style="text-align:right;padding:6px">Costo</th></tr></thead><tbody>'+
+        sucs.map(function(s){
+          var c = porSuc[s].mxn>0 ? ('$'+porSuc[s].mxn.toFixed(2)+' MXN') : ('$'+porSuc[s].usd.toFixed(4)+' USD');
+          return '<tr style="border-bottom:1px solid #f5f5f5"><td style="padding:6px">'+h(s)+'</td>'+
+            '<td style="padding:6px;text-align:right">'+porSuc[s].facturables+'</td>'+
+            '<td style="padding:6px;text-align:right;font-weight:600">'+c+'</td></tr>';
+        }).join('')+'</tbody></table>';
+    }
+    document.getElementById('gastoAviso').textContent =
+      d.tipo_cambio ? '' : '⚠ Configura el tipo de cambio en Tarifas para ver los importes en pesos.';
+  });
+}
+
+function wfAbrirTarifas(){
+  var m=document.getElementById('tarifasModal');
+  m.style.display='flex';
+  document.getElementById('tarifaMsg').textContent='';
+  fetch('/api/tarifas',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    document.getElementById('tarifaTC').value=d.tipo_cambio_usd_mxn||'';
+    document.getElementById('tarifasCampos').innerHTML=(d.tarifas||[]).map(function(t){
+      return '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'+
+        '<span style="flex:1;font-size:13px">'+t.pais+' · <strong>'+t.categoria+'</strong></span>'+
+        '<span style="color:#888">$</span>'+
+        '<input type="number" step="0.0001" data-pais="'+t.pais+'" data-cat="'+t.categoria+'" value="'+(t.precio_usd!=null?t.precio_usd:'')+'" '+
+        'placeholder="sin configurar" style="width:120px;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:13px">'+
+        '<span style="color:#888;font-size:12px">USD</span>'+
+      '</div>';
+    }).join('');
+  });
+}
+
+function wfGuardarTarifas(){
+  var msg=document.getElementById('tarifaMsg');
+  var tarifas=[].map.call(document.querySelectorAll('#tarifasCampos input'),function(el){
+    return {pais:el.getAttribute('data-pais'),categoria:el.getAttribute('data-cat'),precio_usd:el.value===''?null:el.value};
+  });
+  var tc=document.getElementById('tarifaTC').value;
+  msg.textContent='Guardando…'; msg.style.color='#b8860b';
+  fetch('/api/tarifas',{method:'PUT',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},
+    body:JSON.stringify({tarifas:tarifas, tipo_cambio_usd_mxn:tc})})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(d.ok){ msg.textContent='✓ Guardado'; msg.style.color='#2e7d32'; cargarGasto(); setTimeout(function(){document.getElementById('tarifasModal').style.display='none'},900); }
+    else { msg.textContent=d.error||'Error'; msg.style.color='#c62828'; }
+  })
+  .catch(function(){ msg.textContent='Error de conexión'; msg.style.color='#c62828'; });
 }
 
 function cerrarModal(){
@@ -2108,12 +2222,39 @@ function wfSetCfg(i,k,v){
 function wfMoverPaso(i,d){ var t=wfPasos[i]; wfPasos[i]=wfPasos[i+d]; wfPasos[i+d]=t; wfRenderPasos(); }
 function wfQuitarPaso(i){ wfPasos.splice(i,1); wfRenderPasos(); }
 
-function wfAgregarPaso(){
-  var opciones=Object.keys(WF_PASOS).map(function(k,n){return (n+1)+') '+WF_PASOS[k].n}).join('\n');
-  var r=prompt('¿Qué paso quieres añadir?\n\n'+opciones+'\n\nEscribe el número:');
-  if(!r) return;
-  var k=Object.keys(WF_PASOS)[parseInt(r,10)-1];
-  if(!k) return;
+var WF_PASO_DESC = {
+  esperar:          'Deja pasar un tiempo antes del siguiente paso',
+  condicion:        'Revisa algo del contacto y decide si sigue o sale',
+  agregar_etiqueta: 'Le pone una etiqueta (se crea si no existe)',
+  quitar_etiqueta:  'Le quita una etiqueta',
+  cambiar_etapa:    'Mueve el contacto a otra etapa del pipeline',
+  enviar_plantilla: 'Le envía una plantilla aprobada por WhatsApp'
+};
+
+function wfToggleMenuPaso(ev){
+  if(ev) ev.stopPropagation();
+  var m=document.getElementById('wf_menu_paso');
+  if(m.style.display==='block'){ m.style.display='none'; return; }
+  m.innerHTML = Object.keys(WF_PASOS).map(function(k){
+    var meta=WF_PASOS[k];
+    return '<div onclick="wfAgregarPaso(\''+k+'\')" style="padding:9px 10px;border-radius:7px;cursor:pointer;display:flex;flex-direction:column;gap:2px" '+
+      'onmouseover="this.style.background=\'#f0f2f5\'" onmouseout="this.style.background=\'transparent\'">'+
+      '<span style="font-size:13px;font-weight:600;color:'+meta.c+'">'+meta.n+'</span>'+
+      '<span style="font-size:11px;color:#888">'+WF_PASO_DESC[k]+'</span>'+
+    '</div>';
+  }).join('');
+  m.style.display='block';
+}
+
+// Cerrar el menú al hacer clic fuera
+document.addEventListener('click',function(e){
+  var m=document.getElementById('wf_menu_paso');
+  if(m && m.style.display==='block' && !m.contains(e.target)) m.style.display='none';
+});
+
+function wfAgregarPaso(k){
+  document.getElementById('wf_menu_paso').style.display='none';
+  if(!WF_PASOS[k]) return;
   var cfg={};
   if(k==='esperar') cfg={dias:1,horas:0};
   if(k==='condicion') cfg={tipo:'tiene_cita_futura',si_cumple:'salir'};

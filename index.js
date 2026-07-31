@@ -15,6 +15,19 @@ app.use(cors());
 // Guardar el cuerpo crudo: la firma de Meta se calcula sobre los bytes exactos
 // recibidos, no sobre el JSON reserializado.
 app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
+
+// Los bots que escanean la URL publica mandan JSON malformado o peticiones sin
+// cuerpo. Sin esto, body-parser lanza y deja un stack trace en los logs por cada
+// basura. Se responde 400 limpio y no se ensucia el log.
+app.use((err, req, res, next) => {
+  if (err && err.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'JSON inválido' });
+  }
+  next(err);
+});
+// Que req.body sea SIEMPRE un objeto: asi un POST vacio no rompe los handlers
+// que hacen const { x } = req.body.
+app.use((req, res, next) => { if (req.body == null) req.body = {}; next(); });
 app.use(require('express').static('public'));
 
 const multerStorage = multer.diskStorage({
@@ -452,10 +465,33 @@ app.delete('/api/respuestas/:id', auth, (req, res) => {
     [req.params.id, req.user.id], (err) => res.json({ ok: !err }));
 });
 
+// Rate limiting del login: evita que prueben contrasenas sin limite.
+// En memoria (no hace falta dependencia extra). Se cuenta por IP: tras 5 fallos
+// en 15 min se bloquea 15 min. Un login correcto reinicia el contador.
+const LOGIN_MAX = 5, LOGIN_VENTANA_MS = 15 * 60 * 1000;
+const loginIntentos = new Map(); // ip -> { fallos, hasta }
+function ipDe(req) { return (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'desconocida'; }
+// Limpieza periodica para que el Map no crezca sin fin
+setInterval(() => { const ahora = Date.now(); for (const [ip, v] of loginIntentos) if (v.hasta < ahora) loginIntentos.delete(ip); }, 60 * 60 * 1000);
+
 app.post('/api/login', (req, res) => {
+  const ip = ipDe(req);
+  const reg = loginIntentos.get(ip);
+  if (reg && reg.bloqueadoHasta && reg.bloqueadoHasta > Date.now()) {
+    const min = Math.ceil((reg.bloqueadoHasta - Date.now()) / 60000);
+    return res.status(429).json({ error: `Demasiados intentos. Espera ${min} min.` });
+  }
   const { email, password } = req.body;
   db.get('SELECT * FROM usuarios WHERE email = ?', [email], async (err, user) => {
-    if (!user || !(await bcrypt.compare(password, user.password))) return res.status(401).json({ error: 'Credenciales incorrectas' });
+    if (!user || !(await bcrypt.compare(password || '', user.password))) {
+      // Contar el fallo
+      const r = loginIntentos.get(ip) || { fallos: 0 };
+      r.fallos++;
+      if (r.fallos >= LOGIN_MAX) { r.bloqueadoHasta = Date.now() + LOGIN_VENTANA_MS; r.fallos = 0; }
+      loginIntentos.set(ip, r);
+      return res.status(401).json({ error: 'Credenciales incorrectas' });
+    }
+    loginIntentos.delete(ip); // login correcto: borron y cuenta nueva
     const token = jwt.sign({ id: user.id, rol: user.rol, numero_id: user.numero_id, sucursal: user.sucursal, nombre: user.nombre }, process.env.JWT_SECRET, { expiresIn: '24h' });
     res.json({ token, usuario: { id: user.id, nombre: user.nombre, rol: user.rol, sucursal: user.sucursal, numero_id: user.numero_id } });
   });

@@ -2198,6 +2198,11 @@ function wfConfigPaso(p,i){
           '<option value="salir"'+(cfg.si_cumple!=='continuar'?' selected':'')+'>Sacar del flujo</option>'+
           '<option value="continuar"'+(cfg.si_cumple==='continuar'?' selected':'')+'>Continuar</option>'+
         '</select>'+
+        '<span>· si NO se cumple:</span>'+
+        '<select onchange="wfSetCfg('+i+',\'si_no_cumple\',this.value)" style="'+WF_INPUT+';width:auto;background:#fff">'+
+          '<option value="continuar"'+(cfg.si_no_cumple!=='salir'?' selected':'')+'>Continuar</option>'+
+          '<option value="salir"'+(cfg.si_no_cumple==='salir'?' selected':'')+'>Sacar del flujo</option>'+
+        '</select>'+
       '</div>';
     case 'agregar_etiqueta':
     case 'quitar_etiqueta':

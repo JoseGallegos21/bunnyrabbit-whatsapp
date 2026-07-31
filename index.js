@@ -215,6 +215,29 @@ function configGet(clave) {
   });
 }
 
+// Arma los componentes de la plantilla rellenando sus variables {{1}}, {{2}}...
+// Convencion: {{1}} = primer nombre del contacto. Las demas se rellenan con el
+// nombre completo como valor por defecto seguro, porque Meta RECHAZA el envio si
+// una variable va vacia. contacto = { nombre, telefono }.
+function construirComponentesPlantilla(plantilla, contacto) {
+  const texto = (plantilla && plantilla.contenido) || '';
+  let max = 0;
+  const re = /\{\{\s*(\d+)\s*\}\}/g;
+  let m;
+  while ((m = re.exec(texto)) !== null) max = Math.max(max, parseInt(m[1], 10));
+  if (max === 0) return []; // sin variables
+
+  const nombre = (contacto && contacto.nombre) ? String(contacto.nombre).trim() : '';
+  const primerNombre = nombre ? nombre.split(/\s+/)[0] : 'Hola';
+  const parametros = [];
+  for (let i = 1; i <= max; i++) {
+    // {{1}} = primer nombre; el resto = nombre completo o un valor no vacio
+    const valor = i === 1 ? primerNombre : (nombre || primerNombre);
+    parametros.push({ type: 'text', text: valor });
+  }
+  return [{ type: 'body', parameters: parametros }];
+}
+
 // Resuelve el número desde el que se envía.
 // - recepcionista/técnica: siempre el suyo
 // - admin/supervisor: el que indiquen, o el suyo, o el único configurado si solo hay uno
@@ -845,7 +868,8 @@ async function ejecutarDifusion(difId, num, plantilla, contactos) {
       await require('axios').post(
         'https://graph.facebook.com/v18.0/' + num.phone_number_id + '/messages',
         { messaging_product: 'whatsapp', to: c.telefono, type: 'template',
-          template: { name: nombrePlantilla, language: { code: idioma }, components: [] } },
+          template: { name: nombrePlantilla, language: { code: idioma },
+            components: construirComponentesPlantilla(plantilla, { nombre: c.nombre, telefono: c.telefono }) } },
         { headers: { Authorization: 'Bearer ' + num.token } });
       const costoMsg = await calcularCosto(c.telefono, plantilla.categoria);
       db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, tipo, categoria, facturable, costo_usd) VALUES (?,?,?,?,?,?,?,?)',
@@ -884,9 +908,10 @@ app.post('/api/difusion', auth, requireRole('admin', 'supervisor'), async (req, 
     if (!num) return res.status(404).json({ error: 'No hay un número de WhatsApp configurado para enviar.' });
     if (!num.token) return res.status(400).json({ error: 'El número no tiene token de WhatsApp configurado.' });
 
-    let query = 'SELECT DISTINCT telefono FROM contactos WHERE 1=1';
+    let query = 'SELECT telefono, MAX(nombre) nombre FROM contactos WHERE 1=1';
     const params = [];
     if (filtro_etapa) { query += ' AND etapa=?'; params.push(filtro_etapa); }
+    query += ' GROUP BY telefono';
     const contactos = await new Promise(r => db.all(query, params, (e, x) => r(x || [])));
     if (!contactos.length) return res.status(400).json({ error: 'No hay contactos que cumplan el filtro' });
 
@@ -1245,6 +1270,7 @@ app.post('/api/enviar-plantilla', auth, async (req, res) => {
     if (!num) return res.status(404).json({ error: 'No hay un número de WhatsApp configurado para enviar. Asigna uno en el panel de administración.' });
     if (!num.token) return res.status(400).json({ error: 'El número ' + num.phone_number_id + ' no tiene token de WhatsApp configurado.' });
     try {
+      const contactoRow = await new Promise(r => db.get('SELECT nombre FROM contactos WHERE telefono=?', [telefono], (e, x) => r(x)));
       await require('axios').post(
         'https://graph.facebook.com/v18.0/' + num.phone_number_id + '/messages',
         {
@@ -1255,7 +1281,7 @@ app.post('/api/enviar-plantilla', auth, async (req, res) => {
             name: plantilla.nombre.toLowerCase().replace(/\s+/g, '_'),
             // Cada plantilla tiene su propio idioma en Meta (es, en_US...); usar el fijo hacía fallar el envío
             language: { code: plantilla.idioma || 'es' },
-            components: []
+            components: construirComponentesPlantilla(plantilla, { nombre: contactoRow && contactoRow.nombre, telefono })
           }
         },
         { headers: { Authorization: 'Bearer ' + num.token } }
@@ -1812,14 +1838,15 @@ async function wfEjecutarPaso(insc, paso) {
       const p = await wfGet('SELECT * FROM plantillas WHERE id=?', [cfg.plantilla_id]);
       if (!p) { wfLog(insc, insc.paso_actual, 'enviar_plantilla', 'ERROR: plantilla no encontrada'); return null; }
       if (p.estado_meta !== 'aprobada') { wfLog(insc, insc.paso_actual, 'enviar_plantilla', `ERROR: plantilla no aprobada (${p.estado_meta})`); return null; }
-      const contacto = await wfGet('SELECT numero_id FROM contactos WHERE id=?', [insc.contacto_id]);
+      const contacto = await wfGet('SELECT numero_id, nombre FROM contactos WHERE id=?', [insc.contacto_id]);
       const num = await wfGet(`SELECT * FROM numeros WHERE phone_number_id=? AND token IS NOT NULL AND token!=''`,
         [contacto && contacto.numero_id]);
       if (!num) { wfLog(insc, insc.paso_actual, 'enviar_plantilla', 'ERROR: sin número con token para este contacto'); return null; }
       try {
         await axios.post(`https://graph.facebook.com/v18.0/${num.phone_number_id}/messages`,
           { messaging_product: 'whatsapp', to: insc.telefono, type: 'template',
-            template: { name: p.nombre.toLowerCase().replace(/\s+/g, '_'), language: { code: p.idioma || 'es' }, components: [] } },
+            template: { name: p.nombre.toLowerCase().replace(/\s+/g, '_'), language: { code: p.idioma || 'es' },
+              components: construirComponentesPlantilla(p, { nombre: contacto && contacto.nombre, telefono: insc.telefono }) } },
           { headers: { Authorization: 'Bearer ' + num.token } });
         const c = await calcularCosto(insc.telefono, p.categoria);
         db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, tipo, categoria, facturable, costo_usd) VALUES (?,?,?,?,?,?,?,?)',

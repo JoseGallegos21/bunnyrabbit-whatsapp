@@ -457,8 +457,8 @@ tr:last-child td{border-bottom:none}
             <button onclick="wfZoomReset()" title="Centrar" style="border:none;background:none;width:28px;height:28px;cursor:pointer;font-size:13px">⊙</button>
           </div>
           <!-- Viewport pan/zoom -->
-          <div id="wf_viewport" style="height:480px;overflow:hidden;cursor:grab;background-image:radial-gradient(#dde3e8 1px,transparent 1px);background-size:20px 20px">
-            <div id="wf_world" style="transform-origin:top center;transition:transform .05s;padding:24px 0">
+          <div id="wf_viewport" style="height:560px;overflow:auto;cursor:grab;background-image:radial-gradient(#dde3e8 1px,transparent 1px);background-size:20px 20px">
+            <div id="wf_world" style="padding:24px 0;width:max-content;min-width:100%;margin:0 auto">
               <!-- Disparador -->
               <div style="width:280px;margin:0 auto;background:#fff;border:2px solid #1f5c4a;border-radius:10px;padding:12px;box-shadow:0 2px 6px rgba(0,0,0,0.06)">
                 <div style="font-size:11px;font-weight:700;color:#1f5c4a;letter-spacing:.5px;margin-bottom:8px">⚡ CUÁNDO SE DISPARA</div>
@@ -476,7 +476,7 @@ tr:last-child td{border-bottom:none}
           <!-- Menu para añadir paso (flotante) -->
           <div id="wf_menu_paso" style="display:none;position:absolute;z-index:40;background:#fff;border:1px solid #ddd;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,0.18);padding:6px;min-width:230px;text-align:left"></div>
         </div>
-        <p style="font-size:11px;color:#999;margin:6px 0 0;text-align:center">Arrastra el fondo para moverte · usa +/− para el zoom · clic en un paso para configurarlo</p>
+        <p style="font-size:11px;color:#999;margin:6px 0 0;text-align:center">Desplázate con la rueda o las barras · arrastra el fondo para moverte · Ctrl+rueda o +/− para el zoom</p>
 
         <div style="display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap">
           <button onclick="wfGuardar()" style="background:#1f5c4a;color:#fff;border:none;padding:10px 24px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">Guardar</button>
@@ -2419,31 +2419,44 @@ function wfAgregarPaso(k){
 }
 
 // ===== ZOOM Y DESPLAZAMIENTO DEL LIENZO =====
-var wfEscala=1, wfPanX=0, wfPanY=0;
+// El lienzo se puede desplazar con las barras y la rueda (overflow:auto),
+// arrastrando el fondo, y hacer zoom con los botones o Ctrl+rueda.
+var wfEscala=1;
 function wfAplicarTransform(){
   var w=document.getElementById('wf_world');
-  if(w) w.style.transform='translate('+wfPanX+'px,'+wfPanY+'px) scale('+wfEscala+')';
+  if(w) w.style.zoom = wfEscala;   // `zoom` sí ajusta el área de scroll en Chrome
   var lbl=document.getElementById('wf_zoom_lbl');
   if(lbl) lbl.textContent=Math.round(wfEscala*100)+'%';
 }
-function wfZoom(d){ wfEscala=Math.min(1.5,Math.max(0.4,wfEscala+d)); wfAplicarTransform(); }
-function wfZoomReset(){ wfEscala=1; wfPanX=0; wfPanY=0; wfAplicarTransform(); }
+function wfZoom(d){ wfEscala=Math.min(1.5,Math.max(0.4,Math.round((wfEscala+d)*10)/10)); wfAplicarTransform(); }
+function wfZoomReset(){
+  wfEscala=1; wfAplicarTransform();
+  var vp=document.getElementById('wf_viewport');
+  if(vp){ vp.scrollTop=0; vp.scrollLeft=(vp.scrollWidth-vp.clientWidth)/2; } // centrar horizontal
+}
 
-// Arrastrar el fondo para desplazarse (pan)
+// Arrastrar el fondo para desplazarse (mueve el scroll, no un transform)
 (function(){
   var vp=document.getElementById('wf_viewport');
   if(!vp) return;
-  var arrastrando=false, x0=0, y0=0;
+  var arrastrando=false, x0=0, y0=0, sl=0, st=0;
   vp.addEventListener('mousedown', function(e){
-    // Solo si se arrastra el fondo, no un control dentro de una caja
-    if(e.target.closest('button,select,input,textarea')) return;
-    arrastrando=true; x0=e.clientX-wfPanX; y0=e.clientY-wfPanY; vp.style.cursor='grabbing';
+    if(e.target.closest('button,select,input,textarea')) return; // no interferir con controles
+    arrastrando=true; x0=e.clientX; y0=e.clientY; sl=vp.scrollLeft; st=vp.scrollTop; vp.style.cursor='grabbing';
+    e.preventDefault();
   });
   document.addEventListener('mousemove', function(e){
     if(!arrastrando) return;
-    wfPanX=e.clientX-x0; wfPanY=e.clientY-y0; wfAplicarTransform();
+    vp.scrollLeft = sl-(e.clientX-x0);
+    vp.scrollTop  = st-(e.clientY-y0);
   });
   document.addEventListener('mouseup', function(){ arrastrando=false; if(vp) vp.style.cursor='grab'; });
+  // Ctrl + rueda = zoom; rueda sola = scroll normal (nativo)
+  vp.addEventListener('wheel', function(e){
+    if(!e.ctrlKey) return;
+    e.preventDefault();
+    wfZoom(e.deltaY<0 ? 0.1 : -0.1);
+  }, {passive:false});
 })();
 
 function wfGuardar(){

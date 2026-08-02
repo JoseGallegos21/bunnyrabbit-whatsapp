@@ -2047,6 +2047,7 @@ var WF_TRIGGERS = {
   etapa_cambio:     'El contacto cambia de etapa'
 };
 var WF_PASOS = {
+  ramas:            {n:'🔀 Ramas (caminos)',    c:'#00838f'},
   esperar:          {n:'⏳ Esperar',            c:'#6a1b9a'},
   condicion:        {n:'❓ Condición',          c:'#1565c0'},
   agregar_etiqueta: {n:'🏷 Poner etiqueta',     c:'#00695c'},
@@ -2164,83 +2165,149 @@ function wfLeerTriggerConfig(){
 
 // Dibuja los pasos como un flujo vertical
 // Conector vertical + un boton "+" para insertar un paso en esa posicion
-function wfConector(idxInsertar){
+// ===== NAVEGACION POR RUTA (para editar pasos dentro de ramas anidadas) =====
+// path = array de enteros; posiciones pares = indice de paso, impares = indice de rama.
+// "2" -> paso 2 arriba;  "2,0,1" -> paso2 -> rama0 -> paso1.
+function wfP(s){ return s===''?[]:String(s).split(',').map(Number); }
+// Devuelve la LISTA (array de pasos) apuntada por un path de longitud PAR
+function wfListaDePath(lp){
+  var lista=wfPasos;
+  for(var k=0;k<lp.length;k+=2){ lista=(lista[lp[k]].config.ramas[lp[k+1]].pasos)||[]; }
+  return lista;
+}
+// Devuelve el paso apuntado por un path de longitud IMPAR + su lista contenedora
+function wfNodo(path){ var lp=path.slice(0,-1), idx=path[path.length-1]; var lista=wfListaDePath(lp); return {lista:lista, idx:idx, paso:lista[idx]}; }
+
+// Conector con boton "+" para insertar en la lista `lp` en la posicion `idx`
+function wfConector(lp, idx){
   return '<div style="display:flex;flex-direction:column;align-items:center">'+
-    '<div style="width:2px;height:14px;background:#c3ccd4"></div>'+
-    '<button onclick="wfAbrirMenuPaso(event,'+idxInsertar+')" title="Insertar paso aquí" '+
+    '<div style="width:2px;height:12px;background:#c3ccd4"></div>'+
+    '<button onclick="wfAbrirMenuPaso(event,\''+lp.join(',')+'\','+idx+')" title="Insertar paso aquí" '+
       'style="width:20px;height:20px;border-radius:50%;border:1px solid #c3ccd4;background:#fff;color:#1f5c4a;cursor:pointer;font-size:13px;line-height:1;padding:0">+</button>'+
-    '<div style="width:2px;height:14px;background:#c3ccd4"></div>'+
+    '<div style="width:2px;height:12px;background:#c3ccd4"></div>'+
   '</div>';
 }
 
-function wfRenderPasos(){
-  var c=document.getElementById('wf_pasos');
+function wfRenderPasos(){ document.getElementById('wf_pasos').innerHTML = wfRenderLista(wfPasos, []); }
+
+// Dibuja una lista de pasos (recursiva: baja a las ramas). lp = path de la lista (par)
+function wfRenderLista(lista, lp){
   var html='';
-  wfPasos.forEach(function(p,i){
-    var meta=WF_PASOS[p.tipo]||{n:p.tipo,c:'#666'};
-    html += wfConector(i); // conector + "insertar antes de este paso"
-    html +=
-      '<div style="width:280px;margin:0 auto;background:#fff;border:1px solid #e0e0e0;border-left:4px solid '+meta.c+';border-radius:8px;padding:12px;box-shadow:0 2px 6px rgba(0,0,0,0.06)">'+
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
-          '<span style="font-weight:600;font-size:13px;color:'+meta.c+'">'+meta.n+'</span>'+
-          '<span>'+
-            (i>0?'<button onclick="wfMoverPaso('+i+',-1)" title="Subir" style="border:none;background:none;cursor:pointer;color:#888">▲</button>':'')+
-            (i<wfPasos.length-1?'<button onclick="wfMoverPaso('+i+',1)" title="Bajar" style="border:none;background:none;cursor:pointer;color:#888">▼</button>':'')+
-            '<button onclick="wfQuitarPaso('+i+')" title="Quitar" style="border:none;background:none;cursor:pointer;color:#c62828">✕</button>'+
-          '</span>'+
-        '</div>'+
-        wfConfigPaso(p,i)+
-      '</div>';
+  lista.forEach(function(p,i){
+    html += wfConector(lp, i);
+    html += wfCard(p, lp.concat([i]));
   });
-  // Nodo final: conector + boton grande para añadir al final
-  html += wfConector(wfPasos.length);
-  html +=
-    '<div style="width:280px;margin:0 auto">'+
-      '<button onclick="wfAbrirMenuPaso(event,'+wfPasos.length+')" style="width:100%;background:#fff;border:1px dashed #1f5c4a;color:#1f5c4a;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">+ Añadir paso</button>'+
-      (wfPasos.length?'':'<p style="text-align:center;color:#999;font-size:12px;margin:8px 0 0">El flujo aún no tiene pasos</p>')+
-    '</div>';
-  c.innerHTML = html;
+  html += wfConector(lp, lista.length);
+  html += '<div style="width:260px;margin:0 auto">'+
+    '<button onclick="wfAbrirMenuPaso(event,\''+lp.join(',')+'\','+lista.length+')" style="width:100%;background:#fff;border:1px dashed #1f5c4a;color:#1f5c4a;padding:8px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">+ Añadir paso</button>'+
+    (lista.length?'':'<p style="text-align:center;color:#999;font-size:12px;margin:6px 0 0">Sin pasos</p>')+
+  '</div>';
+  return html;
 }
 
-// Campos de configuración de cada tipo de paso
-function wfConfigPaso(p,i){
+// Una caja de paso. Si es "ramas", debajo dibuja las columnas de cada rama.
+function wfCard(p, path){
+  var meta=WF_PASOS[p.tipo]||{n:p.tipo,c:'#666'};
+  var ps=path.join(',');
+  var esUltimo = (function(){ var n=wfNodo(path); return n.idx>=n.lista.length-1; })();
+  var html='<div style="width:280px;margin:0 auto;background:#fff;border:1px solid #e0e0e0;border-left:4px solid '+meta.c+';border-radius:8px;padding:12px;box-shadow:0 2px 6px rgba(0,0,0,0.06)">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
+      '<span style="font-weight:600;font-size:13px;color:'+meta.c+'">'+meta.n+'</span>'+
+      '<span>'+
+        (path[path.length-1]>0?'<button onclick="wfMoverPaso(\''+ps+'\',-1)" title="Subir" style="border:none;background:none;cursor:pointer;color:#888">▲</button>':'')+
+        (!esUltimo?'<button onclick="wfMoverPaso(\''+ps+'\',1)" title="Bajar" style="border:none;background:none;cursor:pointer;color:#888">▼</button>':'')+
+        '<button onclick="wfQuitarPaso(\''+ps+'\')" title="Quitar" style="border:none;background:none;cursor:pointer;color:#c62828">✕</button>'+
+      '</span>'+
+    '</div>'+
+    wfConfigPaso(p,ps)+
+  '</div>';
+  if(p.tipo==='ramas') html += wfRenderRamas(p, path);
+  return html;
+}
+
+// Dibuja las ramas de un paso "ramas" como columnas lado a lado
+function wfRenderRamas(p, path){
+  var ps=path.join(',');
+  var ramas=(p.config&&p.config.ramas)||[];
+  var cols = ramas.map(function(rama,b){
+    var lp = path.concat([b]); // path de la lista de esta rama
+    return '<div style="min-width:290px;border:1px dashed #90a4ae;border-radius:10px;padding:10px;background:rgba(255,255,255,0.55)">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:6px">'+
+        '<input type="text" value="'+h(rama.nombre||('Rama '+(b+1)))+'" onchange="wfSetRama(\''+ps+'\','+b+',\'nombre\',this.value)" style="font-weight:600;font-size:12px;border:none;border-bottom:1px solid #ddd;background:transparent;width:150px">'+
+        (ramas.length>1?'<button onclick="wfQuitarRama(\''+ps+'\','+b+')" title="Eliminar rama" style="border:none;background:none;cursor:pointer;color:#c62828">🗑</button>':'')+
+      '</div>'+
+      wfReglaUI(ps, b, rama.regla||{})+
+      '<div style="margin-top:8px">'+wfRenderLista(rama.pasos||[], lp)+'</div>'+
+    '</div>';
+  }).join('');
+  return '<div style="width:2px;height:12px;background:#c3ccd4;margin:0 auto"></div>'+
+    '<div style="display:flex;gap:14px;justify-content:center;align-items:flex-start;overflow-x:auto;padding:4px">'+cols+'</div>'+
+    '<div style="text-align:center;margin-top:8px"><button onclick="wfAgregarRama(\''+ps+'\')" style="background:#fff;border:1px dashed #00838f;color:#00838f;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">+ Añadir rama</button></div>';
+}
+
+// Editor de la REGLA de una rama
+function wfReglaUI(ps, b, regla){
+  var t=regla.tipo||'tiene_etiqueta';
+  return '<div style="display:flex;flex-direction:column;gap:5px;font-size:12px">'+
+    '<select onchange="wfSetRegla(\''+ps+'\','+b+',\'tipo\',this.value);wfRenderPasos()" style="'+WF_INPUT+';background:#fff">'+
+      '<option value="tiene_etiqueta"'+(t==='tiene_etiqueta'?' selected':'')+'>Tiene la etiqueta…</option>'+
+      '<option value="etapa_es"'+(t==='etapa_es'?' selected':'')+'>Está en la etapa…</option>'+
+      '<option value="tiene_cita_futura"'+(t==='tiene_cita_futura'?' selected':'')+'>Ya tiene cita agendada</option>'+
+      '<option value="respondio"'+(t==='respondio'?' selected':'')+'>Ya respondió</option>'+
+      '<option value="siempre"'+(t==='siempre'?' selected':'')+'>Por defecto (siempre)</option>'+
+    '</select>'+
+    (t==='tiene_etiqueta'
+      ? '<input type="text" value="'+h(regla.valor||'')+'" onchange="wfSetRegla(\''+ps+'\','+b+',\'valor\',this.value)" placeholder="nombre de etiqueta" style="'+WF_INPUT+'">'
+      : t==='etapa_es'
+        ? '<select onchange="wfSetRegla(\''+ps+'\','+b+',\'valor\',this.value)" style="'+WF_INPUT+';background:#fff">'+WF_ETAPAS.map(function(e){return '<option '+(regla.valor===e?'selected':'')+'>'+e+'</option>'}).join('')+'</select>'
+        : '')+
+    (t==='tiene_etiqueta'
+      ? '<label style="font-size:11px;color:#666"><input type="checkbox" '+(regla.negar?'checked':'')+' onchange="wfSetRegla(\''+ps+'\','+b+',\'negar\',this.checked)"> NO la tiene</label>'
+      : '')+
+  '</div>';
+}
+
+// Campos de configuración de cada tipo de paso (ps = path como texto)
+function wfConfigPaso(p,ps){
   var cfg=p.config||{};
   switch(p.tipo){
     case 'esperar':
       return '<div style="display:flex;gap:8px;align-items:center;font-size:13px">'+
-        '<input type="number" min="0" value="'+(cfg.dias||0)+'" onchange="wfSetCfg('+i+',\'dias\',this.value)" style="width:70px;'+WF_INPUT+'"> días'+
-        '<input type="number" min="0" value="'+(cfg.horas||0)+'" onchange="wfSetCfg('+i+',\'horas\',this.value)" style="width:70px;'+WF_INPUT+'"> horas'+
+        '<input type="number" min="0" value="'+(cfg.dias||0)+'" onchange="wfSetCfg(\''+ps+'\',\'dias\',this.value)" style="width:60px;'+WF_INPUT+'"> días'+
+        '<input type="number" min="0" value="'+(cfg.horas||0)+'" onchange="wfSetCfg(\''+ps+'\',\'horas\',this.value)" style="width:60px;'+WF_INPUT+'"> horas'+
       '</div>';
+    case 'ramas':
+      return '<p style="font-size:12px;color:#666;margin:0">Divide el flujo en caminos. Cada contacto toma el primero que cumpla su regla.</p>';
     case 'condicion':
       return '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px">'+
-        '<select onchange="wfSetCfg('+i+',\'tipo\',this.value);wfRenderPasos()" style="'+WF_INPUT+';width:auto;background:#fff">'+
+        '<select onchange="wfSetCfg(\''+ps+'\',\'tipo\',this.value);wfRenderPasos()" style="'+WF_INPUT+';width:auto;background:#fff">'+
           '<option value="tiene_cita_futura"'+(cfg.tipo==='tiene_cita_futura'?' selected':'')+'>Ya tiene otra cita agendada</option>'+
           '<option value="tiene_etiqueta"'+(cfg.tipo==='tiene_etiqueta'?' selected':'')+'>Tiene la etiqueta…</option>'+
           '<option value="etapa_es"'+(cfg.tipo==='etapa_es'?' selected':'')+'>Está en la etapa…</option>'+
           '<option value="respondio"'+(cfg.tipo==='respondio'?' selected':'')+'>Ya respondió</option>'+
         '</select>'+
         ((cfg.tipo==='tiene_etiqueta'||cfg.tipo==='etapa_es')
-          ? '<input type="text" value="'+h(cfg.valor||'')+'" onchange="wfSetCfg('+i+',\'valor\',this.value)" placeholder="valor" style="width:150px;'+WF_INPUT+'">' : '')+
+          ? '<input type="text" value="'+h(cfg.valor||'')+'" onchange="wfSetCfg(\''+ps+'\',\'valor\',this.value)" placeholder="valor" style="width:150px;'+WF_INPUT+'">' : '')+
         '<span>→ si se cumple:</span>'+
-        '<select onchange="wfSetCfg('+i+',\'si_cumple\',this.value)" style="'+WF_INPUT+';width:auto;background:#fff">'+
+        '<select onchange="wfSetCfg(\''+ps+'\',\'si_cumple\',this.value)" style="'+WF_INPUT+';width:auto;background:#fff">'+
           '<option value="salir"'+(cfg.si_cumple!=='continuar'?' selected':'')+'>Sacar del flujo</option>'+
           '<option value="continuar"'+(cfg.si_cumple==='continuar'?' selected':'')+'>Continuar</option>'+
         '</select>'+
         '<span>· si NO se cumple:</span>'+
-        '<select onchange="wfSetCfg('+i+',\'si_no_cumple\',this.value)" style="'+WF_INPUT+';width:auto;background:#fff">'+
+        '<select onchange="wfSetCfg(\''+ps+'\',\'si_no_cumple\',this.value)" style="'+WF_INPUT+';width:auto;background:#fff">'+
           '<option value="continuar"'+(cfg.si_no_cumple!=='salir'?' selected':'')+'>Continuar</option>'+
           '<option value="salir"'+(cfg.si_no_cumple==='salir'?' selected':'')+'>Sacar del flujo</option>'+
         '</select>'+
       '</div>';
     case 'agregar_etiqueta':
     case 'quitar_etiqueta':
-      return '<input type="text" value="'+h(cfg.etiqueta||'')+'" onchange="wfSetCfg('+i+',\'etiqueta\',this.value)" placeholder="Nombre de la etiqueta (se crea si no existe)" style="'+WF_INPUT+'">';
+      return '<input type="text" value="'+h(cfg.etiqueta||'')+'" onchange="wfSetCfg(\''+ps+'\',\'etiqueta\',this.value)" placeholder="Nombre de la etiqueta (se crea si no existe)" style="'+WF_INPUT+'">';
     case 'cambiar_etapa':
-      return '<select onchange="wfSetCfg('+i+',\'etapa\',this.value)" style="'+WF_INPUT+';background:#fff">'+
+      return '<select onchange="wfSetCfg(\''+ps+'\',\'etapa\',this.value)" style="'+WF_INPUT+';background:#fff">'+
         WF_ETAPAS.map(function(e){return '<option '+(cfg.etapa===e?'selected':'')+'>'+e+'</option>'}).join('')+'</select>';
     case 'enviar_plantilla':
       if(!wfPlantillas.length) return '<p style="font-size:12px;color:#c62828;margin:0">No hay plantillas aprobadas. Créalas y sincronízalas con Meta primero.</p>';
-      return '<select onchange="wfSetCfg('+i+',\'plantilla_id\',this.value)" style="'+WF_INPUT+';background:#fff">'+
+      return '<select onchange="wfSetCfg(\''+ps+'\',\'plantilla_id\',this.value)" style="'+WF_INPUT+';background:#fff">'+
         '<option value="">-- Elige plantilla --</option>'+
         wfPlantillas.map(function(pl){return '<option value="'+pl.id+'"'+(String(cfg.plantilla_id)===String(pl.id)?' selected':'')+'>'+h(pl.nombre)+' ('+h(pl.categoria)+')</option>'}).join('')+
         '</select><p style="font-size:11px;color:#b8860b;margin:6px 0 0">Cada envío a un contacto cuesta dinero.</p>';
@@ -2248,28 +2315,32 @@ function wfConfigPaso(p,i){
   }
 }
 
-function wfSetCfg(i,k,v){
-  wfPasos[i].config=wfPasos[i].config||{};
-  wfPasos[i].config[k]=(k==='dias'||k==='horas')?parseInt(v||0,10):v;
-}
-function wfMoverPaso(i,d){ var t=wfPasos[i]; wfPasos[i]=wfPasos[i+d]; wfPasos[i+d]=t; wfRenderPasos(); }
-function wfQuitarPaso(i){ wfPasos.splice(i,1); wfRenderPasos(); }
+function wfSetCfg(ps,k,v){ var n=wfNodo(wfP(ps)); n.paso.config=n.paso.config||{}; n.paso.config[k]=(k==='dias'||k==='horas')?parseInt(v||0,10):v; }
+function wfMoverPaso(ps,d){ var n=wfNodo(wfP(ps)); var t=n.lista[n.idx]; n.lista[n.idx]=n.lista[n.idx+d]; n.lista[n.idx+d]=t; wfRenderPasos(); }
+function wfQuitarPaso(ps){ var n=wfNodo(wfP(ps)); n.lista.splice(n.idx,1); wfRenderPasos(); }
+
+// Ramas
+function wfAgregarRama(ps){ var n=wfNodo(wfP(ps)); var r=n.paso.config.ramas=n.paso.config.ramas||[]; r.push({nombre:'Rama '+(r.length+1),regla:{tipo:'tiene_etiqueta',valor:''},pasos:[]}); wfRenderPasos(); }
+function wfQuitarRama(ps,b){ var n=wfNodo(wfP(ps)); n.paso.config.ramas.splice(b,1); wfRenderPasos(); }
+function wfSetRama(ps,b,k,v){ var n=wfNodo(wfP(ps)); n.paso.config.ramas[b][k]=v; }
+function wfSetRegla(ps,b,k,v){ var n=wfNodo(wfP(ps)); var r=n.paso.config.ramas[b]; r.regla=r.regla||{}; r.regla[k]=v; }
 
 var WF_PASO_DESC = {
+  ramas:            'Divide el flujo en varios caminos (como GHL)',
   esperar:          'Deja pasar un tiempo antes del siguiente paso',
-  condicion:        'Revisa algo del contacto y decide si sigue o sale',
+  condicion:        'Sigue o saca del flujo según una condición',
   agregar_etiqueta: 'Le pone una etiqueta (se crea si no existe)',
   quitar_etiqueta:  'Le quita una etiqueta',
   cambiar_etapa:    'Mueve el contacto a otra etapa del pipeline',
   enviar_plantilla: 'Le envía una plantilla aprobada por WhatsApp'
 };
 
-var wfInsertIdx = 0; // posicion donde se insertara el paso elegido
+var wfInsertLista='', wfInsertIdx=0; // donde se insertara el paso elegido (lista + posicion)
 
-// Abre el menu de tipos de paso junto al boton "+" pulsado, para insertar en idx
-function wfAbrirMenuPaso(ev, idx){
+// Abre el menu de tipos de paso junto al boton "+", para insertar en la lista lp en idx
+function wfAbrirMenuPaso(ev, lpStr, idx){
   if(ev) ev.stopPropagation();
-  wfInsertIdx = idx;
+  wfInsertLista=lpStr; wfInsertIdx=idx;
   var m=document.getElementById('wf_menu_paso');
   m.innerHTML = Object.keys(WF_PASOS).map(function(k){
     var meta=WF_PASOS[k];
@@ -2279,16 +2350,13 @@ function wfAbrirMenuPaso(ev, idx){
       '<span style="font-size:11px;color:#888">'+WF_PASO_DESC[k]+'</span>'+
     '</div>';
   }).join('');
-  // Posicionar el menu cerca del boton, dentro del contenedor del lienzo
   var cont = m.parentElement.getBoundingClientRect();
   var btn = ev.target.getBoundingClientRect();
-  var top = btn.bottom - cont.top + 6, left = btn.left - cont.left - 105;
-  m.style.top = Math.max(6, top) + 'px';
-  m.style.left = Math.max(6, Math.min(left, cont.width - 240)) + 'px';
+  m.style.top = Math.max(6, btn.bottom - cont.top + 6) + 'px';
+  m.style.left = Math.max(6, Math.min(btn.left - cont.left - 105, cont.width - 240)) + 'px';
   m.style.display='block';
 }
 
-// Cerrar el menú al hacer clic fuera
 document.addEventListener('click',function(e){
   var m=document.getElementById('wf_menu_paso');
   if(m && m.style.display==='block' && !m.contains(e.target)) m.style.display='none';
@@ -2301,8 +2369,13 @@ function wfAgregarPaso(k){
   if(k==='esperar') cfg={dias:1,horas:0};
   if(k==='condicion') cfg={tipo:'tiene_cita_futura',si_cumple:'continuar',si_no_cumple:'salir'};
   if(k==='cambiar_etapa') cfg={etapa:'Seguimiento'};
-  var idx = (wfInsertIdx>=0 && wfInsertIdx<=wfPasos.length) ? wfInsertIdx : wfPasos.length;
-  wfPasos.splice(idx, 0, {tipo:k,config:cfg}); // insertar en la posicion elegida
+  if(k==='ramas') cfg={ramas:[
+    {nombre:'Rama 1',regla:{tipo:'tiene_etiqueta',valor:''},pasos:[]},
+    {nombre:'Por defecto',regla:{tipo:'siempre'},pasos:[]}
+  ]};
+  var lista=wfListaDePath(wfP(wfInsertLista));
+  var idx=(wfInsertIdx>=0 && wfInsertIdx<=lista.length)?wfInsertIdx:lista.length;
+  lista.splice(idx,0,{tipo:k,config:cfg});
   wfRenderPasos();
 }
 

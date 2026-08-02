@@ -2053,7 +2053,8 @@ var WF_PASOS = {
   agregar_etiqueta: {n:'🏷 Poner etiqueta',     c:'#00695c'},
   quitar_etiqueta:  {n:'🏷 Quitar etiqueta',    c:'#795548'},
   cambiar_etapa:    {n:'📊 Cambiar etapa',      c:'#ef6c00'},
-  enviar_plantilla: {n:'💬 Enviar plantilla',   c:'#2e7d32'}
+  enviar_plantilla: {n:'💬 Enviar plantilla',   c:'#2e7d32'},
+  enviar_esperar:   {n:'💬⏱ Enviar y esperar respuesta', c:'#00695c'}
 };
 var WF_ETAPAS = ['Nuevo','Seguimiento','Propuesta','Cerrado'];
 var WF_INPUT = 'width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;box-sizing:border-box';
@@ -2221,7 +2222,7 @@ function wfCard(p, path){
     '</div>'+
     wfConfigPaso(p,ps)+
   '</div>';
-  if(p.tipo==='ramas') html += wfRenderRamas(p, path);
+  if(p.tipo==='ramas' || (p.tipo==='enviar_esperar' && p.config && p.config.ramas && p.config.ramas.length)) html += wfRenderRamas(p, path);
   return html;
 }
 
@@ -2229,20 +2230,30 @@ function wfCard(p, path){
 function wfRenderRamas(p, path){
   var ps=path.join(',');
   var ramas=(p.config&&p.config.ramas)||[];
+  var porBoton = (p.tipo==='enviar_esperar'); // ramas fijadas por los botones de la plantilla
   var cols = ramas.map(function(rama,b){
     var lp = path.concat([b]); // path de la lista de esta rama
+    var cabecera;
+    if(porBoton){
+      // El nombre de la rama viene del boton (no se edita aqui)
+      var etq = rama.boton==='__timeout__' ? '⏱ Sin respuesta (Time Out)' : ('🔘 '+(rama.boton||rama.nombre||'—'));
+      cabecera = '<div style="font-weight:600;font-size:12px;color:'+(rama.boton==='__timeout__'?'#b8860b':'#00695c')+';margin-bottom:8px">'+h(etq)+'</div>';
+    } else {
+      cabecera = '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:6px">'+
+          '<input type="text" value="'+h(rama.nombre||('Rama '+(b+1)))+'" onchange="wfSetRama(\''+ps+'\','+b+',\'nombre\',this.value)" style="font-weight:600;font-size:12px;border:none;border-bottom:1px solid #ddd;background:transparent;width:150px">'+
+          (ramas.length>1?'<button onclick="wfQuitarRama(\''+ps+'\','+b+')" title="Eliminar rama" style="border:none;background:none;cursor:pointer;color:#c62828">🗑</button>':'')+
+        '</div>'+ wfReglaUI(ps, b, rama.regla||{});
+    }
     return '<div style="min-width:290px;border:1px dashed #90a4ae;border-radius:10px;padding:10px;background:rgba(255,255,255,0.55)">'+
-      '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:6px">'+
-        '<input type="text" value="'+h(rama.nombre||('Rama '+(b+1)))+'" onchange="wfSetRama(\''+ps+'\','+b+',\'nombre\',this.value)" style="font-weight:600;font-size:12px;border:none;border-bottom:1px solid #ddd;background:transparent;width:150px">'+
-        (ramas.length>1?'<button onclick="wfQuitarRama(\''+ps+'\','+b+')" title="Eliminar rama" style="border:none;background:none;cursor:pointer;color:#c62828">🗑</button>':'')+
-      '</div>'+
-      wfReglaUI(ps, b, rama.regla||{})+
+      cabecera+
       '<div style="margin-top:8px">'+wfRenderLista(rama.pasos||[], lp)+'</div>'+
     '</div>';
   }).join('');
+  var pie = porBoton
+    ? '<p style="text-align:center;color:#888;font-size:11px;margin-top:8px">Las ramas salen de los botones de la plantilla. Cámbialos en Meta y vuelve a sincronizar.</p>'
+    : '<div style="text-align:center;margin-top:8px"><button onclick="wfAgregarRama(\''+ps+'\')" style="background:#fff;border:1px dashed #00838f;color:#00838f;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">+ Añadir rama</button></div>';
   return '<div style="width:2px;height:12px;background:#c3ccd4;margin:0 auto"></div>'+
-    '<div style="display:flex;gap:14px;justify-content:center;align-items:flex-start;overflow-x:auto;padding:4px">'+cols+'</div>'+
-    '<div style="text-align:center;margin-top:8px"><button onclick="wfAgregarRama(\''+ps+'\')" style="background:#fff;border:1px dashed #00838f;color:#00838f;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">+ Añadir rama</button></div>';
+    '<div style="display:flex;gap:14px;justify-content:center;align-items:flex-start;overflow-x:auto;padding:4px">'+cols+'</div>'+ pie;
 }
 
 // Editor de la REGLA de una rama
@@ -2305,6 +2316,16 @@ function wfConfigPaso(p,ps){
     case 'cambiar_etapa':
       return '<select onchange="wfSetCfg(\''+ps+'\',\'etapa\',this.value)" style="'+WF_INPUT+';background:#fff">'+
         WF_ETAPAS.map(function(e){return '<option '+(cfg.etapa===e?'selected':'')+'>'+e+'</option>'}).join('')+'</select>';
+    case 'enviar_esperar':
+      if(!wfPlantillas.length) return '<p style="font-size:12px;color:#c62828;margin:0">No hay plantillas aprobadas. Créalas y sincronízalas con Meta primero.</p>';
+      return '<select onchange="wfPlantillaEsperar(\''+ps+'\',this.value)" style="'+WF_INPUT+';background:#fff">'+
+          '<option value="">-- Elige plantilla con botones --</option>'+
+          wfPlantillas.map(function(pl){return '<option value="'+pl.id+'"'+(String(cfg.plantilla_id)===String(pl.id)?' selected':'')+'>'+h(pl.nombre)+' ('+h(pl.categoria)+')</option>'}).join('')+
+        '</select>'+
+        '<div style="display:flex;gap:6px;align-items:center;font-size:12px;margin-top:6px">Esperar respuesta hasta '+
+          '<input type="number" min="1" value="'+(cfg.timeout_horas!=null?cfg.timeout_horas:24)+'" onchange="wfSetCfg(\''+ps+'\',\'timeout_horas\',this.value)" style="width:60px;'+WF_INPUT+'"> horas'+
+        '</div>'+
+        '<p style="font-size:11px;color:#b8860b;margin:6px 0 0">Las ramas se crean solas con los botones de la plantilla. Cada envío cuesta dinero.</p>';
     case 'enviar_plantilla':
       if(!wfPlantillas.length) return '<p style="font-size:12px;color:#c62828;margin:0">No hay plantillas aprobadas. Créalas y sincronízalas con Meta primero.</p>';
       return '<select onchange="wfSetCfg(\''+ps+'\',\'plantilla_id\',this.value)" style="'+WF_INPUT+';background:#fff">'+
@@ -2325,6 +2346,22 @@ function wfQuitarRama(ps,b){ var n=wfNodo(wfP(ps)); n.paso.config.ramas.splice(b
 function wfSetRama(ps,b,k,v){ var n=wfNodo(wfP(ps)); n.paso.config.ramas[b][k]=v; }
 function wfSetRegla(ps,b,k,v){ var n=wfNodo(wfP(ps)); var r=n.paso.config.ramas[b]; r.regla=r.regla||{}; r.regla[k]=v; }
 
+// Al elegir plantilla en "enviar y esperar": genera una rama por cada boton + Time Out,
+// conservando los pasos ya armados de las ramas que sigan existiendo.
+function wfPlantillaEsperar(ps,plid){
+  var n=wfNodo(wfP(ps)); var cfg=n.paso.config=n.paso.config||{};
+  cfg.plantilla_id=plid;
+  var pl=wfPlantillas.find(function(x){return String(x.id)===String(plid)});
+  var botones=[]; if(pl){ try{ botones=JSON.parse(pl.botones||'[]'); }catch(e){} }
+  var previas=cfg.ramas||[];
+  function pasosDe(boton){ var r=previas.find(function(x){return x.boton===boton}); return r?r.pasos:[]; }
+  var ramas=botones.map(function(bt){ return {boton:bt, nombre:bt, pasos:pasosDe(bt)}; });
+  ramas.push({boton:'__timeout__', nombre:'Time Out', pasos:pasosDe('__timeout__')});
+  cfg.ramas=ramas;
+  if(!botones.length){ alert('Esa plantilla no tiene botones de respuesta rápida. Créala en Meta con botones (ej. "QUIERO AGENDAR") y sincroniza.'); }
+  wfRenderPasos();
+}
+
 var WF_PASO_DESC = {
   ramas:            'Divide el flujo en varios caminos (como GHL)',
   esperar:          'Deja pasar un tiempo antes del siguiente paso',
@@ -2332,7 +2369,8 @@ var WF_PASO_DESC = {
   agregar_etiqueta: 'Le pone una etiqueta (se crea si no existe)',
   quitar_etiqueta:  'Le quita una etiqueta',
   cambiar_etapa:    'Mueve el contacto a otra etapa del pipeline',
-  enviar_plantilla: 'Le envía una plantilla aprobada por WhatsApp'
+  enviar_plantilla: 'Le envía una plantilla aprobada por WhatsApp',
+  enviar_esperar:   'Envía plantilla con botones y ramifica según lo que responda'
 };
 
 var wfInsertLista='', wfInsertIdx=0; // donde se insertara el paso elegido (lista + posicion)
@@ -2373,6 +2411,7 @@ function wfAgregarPaso(k){
     {nombre:'Rama 1',regla:{tipo:'tiene_etiqueta',valor:''},pasos:[]},
     {nombre:'Por defecto',regla:{tipo:'siempre'},pasos:[]}
   ]};
+  if(k==='enviar_esperar') cfg={plantilla_id:'',timeout_horas:24,ramas:[]};
   var lista=wfListaDePath(wfP(wfInsertLista));
   var idx=(wfInsertIdx>=0 && wfInsertIdx<=lista.length)?wfInsertIdx:lista.length;
   lista.splice(idx,0,{tipo:k,config:cfg});

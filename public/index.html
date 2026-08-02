@@ -1059,6 +1059,15 @@ function _plantillaBadge(estado){
   return '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;color:'+s.c+';background:'+s.bg+'">● '+s.t+'</span>';
 }
 
+// Muestra los botones de respuesta rápida de una plantilla (los que el cliente toca)
+function _plantillaBotones(p){
+  var b=[]; try{ b=JSON.parse(p.botones||'[]'); }catch(e){}
+  if(!b.length) return '';
+  return '<div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap">'+
+    b.map(function(t){ return '<span style="font-size:10px;background:#e8f5e9;color:#1b5e20;border:1px solid #a5d6a7;border-radius:10px;padding:1px 8px">🔘 '+String(t)+'</span>'; }).join('')+
+  '</div>';
+}
+
 function cargarPlantillasPanel(){
   fetch('/api/plantillas',{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
@@ -1073,7 +1082,7 @@ function cargarPlantillasPanel(){
         return '<tr style="border-bottom:1px solid #f0f0f0">'+
           '<td style="padding:10px 8px;font-weight:600">'+(p.nombre||'')+'</td>'+
           '<td style="padding:10px 8px;color:#666">'+(p.categoria||'')+'</td>'+
-          '<td style="padding:10px 8px;color:#666;max-width:300px">'+cont.substring(0,80)+(cont.length>80?'...':'')+'</td>'+
+          '<td style="padding:10px 8px;color:#666;max-width:300px">'+cont.substring(0,80)+(cont.length>80?'...':'')+_plantillaBotones(p)+'</td>'+
           '<td style="padding:10px 8px">'+_plantillaBadge(est)+'</td>'+
         '</tr>';
       }).join('') : '<tr><td colspan="4" style="text-align:center;color:#999;padding:20px">No tienes plantillas aún</td></tr>';

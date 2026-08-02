@@ -132,7 +132,10 @@ db.serialize(() => {
     });
   };
   ensureColumns('usuarios', [['telefono', 'TEXT']]);
-  ensureColumns('plantillas', [['idioma', "TEXT DEFAULT 'es'"]]);
+  ensureColumns('plantillas', [
+    ['idioma', "TEXT DEFAULT 'es'"],
+    ['botones', 'TEXT']   // JSON con los textos de los botones de respuesta rapida
+  ]);
   ensureColumns('mensajes', [
     ['origen', 'TEXT'],
     ['tipo', 'TEXT'],            // texto | plantilla
@@ -790,6 +793,13 @@ app.post('/api/plantillas/sync', auth, async (req, res) => {
             const body = (t.components || []).find(c => c.type === 'BODY');
             const contenido = (body && body.text) ? body.text : '';
             const categoria = t.category || 'General';
+            // Botones de respuesta rapida (QUICK_REPLY): son los que el cliente toca
+            // y con los que la Etapa C ramificara el flujo.
+            const compBtns = (t.components || []).find(c => c.type === 'BUTTONS');
+            const botones = compBtns && Array.isArray(compBtns.buttons)
+              ? compBtns.buttons.filter(x => x.type === 'QUICK_REPLY').map(x => x.text)
+              : [];
+            const botonesJson = JSON.stringify(botones);
 
             // Enlazar por meta_template_id; si no, adoptar una local con el mismo nombre aún sin enlazar
             let fila = await new Promise(resolve =>
@@ -802,15 +812,15 @@ app.post('/api/plantillas/sync', auth, async (req, res) => {
 
             if (fila) {
               await new Promise(resolve => db.run(
-                `UPDATE plantillas SET meta_template_id=?, estado_meta=?, categoria=?, contenido=?, idioma=?,
+                `UPDATE plantillas SET meta_template_id=?, estado_meta=?, categoria=?, contenido=?, idioma=?, botones=?,
                  phone_number_id=COALESCE(phone_number_id,?) WHERE id=?`,
-                [t.id, estado, categoria, contenido, t.language || 'es', n.phone_number_id, fila.id], () => resolve()));
+                [t.id, estado, categoria, contenido, t.language || 'es', botonesJson, n.phone_number_id, fila.id], () => resolve()));
               vistas.add(fila.id);
               actualizadas++;
             } else {
               const nuevo = await new Promise(resolve => db.run(
-                'INSERT INTO plantillas (nombre, categoria, contenido, phone_number_id, estado_meta, meta_template_id, idioma) VALUES (?,?,?,?,?,?,?)',
-                [t.name, categoria, contenido, n.phone_number_id, estado, t.id, t.language || 'es'], function () { resolve(this.lastID); }));
+                'INSERT INTO plantillas (nombre, categoria, contenido, phone_number_id, estado_meta, meta_template_id, idioma, botones) VALUES (?,?,?,?,?,?,?,?)',
+                [t.name, categoria, contenido, n.phone_number_id, estado, t.id, t.language || 'es', botonesJson], function () { resolve(this.lastID); }));
               vistas.add(nuevo);
               importadas++;
             }

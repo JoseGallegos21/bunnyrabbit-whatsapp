@@ -148,6 +148,8 @@ db.serialize(() => {
     ['errores', 'TEXT']          // JSON con los errores agrupados, para que sean visibles
   ]);
   ensureColumns('contactos', [['origen', 'TEXT']]);
+  // ruta = posicion del contacto en el arbol del workflow (soporta ramas anidadas)
+  ensureColumns('workflow_inscripciones', [['ruta', 'TEXT']]);
   ensureColumns('etiquetas', [['usuario_id', 'INTEGER']]);
   ensureColumns('numeros', [
     ['waba_id', 'TEXT'],
@@ -1798,8 +1800,37 @@ async function wfCondicion(insc, cfg) {
   }
 }
 
-// Ejecuta un paso. Devuelve { esperar_ms } si toca esperar, { salir, motivo } si
-// el contacto debe salir del flujo, o null para continuar al siguiente paso.
+// Evalua la regla de una rama. La rama "por defecto" (siempre/ninguna) siempre entra.
+async function wfReglaRama(insc, regla) {
+  regla = regla || {};
+  if (regla.tipo === 'siempre' || regla.tipo === 'ninguna' || regla.es_default) return true;
+  let ok = await wfCondicion(insc, regla);
+  if (regla.negar) ok = !ok;
+  return ok;
+}
+
+// Resuelve un camino (ruta) dentro del arbol de pasos.
+// ruta alterna [idxPaso, idxRama, idxPaso, idxRama, ..., idxPaso].
+// Devuelve { lista, idx, paso } donde lista es el array que contiene al paso.
+function wfResolver(pasos, ruta) {
+  let lista = pasos;
+  for (let k = 0; k < ruta.length; k += 2) {
+    const idx = ruta[k];
+    if (k + 1 < ruta.length) {
+      const paso = lista[idx];
+      const b = ruta[k + 1];
+      const rama = paso && paso.config && paso.config.ramas && paso.config.ramas[b];
+      if (!rama) return { lista: [], idx: 0, paso: undefined };
+      lista = rama.pasos || [];
+    } else {
+      return { lista, idx, paso: lista[idx] };
+    }
+  }
+  return { lista, idx: 0, paso: lista[0] };
+}
+
+// Ejecuta un paso. Devuelve { esperar_ms } para esperar, { salir, motivo } para
+// sacar al contacto, { entrar_rama } para bajar a una rama, o null para continuar.
 async function wfEjecutarPaso(insc, paso) {
   const cfg = paso.config || {};
   switch (paso.tipo) {
@@ -1818,6 +1849,19 @@ async function wfEjecutarPaso(insc, paso) {
       wfLog(insc, insc.paso_actual, 'condicion', `${cfg.tipo}=${cumple} -> ${accion}`);
       if (accion === 'salir') return { salir: true, motivo: `condición ${cfg.tipo}` };
       return null;
+    }
+    case 'ramas': {
+      // Elige la primera rama cuya regla se cumple; la ultima suele ser "por defecto".
+      const ramas = cfg.ramas || [];
+      for (let b = 0; b < ramas.length; b++) {
+        if (await wfReglaRama(insc, ramas[b].regla)) {
+          wfLog(insc, insc.paso_actual, 'ramas', `entra a "${ramas[b].nombre || ('rama ' + b)}"`);
+          return { entrar_rama: b };
+        }
+      }
+      // Ninguna rama coincidio y no hay "por defecto" -> el contacto sale
+      wfLog(insc, insc.paso_actual, 'ramas', 'ninguna rama coincidió → sale');
+      return { salir: true, motivo: 'ninguna rama coincidió' };
     }
     case 'agregar_etiqueta': {
       const r = await wfEtiquetar(insc.contacto_id, cfg.etiqueta, false);
@@ -1863,37 +1907,51 @@ async function wfEjecutarPaso(insc, paso) {
   }
 }
 
-// Avanza una inscripcion todo lo que pueda hasta que toque esperar o termine
+// Avanza una inscripcion por el arbol hasta que toque esperar, salga o termine.
+// La posicion se guarda como `ruta` (soporta ramas anidadas).
 async function wfAvanzar(insc) {
   const wf = await wfGet('SELECT * FROM workflows WHERE id=?', [insc.workflow_id]);
   if (!wf || !wf.activo) return; // si lo desactivaron a mitad, se queda parado
   let pasos = [];
   try { pasos = JSON.parse(wf.pasos || '[]'); } catch (e) { return; }
 
-  let i = insc.paso_actual;
-  // Tope de pasos por vuelta: evita que un workflow mal hecho se cicle
-  for (let n = 0; n < 50; n++) {
-    if (i >= pasos.length) {
-      await wfRun(`UPDATE workflow_inscripciones SET estado='completado', paso_actual=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, [i, insc.id]);
+  // Recuperar la ruta; compat con inscripciones viejas (solo tenian paso_actual)
+  let ruta;
+  try { ruta = JSON.parse(insc.ruta || 'null'); } catch (e) { ruta = null; }
+  if (!Array.isArray(ruta) || !ruta.length) ruta = [insc.paso_actual || 0];
+
+  const guardar = (campos, params) =>
+    wfRun(`UPDATE workflow_inscripciones SET ${campos}, ruta=?, paso_actual=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+      params.concat([JSON.stringify(ruta), ruta[ruta.length - 1] || 0, insc.id]));
+
+  // Tope alto por vuelta: evita ciclos en workflows mal armados
+  for (let n = 0; n < 100; n++) {
+    const { lista, idx, paso } = wfResolver(pasos, ruta);
+    if (!paso || idx >= lista.length) {
+      // Fin de la lista (o de una rama): las ramas son terminales -> completado
+      await guardar(`estado='completado'`, []);
       return;
     }
-    insc.paso_actual = i;
-    const r = await wfEjecutarPaso(insc, pasos[i]);
+    insc.paso_actual = ruta[ruta.length - 1];
+    const r = await wfEjecutarPaso(insc, paso);
     if (r && r.salir) {
-      await wfRun(`UPDATE workflow_inscripciones SET estado='salido', motivo_salida=?, paso_actual=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-        [r.motivo, i, insc.id]);
+      await guardar(`estado='salido', motivo_salida=?`, [r.motivo]);
       return;
     }
     if (r && r.esperar_ms != null) {
       const seg = Math.round(r.esperar_ms / 1000);
-      await wfRun(`UPDATE workflow_inscripciones SET paso_actual=?, proximo_en=datetime('now','+' || ? || ' seconds'), updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-        [i + 1, seg, insc.id]);
+      ruta = ruta.slice(); ruta[ruta.length - 1] = idx + 1; // siguiente en la misma lista
+      await guardar(`proximo_en=datetime('now','+' || ? || ' seconds')`, [seg]);
       return;
     }
-    i++;
+    if (r && r.entrar_rama != null) {
+      ruta = ruta.concat([r.entrar_rama, 0]); // bajar a la rama elegida
+      continue;
+    }
+    // continuar: siguiente paso en la misma lista
+    ruta = ruta.slice(); ruta[ruta.length - 1] = idx + 1;
   }
-  // Si llegamos aqui el workflow tiene demasiados pasos seguidos sin espera
-  await wfRun(`UPDATE workflow_inscripciones SET estado='error', motivo_salida='demasiados pasos sin espera', updated_at=CURRENT_TIMESTAMP WHERE id=?`, [insc.id]);
+  await guardar(`estado='error', motivo_salida='demasiados pasos sin espera'`, []);
 }
 
 // Inscribe contactos cuando ocurre un evento

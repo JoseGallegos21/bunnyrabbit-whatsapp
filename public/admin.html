@@ -447,24 +447,36 @@ tr:last-child td{border-bottom:none}
           </div>
         </div>
 
-        <!-- Disparador -->
-        <div style="background:#fff;border:2px solid #1f5c4a;border-radius:10px;padding:14px;margin-bottom:4px">
-          <div style="font-size:12px;font-weight:700;color:#1f5c4a;letter-spacing:.5px;margin-bottom:8px">CUÁNDO SE DISPARA</div>
-          <select id="wf_trigger" onchange="wfRenderTriggerConfig()" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;background:#fff">
-            <option value="cita_completada">Se completa una cita</option>
-            <option value="etiqueta_agregada">Se añade una etiqueta</option>
-            <option value="etapa_cambio">El contacto cambia de etapa</option>
-          </select>
-          <div id="wf_trigger_config" style="margin-top:10px"></div>
+        <!-- Lienzo del flujo (estilo GHL: arbol arriba->abajo, con zoom y desplazamiento) -->
+        <div style="position:relative;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden;background:#f4f6f8">
+          <!-- Controles de zoom -->
+          <div style="position:absolute;top:10px;right:10px;z-index:30;display:flex;gap:4px;background:#fff;border:1px solid #ddd;border-radius:8px;padding:3px;box-shadow:0 1px 4px rgba(0,0,0,0.1)">
+            <button onclick="wfZoom(-0.1)" title="Alejar" style="border:none;background:none;width:28px;height:28px;cursor:pointer;font-size:16px">−</button>
+            <span id="wf_zoom_lbl" style="min-width:44px;text-align:center;line-height:28px;font-size:12px;color:#666">100%</span>
+            <button onclick="wfZoom(0.1)" title="Acercar" style="border:none;background:none;width:28px;height:28px;cursor:pointer;font-size:16px">+</button>
+            <button onclick="wfZoomReset()" title="Centrar" style="border:none;background:none;width:28px;height:28px;cursor:pointer;font-size:13px">⊙</button>
+          </div>
+          <!-- Viewport pan/zoom -->
+          <div id="wf_viewport" style="height:480px;overflow:hidden;cursor:grab;background-image:radial-gradient(#dde3e8 1px,transparent 1px);background-size:20px 20px">
+            <div id="wf_world" style="transform-origin:top center;transition:transform .05s;padding:24px 0">
+              <!-- Disparador -->
+              <div style="width:280px;margin:0 auto;background:#fff;border:2px solid #1f5c4a;border-radius:10px;padding:12px;box-shadow:0 2px 6px rgba(0,0,0,0.06)">
+                <div style="font-size:11px;font-weight:700;color:#1f5c4a;letter-spacing:.5px;margin-bottom:8px">⚡ CUÁNDO SE DISPARA</div>
+                <select id="wf_trigger" onchange="wfRenderTriggerConfig()" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;background:#fff;box-sizing:border-box">
+                  <option value="cita_completada">Se completa una cita</option>
+                  <option value="etiqueta_agregada">Se añade una etiqueta</option>
+                  <option value="etapa_cambio">El contacto cambia de etapa</option>
+                </select>
+                <div id="wf_trigger_config" style="margin-top:8px"></div>
+              </div>
+              <!-- Pasos (se dibujan aqui, cada uno conectado con lineas) -->
+              <div id="wf_pasos"></div>
+            </div>
+          </div>
+          <!-- Menu para añadir paso (flotante) -->
+          <div id="wf_menu_paso" style="display:none;position:absolute;z-index:40;background:#fff;border:1px solid #ddd;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,0.18);padding:6px;min-width:230px;text-align:left"></div>
         </div>
-
-        <!-- Pasos -->
-        <div id="wf_pasos"></div>
-
-        <div style="text-align:center;margin:10px 0;position:relative">
-          <button onclick="wfToggleMenuPaso(event)" style="background:#fff;border:1px dashed #1f5c4a;color:#1f5c4a;padding:8px 18px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">+ Añadir paso</button>
-          <div id="wf_menu_paso" style="display:none;position:absolute;left:50%;transform:translateX(-50%);top:42px;z-index:20;background:#fff;border:1px solid #ddd;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,0.15);padding:6px;min-width:220px;text-align:left"></div>
-        </div>
+        <p style="font-size:11px;color:#999;margin:6px 0 0;text-align:center">Arrastra el fondo para moverte · usa +/− para el zoom · clic en un paso para configurarlo</p>
 
         <div style="display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap">
           <button onclick="wfGuardar()" style="background:#1f5c4a;color:#fff;border:none;padding:10px 24px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">Guardar</button>
@@ -2102,7 +2114,7 @@ function wfNuevo(){
   document.getElementById('wf_activo').checked=false;
   document.getElementById('wf_msg').textContent='';
   document.getElementById('wf_detalle').style.display='none';
-  wfRenderTriggerConfig(); wfRenderPasos();
+  wfRenderTriggerConfig(); wfRenderPasos(); wfZoomReset();
   document.getElementById('wf_editor').style.display='block';
   document.getElementById('wf_editor').scrollIntoView({behavior:'smooth'});
 }
@@ -2118,7 +2130,7 @@ function wfEditar(id){
   document.getElementById('wf_activo').checked=!!w.activo;
   document.getElementById('wf_msg').textContent='';
   document.getElementById('wf_detalle').style.display='none';
-  wfRenderTriggerConfig(w.trigger_config||{}); wfRenderPasos();
+  wfRenderTriggerConfig(w.trigger_config||{}); wfRenderPasos(); wfZoomReset();
   document.getElementById('wf_editor').style.display='block';
   document.getElementById('wf_editor').scrollIntoView({behavior:'smooth'});
 }
@@ -2151,16 +2163,24 @@ function wfLeerTriggerConfig(){
 }
 
 // Dibuja los pasos como un flujo vertical
+// Conector vertical + un boton "+" para insertar un paso en esa posicion
+function wfConector(idxInsertar){
+  return '<div style="display:flex;flex-direction:column;align-items:center">'+
+    '<div style="width:2px;height:14px;background:#c3ccd4"></div>'+
+    '<button onclick="wfAbrirMenuPaso(event,'+idxInsertar+')" title="Insertar paso aquí" '+
+      'style="width:20px;height:20px;border-radius:50%;border:1px solid #c3ccd4;background:#fff;color:#1f5c4a;cursor:pointer;font-size:13px;line-height:1;padding:0">+</button>'+
+    '<div style="width:2px;height:14px;background:#c3ccd4"></div>'+
+  '</div>';
+}
+
 function wfRenderPasos(){
   var c=document.getElementById('wf_pasos');
-  if(!wfPasos.length){
-    c.innerHTML='<div style="text-align:center;color:#999;font-size:13px;padding:16px">Sin pasos todavía</div>';
-    return;
-  }
-  c.innerHTML = wfPasos.map(function(p,i){
+  var html='';
+  wfPasos.forEach(function(p,i){
     var meta=WF_PASOS[p.tipo]||{n:p.tipo,c:'#666'};
-    return '<div style="text-align:center;color:#bbb;font-size:18px;line-height:1">↓</div>'+
-      '<div style="background:#fff;border-left:4px solid '+meta.c+';border:1px solid #e0e0e0;border-left:4px solid '+meta.c+';border-radius:8px;padding:12px">'+
+    html += wfConector(i); // conector + "insertar antes de este paso"
+    html +=
+      '<div style="width:280px;margin:0 auto;background:#fff;border:1px solid #e0e0e0;border-left:4px solid '+meta.c+';border-radius:8px;padding:12px;box-shadow:0 2px 6px rgba(0,0,0,0.06)">'+
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
           '<span style="font-weight:600;font-size:13px;color:'+meta.c+'">'+meta.n+'</span>'+
           '<span>'+
@@ -2171,7 +2191,15 @@ function wfRenderPasos(){
         '</div>'+
         wfConfigPaso(p,i)+
       '</div>';
-  }).join('');
+  });
+  // Nodo final: conector + boton grande para añadir al final
+  html += wfConector(wfPasos.length);
+  html +=
+    '<div style="width:280px;margin:0 auto">'+
+      '<button onclick="wfAbrirMenuPaso(event,'+wfPasos.length+')" style="width:100%;background:#fff;border:1px dashed #1f5c4a;color:#1f5c4a;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">+ Añadir paso</button>'+
+      (wfPasos.length?'':'<p style="text-align:center;color:#999;font-size:12px;margin:8px 0 0">El flujo aún no tiene pasos</p>')+
+    '</div>';
+  c.innerHTML = html;
 }
 
 // Campos de configuración de cada tipo de paso
@@ -2236,10 +2264,13 @@ var WF_PASO_DESC = {
   enviar_plantilla: 'Le envía una plantilla aprobada por WhatsApp'
 };
 
-function wfToggleMenuPaso(ev){
+var wfInsertIdx = 0; // posicion donde se insertara el paso elegido
+
+// Abre el menu de tipos de paso junto al boton "+" pulsado, para insertar en idx
+function wfAbrirMenuPaso(ev, idx){
   if(ev) ev.stopPropagation();
+  wfInsertIdx = idx;
   var m=document.getElementById('wf_menu_paso');
-  if(m.style.display==='block'){ m.style.display='none'; return; }
   m.innerHTML = Object.keys(WF_PASOS).map(function(k){
     var meta=WF_PASOS[k];
     return '<div onclick="wfAgregarPaso(\''+k+'\')" style="padding:9px 10px;border-radius:7px;cursor:pointer;display:flex;flex-direction:column;gap:2px" '+
@@ -2248,6 +2279,12 @@ function wfToggleMenuPaso(ev){
       '<span style="font-size:11px;color:#888">'+WF_PASO_DESC[k]+'</span>'+
     '</div>';
   }).join('');
+  // Posicionar el menu cerca del boton, dentro del contenedor del lienzo
+  var cont = m.parentElement.getBoundingClientRect();
+  var btn = ev.target.getBoundingClientRect();
+  var top = btn.bottom - cont.top + 6, left = btn.left - cont.left - 105;
+  m.style.top = Math.max(6, top) + 'px';
+  m.style.left = Math.max(6, Math.min(left, cont.width - 240)) + 'px';
   m.style.display='block';
 }
 
@@ -2262,11 +2299,40 @@ function wfAgregarPaso(k){
   if(!WF_PASOS[k]) return;
   var cfg={};
   if(k==='esperar') cfg={dias:1,horas:0};
-  if(k==='condicion') cfg={tipo:'tiene_cita_futura',si_cumple:'salir'};
+  if(k==='condicion') cfg={tipo:'tiene_cita_futura',si_cumple:'continuar',si_no_cumple:'salir'};
   if(k==='cambiar_etapa') cfg={etapa:'Seguimiento'};
-  wfPasos.push({tipo:k,config:cfg});
+  var idx = (wfInsertIdx>=0 && wfInsertIdx<=wfPasos.length) ? wfInsertIdx : wfPasos.length;
+  wfPasos.splice(idx, 0, {tipo:k,config:cfg}); // insertar en la posicion elegida
   wfRenderPasos();
 }
+
+// ===== ZOOM Y DESPLAZAMIENTO DEL LIENZO =====
+var wfEscala=1, wfPanX=0, wfPanY=0;
+function wfAplicarTransform(){
+  var w=document.getElementById('wf_world');
+  if(w) w.style.transform='translate('+wfPanX+'px,'+wfPanY+'px) scale('+wfEscala+')';
+  var lbl=document.getElementById('wf_zoom_lbl');
+  if(lbl) lbl.textContent=Math.round(wfEscala*100)+'%';
+}
+function wfZoom(d){ wfEscala=Math.min(1.5,Math.max(0.4,wfEscala+d)); wfAplicarTransform(); }
+function wfZoomReset(){ wfEscala=1; wfPanX=0; wfPanY=0; wfAplicarTransform(); }
+
+// Arrastrar el fondo para desplazarse (pan)
+(function(){
+  var vp=document.getElementById('wf_viewport');
+  if(!vp) return;
+  var arrastrando=false, x0=0, y0=0;
+  vp.addEventListener('mousedown', function(e){
+    // Solo si se arrastra el fondo, no un control dentro de una caja
+    if(e.target.closest('button,select,input,textarea')) return;
+    arrastrando=true; x0=e.clientX-wfPanX; y0=e.clientY-wfPanY; vp.style.cursor='grabbing';
+  });
+  document.addEventListener('mousemove', function(e){
+    if(!arrastrando) return;
+    wfPanX=e.clientX-x0; wfPanY=e.clientY-y0; wfAplicarTransform();
+  });
+  document.addEventListener('mouseup', function(){ arrastrando=false; if(vp) vp.style.cursor='grab'; });
+})();
 
 function wfGuardar(){
   var msg=document.getElementById('wf_msg');

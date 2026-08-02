@@ -645,16 +645,31 @@ function verificarFirmaMeta(req, res, next) {
   next();
 }
 
+// Extrae el texto de un mensaje entrante, incluidos los botones de respuesta rapida.
+// Los botones de plantilla llegan como type 'button'; los interactivos como 'interactive'.
+function textoDeMensaje(msg) {
+  if (!msg) return { texto: '[media]', esBoton: false };
+  if (msg.type === 'button' && msg.button) return { texto: msg.button.text || msg.button.payload || '', esBoton: true };
+  if (msg.type === 'interactive' && msg.interactive) {
+    const i = msg.interactive;
+    const t = (i.button_reply && i.button_reply.title) || (i.list_reply && i.list_reply.title) || '';
+    return { texto: t, esBoton: true };
+  }
+  return { texto: msg.text?.body || '[media]', esBoton: false };
+}
+
 app.post('/webhook', verificarFirmaMeta, (req, res) => {
   const entry = req.body.entry?.[0]?.changes?.[0]?.value;
   if (entry?.messages) {
     const msg = entry.messages[0];
     const numero_id = entry.metadata.phone_number_id;
     const telefono = msg.from;
-    const texto = msg.text?.body || '[media]';
+    const { texto, esBoton } = textoDeMensaje(msg);
     const origen = origenDelMensaje(msg, texto);
     db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, origen) VALUES (?, ?, ?, ?, ?)', [numero_id, telefono, texto, 'entrante', origen]);
     db.run(`INSERT INTO contactos (telefono, numero_id, etapa, prioridad, origen) VALUES (?, ?, 'Nuevo', 'Media', ?) ON CONFLICT(telefono) DO NOTHING`, [telefono, numero_id, origen]);
+    // Si un workflow esta esperando la respuesta de este contacto, enrutar por el boton
+    wfRutearRespuesta(telefono, texto).catch(e => console.error('[WF] rutear respuesta:', e.message));
   }
   res.sendStatus(200);
 });
@@ -1839,8 +1854,35 @@ function wfResolver(pasos, ruta) {
   return { lista, idx: 0, paso: lista[0] };
 }
 
+// Envia una plantilla a la inscripcion. Devuelve true si se envio, false si no.
+async function wfEnviarPlantillaPaso(insc, plantilla_id, accion) {
+  const p = await wfGet('SELECT * FROM plantillas WHERE id=?', [plantilla_id]);
+  if (!p) { wfLog(insc, insc.paso_actual, accion, 'ERROR: plantilla no encontrada'); return false; }
+  if (p.estado_meta !== 'aprobada') { wfLog(insc, insc.paso_actual, accion, `ERROR: plantilla no aprobada (${p.estado_meta})`); return false; }
+  const contacto = await wfGet('SELECT numero_id, nombre FROM contactos WHERE id=?', [insc.contacto_id]);
+  const num = await wfGet(`SELECT * FROM numeros WHERE phone_number_id=? AND token IS NOT NULL AND token!=''`,
+    [contacto && contacto.numero_id]);
+  if (!num) { wfLog(insc, insc.paso_actual, accion, 'ERROR: sin número con token para este contacto'); return false; }
+  try {
+    await axios.post(`https://graph.facebook.com/v18.0/${num.phone_number_id}/messages`,
+      { messaging_product: 'whatsapp', to: insc.telefono, type: 'template',
+        template: { name: p.nombre.toLowerCase().replace(/\s+/g, '_'), language: { code: p.idioma || 'es' },
+          components: construirComponentesPlantilla(p, { nombre: contacto && contacto.nombre, telefono: insc.telefono }) } },
+      { headers: { Authorization: 'Bearer ' + num.token } });
+    const c = await calcularCosto(insc.telefono, p.categoria);
+    db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, tipo, categoria, facturable, costo_usd) VALUES (?,?,?,?,?,?,?,?)',
+      [num.phone_number_id, insc.telefono, '[Workflow: ' + p.nombre + ']', 'saliente', 'plantilla', c.categoria, c.facturable, c.costo_usd]);
+    wfLog(insc, insc.paso_actual, accion, `enviada ${p.nombre} ($${c.costo_usd})`);
+    return true;
+  } catch (e) {
+    wfLog(insc, insc.paso_actual, accion, 'ERROR: ' + (e.response?.data?.error?.message || e.message));
+    return false;
+  }
+}
+
 // Ejecuta un paso. Devuelve { esperar_ms } para esperar, { salir, motivo } para
-// sacar al contacto, { entrar_rama } para bajar a una rama, o null para continuar.
+// sacar al contacto, { entrar_rama } para bajar a una rama, { esperar_respuesta }
+// para aguardar la respuesta del cliente, o null para continuar.
 async function wfEjecutarPaso(insc, paso) {
   const cfg = paso.config || {};
   switch (paso.tipo) {
@@ -1889,27 +1931,16 @@ async function wfEjecutarPaso(insc, paso) {
       return null;
     }
     case 'enviar_plantilla': {
-      const p = await wfGet('SELECT * FROM plantillas WHERE id=?', [cfg.plantilla_id]);
-      if (!p) { wfLog(insc, insc.paso_actual, 'enviar_plantilla', 'ERROR: plantilla no encontrada'); return null; }
-      if (p.estado_meta !== 'aprobada') { wfLog(insc, insc.paso_actual, 'enviar_plantilla', `ERROR: plantilla no aprobada (${p.estado_meta})`); return null; }
-      const contacto = await wfGet('SELECT numero_id, nombre FROM contactos WHERE id=?', [insc.contacto_id]);
-      const num = await wfGet(`SELECT * FROM numeros WHERE phone_number_id=? AND token IS NOT NULL AND token!=''`,
-        [contacto && contacto.numero_id]);
-      if (!num) { wfLog(insc, insc.paso_actual, 'enviar_plantilla', 'ERROR: sin número con token para este contacto'); return null; }
-      try {
-        await axios.post(`https://graph.facebook.com/v18.0/${num.phone_number_id}/messages`,
-          { messaging_product: 'whatsapp', to: insc.telefono, type: 'template',
-            template: { name: p.nombre.toLowerCase().replace(/\s+/g, '_'), language: { code: p.idioma || 'es' },
-              components: construirComponentesPlantilla(p, { nombre: contacto && contacto.nombre, telefono: insc.telefono }) } },
-          { headers: { Authorization: 'Bearer ' + num.token } });
-        const c = await calcularCosto(insc.telefono, p.categoria);
-        db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, tipo, categoria, facturable, costo_usd) VALUES (?,?,?,?,?,?,?,?)',
-          [num.phone_number_id, insc.telefono, '[Workflow: ' + p.nombre + ']', 'saliente', 'plantilla', c.categoria, c.facturable, c.costo_usd]);
-        wfLog(insc, insc.paso_actual, 'enviar_plantilla', `enviada ${p.nombre} ($${c.costo_usd})`);
-      } catch (e) {
-        wfLog(insc, insc.paso_actual, 'enviar_plantilla', 'ERROR: ' + (e.response?.data?.error?.message || e.message));
-      }
+      await wfEnviarPlantillaPaso(insc, cfg.plantilla_id, 'enviar_plantilla');
       return null;
+    }
+    case 'enviar_esperar': {
+      // Envia la plantilla (con botones) y ESPERA la respuesta del cliente.
+      // El ramificado por boton lo hace el webhook; el Time Out, el programador.
+      const enviado = await wfEnviarPlantillaPaso(insc, cfg.plantilla_id, 'enviar_esperar');
+      if (!enviado) return null; // si no se pudo enviar, no tiene sentido esperar: continuar
+      const horas = cfg.timeout_horas != null ? cfg.timeout_horas : 24;
+      return { esperar_respuesta: true, timeout_ms: horas * 3600 * 1000 };
     }
     default:
       wfLog(insc, insc.paso_actual, 'desconocido', 'tipo de paso no reconocido: ' + paso.tipo);
@@ -1952,6 +1983,13 @@ async function wfAvanzar(insc) {
       const seg = Math.round(r.esperar_ms / 1000);
       ruta = ruta.slice(); ruta[ruta.length - 1] = idx + 1; // siguiente en la misma lista
       await guardar(`proximo_en=datetime('now','+' || ? || ' seconds')`, [seg]);
+      return;
+    }
+    if (r && r.esperar_respuesta) {
+      // Queda esperando la respuesta del cliente. La ruta apunta a ESTE paso;
+      // el webhook la baja a la rama del boton, y proximo_en marca el Time Out.
+      const seg = Math.round((r.timeout_ms || 0) / 1000);
+      await guardar(`estado='esperando', proximo_en=datetime('now','+' || ? || ' seconds')`, [seg]);
       return;
     }
     if (r && r.entrar_rama != null) {
@@ -2002,7 +2040,58 @@ async function dispararWorkflows(tipo, datos) {
   }
 }
 
-// Programador: cada minuto avanza las inscripciones cuya espera vencio
+// Normaliza texto para comparar botones (sin mayus/acentos/espacios de sobra)
+function wfNorm(s) {
+  return String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+// Enruta a la inscripcion que espera respuesta, segun el boton/palabra que llego.
+// Devuelve true si enruto a una rama.
+async function wfRutearRespuesta(telefono, texto) {
+  const insc = await wfGet(`SELECT * FROM workflow_inscripciones WHERE telefono=? AND estado='esperando' ORDER BY id DESC LIMIT 1`, [telefono]);
+  if (!insc) return false;
+  const wf = await wfGet('SELECT pasos, activo FROM workflows WHERE id=?', [insc.workflow_id]);
+  if (!wf) return false;
+  let pasos = []; try { pasos = JSON.parse(wf.pasos || '[]'); } catch (e) { return false; }
+  let ruta; try { ruta = JSON.parse(insc.ruta || '[0]'); } catch (e) { return false; }
+  const { paso } = wfResolver(pasos, ruta);
+  if (!paso || paso.tipo !== 'enviar_esperar') return false;
+  const ramas = (paso.config && paso.config.ramas) || [];
+  // Buscar la rama cuyo boton coincide con lo que escribio/toco el cliente
+  let b = ramas.findIndex(r => r.boton && wfNorm(r.boton) === wfNorm(texto));
+  if (b < 0) return false; // no coincide con ningun boton -> sigue esperando
+  const nueva = ruta.concat([b, 0]);
+  await wfRun(`UPDATE workflow_inscripciones SET estado='activo', ruta=?, proximo_en=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+    [JSON.stringify(nueva), insc.id]);
+  const fresca = await wfGet('SELECT * FROM workflow_inscripciones WHERE id=?', [insc.id]);
+  wfLog(fresca, 0, 'respuesta', `botón "${texto}" → rama "${ramas[b].nombre || ramas[b].boton}"`);
+  await wfAvanzar(fresca);
+  return true;
+}
+
+// Time Out: una espera de respuesta que vencio. Enruta a la rama __timeout__ si existe.
+async function wfTimeout(insc) {
+  const wf = await wfGet('SELECT pasos FROM workflows WHERE id=?', [insc.workflow_id]);
+  let pasos = []; try { pasos = JSON.parse((wf && wf.pasos) || '[]'); } catch (e) {}
+  let ruta; try { ruta = JSON.parse(insc.ruta || '[0]'); } catch (e) { ruta = [0]; }
+  const { paso } = wfResolver(pasos, ruta);
+  const ramas = (paso && paso.config && paso.config.ramas) || [];
+  const b = ramas.findIndex(r => r.boton === '__timeout__');
+  if (b >= 0) {
+    const nueva = ruta.concat([b, 0]);
+    await wfRun(`UPDATE workflow_inscripciones SET estado='activo', ruta=?, proximo_en=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+      [JSON.stringify(nueva), insc.id]);
+    const fresca = await wfGet('SELECT * FROM workflow_inscripciones WHERE id=?', [insc.id]);
+    wfLog(fresca, 0, 'timeout', 'no respondió a tiempo → rama Time Out');
+    await wfAvanzar(fresca);
+  } else {
+    // Sin rama de Time Out: el contacto simplemente termina
+    await wfRun(`UPDATE workflow_inscripciones SET estado='completado', motivo_salida='sin respuesta (Time Out)', updated_at=CURRENT_TIMESTAMP WHERE id=?`, [insc.id]);
+    wfLog(insc, 0, 'timeout', 'no respondió y no hay rama Time Out → termina');
+  }
+}
+
+// Programador: cada minuto avanza esperas vencidas y Time Outs
 let wfCorriendo = false;
 async function wfProcesarPendientes() {
   if (wfCorriendo) return; // evita solapamiento si una vuelta tarda
@@ -2011,7 +2100,11 @@ async function wfProcesarPendientes() {
     const pendientes = await wfAll(`SELECT * FROM workflow_inscripciones
                                     WHERE estado='activo' AND proximo_en <= datetime('now') LIMIT 200`);
     for (const insc of pendientes) await wfAvanzar(insc);
-    if (pendientes.length) console.log(`[WF] ${pendientes.length} inscripcion(es) avanzadas`);
+    // Time Outs: esperas de respuesta que ya vencieron
+    const vencidas = await wfAll(`SELECT * FROM workflow_inscripciones
+                                  WHERE estado='esperando' AND proximo_en <= datetime('now') LIMIT 200`);
+    for (const insc of vencidas) await wfTimeout(insc);
+    if (pendientes.length || vencidas.length) console.log(`[WF] ${pendientes.length} avanzadas, ${vencidas.length} timeouts`);
   } catch (e) {
     console.error('[WF] error en el programador:', e.message);
   } finally {

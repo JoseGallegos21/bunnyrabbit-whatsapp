@@ -2294,11 +2294,14 @@ function wfConfigPaso(p,ps){
         '<select onchange="wfSetCfg(\''+ps+'\',\'tipo\',this.value);wfRenderPasos()" style="'+WF_INPUT+';width:auto;background:#fff">'+
           '<option value="tiene_cita_futura"'+(cfg.tipo==='tiene_cita_futura'?' selected':'')+'>Ya tiene otra cita agendada</option>'+
           '<option value="tiene_etiqueta"'+(cfg.tipo==='tiene_etiqueta'?' selected':'')+'>Tiene la etiqueta…</option>'+
+          '<option value="tiene_alguna_etiqueta"'+(cfg.tipo==='tiene_alguna_etiqueta'?' selected':'')+'>Tiene alguna de estas etiquetas…</option>'+
           '<option value="etapa_es"'+(cfg.tipo==='etapa_es'?' selected':'')+'>Está en la etapa…</option>'+
           '<option value="respondio"'+(cfg.tipo==='respondio'?' selected':'')+'>Ya respondió</option>'+
         '</select>'+
         ((cfg.tipo==='tiene_etiqueta'||cfg.tipo==='etapa_es')
           ? '<input type="text" value="'+h(cfg.valor||'')+'" onchange="wfSetCfg(\''+ps+'\',\'valor\',this.value)" placeholder="valor" style="width:150px;'+WF_INPUT+'">' : '')+
+        (cfg.tipo==='tiene_alguna_etiqueta'
+          ? '<input type="text" value="'+h(Array.isArray(cfg.valor)?cfg.valor.join(', '):(cfg.valor||''))+'" onchange="wfSetCfg(\''+ps+'\',\'valor\',this.value)" placeholder="etiquetas separadas por coma" style="width:280px;'+WF_INPUT+'">' : '')+
         '<span>→ si se cumple:</span>'+
         '<select onchange="wfSetCfg(\''+ps+'\',\'si_cumple\',this.value)" style="'+WF_INPUT+';width:auto;background:#fff">'+
           '<option value="salir"'+(cfg.si_cumple!=='continuar'?' selected':'')+'>Sacar del flujo</option>'+

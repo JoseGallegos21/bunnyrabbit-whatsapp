@@ -1805,6 +1805,16 @@ async function wfCondicion(insc, cfg) {
                              WHERE ce.contacto_id=? AND e.nombre=?`, [cid, cfg.valor]);
       return !!r;
     }
+    case 'tiene_alguna_etiqueta': {
+      // Verdadero si el contacto tiene AL MENOS UNA de las etiquetas de la lista.
+      const lista = Array.isArray(cfg.valor) ? cfg.valor
+        : String(cfg.valor || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (!lista.length) return false;
+      const ph = lista.map(() => '?').join(',');
+      const r = await wfGet(`SELECT 1 x FROM contacto_etiquetas ce JOIN etiquetas e ON e.id=ce.etiqueta_id
+                             WHERE ce.contacto_id=? AND e.nombre IN (${ph})`, [cid, ...lista]);
+      return !!r;
+    }
     case 'etapa_es': {
       const r = await wfGet('SELECT etapa FROM contactos WHERE id=?', [cid]);
       return !!r && r.etapa === cfg.valor;

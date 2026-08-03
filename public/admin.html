@@ -2236,8 +2236,11 @@ function wfRenderRamas(p, path){
     var cabecera;
     if(porBoton){
       // El nombre de la rama viene del boton (no se edita aqui)
-      var etq = rama.boton==='__timeout__' ? '⏱ Sin respuesta (Time Out)' : ('🔘 '+(rama.boton||rama.nombre||'—'));
-      cabecera = '<div style="font-weight:600;font-size:12px;color:'+(rama.boton==='__timeout__'?'#b8860b':'#00695c')+';margin-bottom:8px">'+h(etq)+'</div>';
+      var especial = rama.boton==='__timeout__' || rama.boton==='__undelivered__';
+      var etq = rama.boton==='__timeout__' ? '⏱ Sin respuesta (Time Out)'
+              : rama.boton==='__undelivered__' ? '⚠ No entregado'
+              : ('🔘 '+(rama.boton||rama.nombre||'—'));
+      cabecera = '<div style="font-weight:600;font-size:12px;color:'+(especial?'#b8860b':'#00695c')+';margin-bottom:8px">'+h(etq)+'</div>';
     } else {
       cabecera = '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:6px">'+
           '<input type="text" value="'+h(rama.nombre||('Rama '+(b+1)))+'" onchange="wfSetRama(\''+ps+'\','+b+',\'nombre\',this.value)" style="font-weight:600;font-size:12px;border:none;border-bottom:1px solid #ddd;background:transparent;width:150px">'+
@@ -2360,6 +2363,7 @@ function wfPlantillaEsperar(ps,plid){
   function pasosDe(boton){ var r=previas.find(function(x){return x.boton===boton}); return r?r.pasos:[]; }
   var ramas=botones.map(function(bt){ return {boton:bt, nombre:bt, pasos:pasosDe(bt)}; });
   ramas.push({boton:'__timeout__', nombre:'Time Out', pasos:pasosDe('__timeout__')});
+  ramas.push({boton:'__undelivered__', nombre:'No entregado', pasos:pasosDe('__undelivered__')});
   cfg.ramas=ramas;
   if(!botones.length){ alert('Esa plantilla no tiene botones de respuesta rápida. Créala en Meta con botones (ej. "QUIERO AGENDAR") y sincroniza.'); }
   wfRenderPasos();

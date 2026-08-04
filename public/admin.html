@@ -1639,6 +1639,7 @@ function fbLoadNumeros() {
       }).join('');
       if (!numeros.length) html = '<p style="color:#999;text-align:center;padding:20px">No hay numeros registrados</p>';
       document.getElementById('fb-numeros-list').innerHTML = html;
+      if (window.escanearPasswords) escanearPasswords(); // ojito en los tokens recién pintados
       // Inicializar triggers por numero
       numeros.forEach(function(n) {
         fbTriggersData[n.id] = n.capi_triggers ? JSON.parse(n.capi_triggers) : [];
@@ -2560,5 +2561,26 @@ function wfVerDetalle(id){
   </div>
 </div>
 
+<script>
+// Ojito para ver/ocultar contraseñas en todos los campos type=password
+window.escanearPasswords = (function(){
+  function ponerOjo(inp){
+    if(inp.dataset.ojo) return; inp.dataset.ojo='1';
+    var wrap=document.createElement('span');
+    wrap.style.cssText='position:relative;display:block';
+    inp.parentNode.insertBefore(wrap, inp);
+    wrap.appendChild(inp);
+    inp.style.paddingRight='34px';
+    var b=document.createElement('button');
+    b.type='button'; b.tabIndex=-1; b.title='Mostrar u ocultar contraseña'; b.textContent='👁';
+    b.style.cssText='position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:16px;opacity:.55;padding:0;line-height:1';
+    b.onclick=function(){ var oculto=inp.type==='password'; inp.type=oculto?'text':'password'; b.style.opacity=oculto?'1':'.55'; };
+    wrap.appendChild(b);
+  }
+  function escanear(){ document.querySelectorAll('input[type=password]').forEach(ponerOjo); }
+  if(document.readyState!=='loading') escanear(); else document.addEventListener('DOMContentLoaded', escanear);
+  return escanear;
+})();
+</script>
 </body>
 </html>

@@ -124,6 +124,7 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
   .layout.chat-open .sidebar{display:none}
   .layout.chat-open .main{display:flex}
   .btn-atras{display:inline-block}
+  .barra-volver-movil{display:flex!important}
   .metrics-bar{gap:10px;font-size:10px;overflow-x:auto}
   .filters{overflow-x:auto}
   /* El panel de herramientas (plantillas/perfil) ocupa toda la pantalla */
@@ -1037,11 +1038,34 @@ function switchMainTab(tab, btn){
   document.querySelectorAll('.main-tab').forEach(function(b){ b.classList.remove('active'); });
   document.querySelectorAll('.main-section').forEach(function(s){ s.classList.remove('active'); });
   btn.classList.add('active');
-  document.getElementById('msec-'+tab).classList.add('active');
+  var sec=document.getElementById('msec-'+tab);
+  sec.classList.add('active');
   if(tab==='plantillas'){ cargarPlantillasPanel(); cargarRespuestasRapidas(); }
   if(tab==='difusion'){ cargarHistorialDifPanel(); cargarPlantillasDifusion(); }
   if(tab==='contactos') cargarContactos();
   if(tab==='etiquetas') cargarEtiquetas();
+  // En móvil: las secciones viven dentro de .main (oculto por defecto). Para Chat
+  // se muestra la lista (sidebar); para las demás se muestra la sección a pantalla
+  // completa con un botón "atrás" para volver al menú.
+  var lay=document.querySelector('.layout');
+  if(window.innerWidth<=820 && lay){
+    if(tab==='chat'){ lay.classList.remove('chat-open'); }
+    else { lay.classList.add('chat-open'); ponerBotonVolverSeccion(sec); }
+  }
+}
+
+// Añade (una sola vez) una barra con botón "atrás" arriba de una sección, para móvil
+function ponerBotonVolverSeccion(sec){
+  if(sec.querySelector('.barra-volver-movil')) return;
+  var barra=document.createElement('div');
+  barra.className='barra-volver-movil';
+  barra.innerHTML='<button onclick="volverAlMenu()" style="background:none;border:none;color:#111;font-size:22px;cursor:pointer;padding:4px 8px">&#8592;</button><span style="font-weight:600;color:#111">Menú</span>';
+  barra.style.cssText='display:none;align-items:center;gap:6px;padding:6px 8px;background:#fff;border-bottom:1px solid #eee;flex-shrink:0';
+  sec.insertBefore(barra, sec.firstChild);
+}
+// Volver del contenido al menú (lista + pestañas) en móvil
+function volverAlMenu(){
+  var lay=document.querySelector('.layout'); if(lay) lay.classList.remove('chat-open');
 }
 
 function switchPanelTab(tab, btn){

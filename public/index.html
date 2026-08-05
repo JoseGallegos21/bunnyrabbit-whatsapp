@@ -130,6 +130,11 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
   /* El panel de herramientas (plantillas/perfil) ocupa toda la pantalla */
   .panel-herramientas{position:fixed;top:0;right:0;bottom:0;left:0;width:auto;z-index:100}
   .panel-perfil{position:fixed;top:0;right:0;bottom:0;left:0;width:auto;z-index:100}
+  /* Formularios de 2 columnas -> 1 columna en móvil (evita corte horizontal) */
+  .main-section [style*="grid-template-columns:1fr 320px"]{grid-template-columns:1fr!important}
+  .main-section [style*="position:sticky"]{position:static!important}
+  /* Reducir padding lateral del contenedor central en móvil */
+  #msec-plantillas>div,#msec-difusion>div,#msec-contactos>div,#msec-etiquetas>div{padding-left:12px!important;padding-right:12px!important}
 }
 </style>
 <link rel="stylesheet" type="text/css" href="/boxicons.min.css"></head>
@@ -174,7 +179,7 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
     <div class="main" id="mainArea">
 
       <!-- CHAT -->
-      <div class="main-section active" id="msec-chat" style="display:flex;flex-direction:column;overflow:hidden;flex:1;min-height:0">
+      <div class="main-section active" id="msec-chat" style="flex-direction:column;overflow:hidden;flex:1;min-height:0">
         <div style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
           <div id="chatHeader"></div>
           <div id="mensajesArea" class="messages" style="display:none"></div>

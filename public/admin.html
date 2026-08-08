@@ -520,7 +520,8 @@ tr:last-child td{border-bottom:none}
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
               <h3 style="font-size:15px;color:#333;margin:0">Configuracion por numero</h3>
               <div style="display:flex;gap:8px">
-                <button onclick="fbMostrarFormNuevo()" style="padding:6px 12px;background:#1877F2;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px">+ Agregar numero</button>
+                <button onclick="coexIniciar()" style="padding:6px 12px;background:#25D366;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">📱 Conectar WhatsApp del celular</button>
+                <button onclick="fbMostrarFormNuevo()" style="padding:6px 12px;background:#1877F2;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px">+ Agregar numero (manual)</button>
                 <button onclick="fbLoadNumeros()" style="padding:6px 12px;background:white;border:1px solid #ddd;border-radius:6px;cursor:pointer;font-size:12px">&#8635; Actualizar</button>
               </div>
             </div>
@@ -558,6 +559,10 @@ tr:last-child td{border-bottom:none}
                 <span id="nuevo-msg" style="font-size:12px;color:#666"></span>
               </div>
             </div>
+            <div style="background:#e8f9ef;border-left:3px solid #25D366;border-radius:4px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#1b7a45">
+              <b>📱 Conectar WhatsApp del celular (Coexistencia):</b> el numero sigue funcionando en la app WhatsApp Business del telefono <b>y</b> aqui en la plataforma, con los chats y contactos sincronizados. Requiere WhatsApp Business ≥ 2.24.17 en el telefono. La opcion "Agregar numero (manual)" es solo para pegar credenciales a mano.
+            </div>
+            <div id="coex-msg" style="display:none;background:#fff;border:1px solid #cde;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:13px;color:#333"></div>
             <div style="background:#e7f0fd;border-left:3px solid #1877F2;border-radius:4px;padding:10px 12px;margin-bottom:16px;font-size:12px;color:#1565d8">
               Cada numero puede tener su propio Pixel ID y token CAPI. Los eventos se enviaran al pixel del numero que atendio al contacto.
             </div>
@@ -1895,6 +1900,83 @@ function fbGuardarNuevoNumero() {
         msg.textContent = 'Error: ' + (d.error||'Error desconocido'); msg.style.color = '#dc2626';
       }
     });
+}
+
+// ==================== COEXISTENCIA: Embedded Signup de Meta ====================
+var COEX = { app_id:'', config_id:'', version:'v21.0', waData:null };
+
+// El popup de Meta manda phone_number_id + waba_id por postMessage.
+window.addEventListener('message', function(ev){
+  if (typeof ev.origin !== 'string' || ev.origin.indexOf('facebook.com') === -1) return;
+  try { var d = JSON.parse(ev.data); if (d && d.type === 'WA_EMBEDDED_SIGNUP' && d.data) { COEX.waData = d.data; } } catch(e){}
+});
+
+function coexMsg(html, color){
+  var m = document.getElementById('coex-msg');
+  if (!m) return;
+  m.style.display = 'block';
+  m.innerHTML = html;
+  m.style.color = color || '#333';
+}
+
+// Carga el SDK de Facebook una sola vez, cuando se necesita.
+function coexCargarSDK(cb){
+  if (window.FB) { cb(); return; }
+  window.fbAsyncInit = function(){
+    FB.init({ appId: COEX.app_id, autoLogAppEvents: true, xfbml: false, version: COEX.version });
+    cb();
+  };
+  var js = document.createElement('script');
+  js.src = 'https://connect.facebook.net/en_US/sdk.js';
+  js.async = true; js.defer = true; js.crossOrigin = 'anonymous';
+  js.onerror = function(){ coexMsg('❌ No se pudo cargar el SDK de Facebook (revisa tu conexion).', '#dc2626'); };
+  document.body.appendChild(js);
+}
+
+// Paso 1: pedir la config al backend y abrir el flujo de Meta.
+function coexIniciar(){
+  coexMsg('⏳ Preparando conexion...', '#666');
+  fetch('/api/meta/embedded-config', { headers: { Authorization: 'Bearer '+token } })
+    .then(function(r){ return r.json(); })
+    .then(function(cfg){
+      if (!cfg || !cfg.app_id || !cfg.config_id) {
+        coexMsg('⚠️ Falta configurar Meta en el servidor. Pon <b>META_APP_ID</b> y <b>META_ES_CONFIG_ID</b> (y META_APP_SECRET) en el .env. Mira la guia de coexistencia.', '#b45309');
+        return;
+      }
+      COEX.app_id = cfg.app_id; COEX.config_id = cfg.config_id; COEX.version = cfg.graph_version || 'v21.0';
+      coexCargarSDK(coexLanzar);
+    })
+    .catch(function(){ coexMsg('❌ Error consultando la configuracion.', '#dc2626'); });
+}
+
+// Paso 2: lanzar Embedded Signup en modo coexistencia y enviar el code al backend.
+function coexLanzar(){
+  COEX.waData = null;
+  coexMsg('Abriendo la ventana de Meta... completa el flujo y confirma en tu telefono.', '#666');
+  FB.login(function(response){
+    if (response.authResponse && response.authResponse.code) {
+      var code = response.authResponse.code;
+      var d = COEX.waData || {};
+      coexMsg('⏳ Conectando el numero...', '#666');
+      fetch('/api/numeros/coexistencia', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer '+token },
+        body: JSON.stringify({ code: code, phone_number_id: d.phone_number_id, waba_id: d.waba_id })
+      }).then(function(r){ return r.json(); })
+        .then(function(res){
+          if (res.ok) { coexMsg('✅ Numero conectado en coexistencia. Sincronizando contactos e historial (puede tardar unos minutos).', '#16a34a'); fbLoadNumeros(); }
+          else { coexMsg('❌ ' + (res.error || 'Error al conectar'), '#dc2626'); }
+        })
+        .catch(function(){ coexMsg('❌ Error de red al conectar el numero.', '#dc2626'); });
+    } else {
+      coexMsg('Conexion cancelada.', '#888');
+    }
+  }, {
+    config_id: COEX.config_id,
+    response_type: 'code',
+    override_default_response_type: true,
+    extras: { setup: {}, featureType: 'whatsapp_business_app_onboarding', sessionInfoVersion: '3' }
+  });
 }
 
 function fbFiltrarTabla() {

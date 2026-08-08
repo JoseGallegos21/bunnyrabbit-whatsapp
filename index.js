@@ -782,6 +782,59 @@ app.get('/api/meta/embedded-config', auth, (req, res) => {
   });
 });
 
+// Dispara la sincronizacion de contactos desde la app del celular. El historial
+// llega solo si el negocio acepto compartirlo durante el onboarding. Debe correr
+// dentro de las primeras 24h tras conectar (regla de Meta).
+async function dispararSyncCoexistencia(phone_number_id, token, V) {
+  try {
+    const r = await axios.post(`https://graph.facebook.com/${V}/${phone_number_id}/smb_app_data`,
+      { messaging_product: 'whatsapp', sync_type: 'smb_app_state_sync' },
+      { headers: { Authorization: 'Bearer ' + token } });
+    console.log('[COEX] sync solicitado para ' + phone_number_id + ': ' + JSON.stringify(r.data));
+    db.run("UPDATE numeros SET sync_estado='sincronizando' WHERE phone_number_id=?", [phone_number_id]);
+  } catch (e) {
+    const msg = e.response?.data?.error?.message || e.message;
+    console.error('[COEX] no se pudo disparar sync:', msg);
+    db.run("UPDATE numeros SET sync_estado='error' WHERE phone_number_id=?", [phone_number_id]);
+  }
+}
+
+// Onboarding de coexistencia (Embedded Signup): recibe el 'code' que devuelve
+// Meta, lo cambia por el token del numero, suscribe NUESTRA app a los webhooks
+// del WABA, guarda el numero en modo coexistencia y arranca la sincronizacion.
+app.post('/api/numeros/coexistencia', auth, async (req, res) => {
+  if (req.user.rol !== 'admin' && req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  const { code, phone_number_id, waba_id, nombre, sucursal } = req.body;
+  const APP_ID = process.env.META_APP_ID, APP_SECRET = process.env.META_APP_SECRET;
+  const V = process.env.META_GRAPH_VERSION || 'v21.0';
+  if (!APP_ID || !APP_SECRET) return res.status(400).json({ error: 'Falta configurar META_APP_ID y META_APP_SECRET en el .env del servidor' });
+  if (!code || !phone_number_id || !waba_id) return res.status(400).json({ error: 'Faltan datos del Embedded Signup (code, phone_number_id, waba_id)' });
+  try {
+    // 1) code -> token del negocio
+    const tk = await axios.get(`https://graph.facebook.com/${V}/oauth/access_token`,
+      { params: { client_id: APP_ID, client_secret: APP_SECRET, code } });
+    const token = tk.data && tk.data.access_token;
+    if (!token) return res.status(502).json({ error: 'Meta no devolvio un token de acceso' });
+    // 2) suscribir nuestra app a los webhooks del WABA
+    await axios.post(`https://graph.facebook.com/${V}/${waba_id}/subscribed_apps`, {}, { headers: { Authorization: 'Bearer ' + token } });
+    // 3) guardar el numero en modo coexistencia (sin pisar datos CAPI si ya existia)
+    await new Promise((resolve, reject) => {
+      db.run(`INSERT INTO numeros (nombre, sucursal, phone_number_id, token, waba_id, es_coexistencia, sync_estado, sync_progreso)
+              VALUES (?,?,?,?,?,1,'pendiente',0)
+              ON CONFLICT(phone_number_id) DO UPDATE SET token=excluded.token, waba_id=excluded.waba_id, es_coexistencia=1, sync_estado='pendiente'`,
+        [nombre || sucursal || phone_number_id, sucursal || nombre || phone_number_id, phone_number_id, token, waba_id],
+        (e) => e ? reject(e) : resolve());
+    });
+    // 4) disparar la sincronizacion (no bloquea la respuesta al panel)
+    dispararSyncCoexistencia(phone_number_id, token, V);
+    res.json({ ok: true, phone_number_id, waba_id });
+  } catch (e) {
+    const msg = e.response?.data?.error?.message || e.message;
+    console.error('[COEX] onboarding:', msg);
+    res.status(500).json({ error: 'Error al conectar: ' + msg });
+  }
+});
+
 const ROLES_VALIDOS = ['admin', 'supervisor', 'recepcionista', 'tecnica'];
 
 app.post('/api/usuarios', auth, async (req, res) => {

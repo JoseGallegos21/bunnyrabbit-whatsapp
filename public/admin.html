@@ -91,7 +91,6 @@ tr:last-child td{border-bottom:none}
     <div class="tab" onclick="showTab('reportes',this)">Reportes</div>
         <div class="tab" onclick="showTab('biblioteca',this)">Biblioteca</div>
         <div class="tab" onclick="showTab('facebook',this)">&#128279; Facebook CAPI</div>
-        <div class="tab" onclick="showTab('sucursales',this)">🏢 Sucursales</div>
         <div class="tab" onclick="showTab('workflows',this)">⚡ Automatizaciones</div>
   </div>
 
@@ -116,6 +115,72 @@ tr:last-child td{border-bottom:none}
         <button class="btn btn-primary" id="btnCrearUsuario">Crear usuario</button>
         <p id="msgUsuario" style="font-size:13px;margin-top:8px"></p>
       </div>
+
+      <!-- ===== Conexion de WhatsApp (coexistencia) — gestion unificada ===== -->
+      <div class="card">
+        <h2>📱 Conexión de WhatsApp</h2>
+        <div style="background:#e8f9ef;border-left:3px solid #25D366;border-radius:4px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#1b7a45">
+          <b>Conectar WhatsApp del celular (Coexistencia):</b> el número sigue funcionando en la app WhatsApp Business del teléfono <b>y</b> aquí en la plataforma, con chats y contactos sincronizados. Requiere WhatsApp Business ≥ 2.24.17 en el teléfono. La opción "Agregar número a sucursal" (abajo) es para pegar credenciales a mano.
+        </div>
+        <button onclick="coexIniciar()" style="padding:9px 16px;background:#25D366;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">📱 Conectar WhatsApp del celular</button>
+        <div id="coex-msg" style="display:none;background:#fff;border:1px solid #cde;border-radius:6px;padding:10px 12px;margin-top:12px;font-size:13px;color:#333"></div>
+      </div>
+
+      <!-- ===== Sucursales y numeros (movido aqui desde su pestaña) ===== -->
+      <div class="card">
+        <h2>🏢 Sucursales y números</h2>
+        <div style="margin-bottom:24px;background:#f8f9fa;border-radius:12px;padding:20px;border:1px solid #e0e0e0">
+          <h3 style="margin-bottom:16px;font-size:15px">Agregar sucursal</h3>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+            <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Nombre</label>
+              <input id="suc_nombre" type="text" placeholder="Ej: Caralinda Insurgentes" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
+            <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Dirección</label>
+              <input id="suc_direccion" type="text" placeholder="Dirección completa" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+            <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Phone Number ID de WhatsApp</label>
+              <select id="suc_phone" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;background:#fff">
+                <option value="">Sin número asignado</option>
+              </select></div>
+            <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Logo</label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <div id="suc_logo_preview" style="width:48px;height:48px;border-radius:8px;background:#e8f5e9;border:1px solid #ddd;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">🏢</div>
+                <input id="suc_logo" type="hidden">
+                <button type="button" onclick="abrirBibliotecaLogo()" style="background:#f0f0f0;border:1px solid #ddd;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px">📷 Seleccionar de biblioteca</button>
+              </div></div>
+          </div>
+          <button onclick="crearSucursal()" style="background:#1f5c4a;color:#fff;border:none;padding:10px 24px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">Crear sucursal</button>
+          <span id="sucMsg" style="margin-left:12px;font-size:13px"></span>
+        </div>
+
+        <div id="listaSucursales"><p style="color:#999;text-align:center;padding:20px">Cargando sucursales...</p></div>
+
+        <div style="margin-top:24px;background:#f8f9fa;border-radius:12px;padding:20px;border:1px solid #e0e0e0">
+          <h3 style="margin-bottom:16px;font-size:15px">➕ Agregar número de WhatsApp a sucursal (manual)</h3>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+            <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Sucursal</label>
+              <select id="num_sucursal" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;background:#fff">
+                <option value="">Seleccionar sucursal</option>
+              </select></div>
+            <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Nombre del número</label>
+              <input id="num_nombre" type="text" placeholder="Ej: Caralinda Insurgentes" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
+            <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Phone Number ID</label>
+              <input id="num_phone_id" type="text" placeholder="ID de Meta" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+            <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Token de WhatsApp</label>
+              <input id="num_token" type="text" placeholder="Token permanente" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
+            <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">WABA ID <span style="color:#999">(para plantillas)</span></label>
+              <input id="num_waba_id" type="text" placeholder="ID de la cuenta de WhatsApp Business" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
+            <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Nombre visible en sistema</label>
+              <input id="num_display" type="text" placeholder="Ej: WA Insurgentes" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
+          </div>
+          <p style="font-size:12px;color:#666;margin:-8px 0 14px">El <strong>WABA ID</strong> permite importar y sincronizar las plantillas de tu Administrador comercial. Lo encuentras en Administrador de WhatsApp → Configuración de la cuenta.</p>
+          <button onclick="agregarNumeroSucursal()" style="background:#1f5c4a;color:#fff;border:none;padding:10px 24px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">Agregar número</button>
+          <span id="numSucMsg" style="margin-left:12px;font-size:13px"></span>
+        </div>
+      </div>
+
       <div class="card">
         <h2>Usuarios registrados</h2>
       <div style="margin-bottom:12px">
@@ -362,59 +427,7 @@ tr:last-child td{border-bottom:none}
       </div>
     </div>
 
-    <div class="section" id="sec-sucursales">
-      <h2>Sucursales</h2>
-      <div style="margin-bottom:24px;background:#f8f9fa;border-radius:12px;padding:20px;border:1px solid #e0e0e0">
-        <h3 style="margin-bottom:16px;font-size:15px">Agregar sucursal</h3>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
-          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Nombre</label>
-            <input id="suc_nombre" type="text" placeholder="Ej: Caralinda Insurgentes" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
-          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Dirección</label>
-            <input id="suc_direccion" type="text" placeholder="Dirección completa" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
-          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Phone Number ID de WhatsApp</label>
-            <select id="suc_phone" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;background:#fff">
-              <option value="">Sin número asignado</option>
-            </select></div>
-          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Logo</label>
-            <div style="display:flex;gap:8px;align-items:center">
-              <div id="suc_logo_preview" style="width:48px;height:48px;border-radius:8px;background:#e8f5e9;border:1px solid #ddd;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">🏢</div>
-              <input id="suc_logo" type="hidden">
-              <button type="button" onclick="abrirBibliotecaLogo()" style="background:#f0f0f0;border:1px solid #ddd;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px">📷 Seleccionar de biblioteca</button>
-            </div></div>
-        </div>
-        <button onclick="crearSucursal()" style="background:#1f5c4a;color:#fff;border:none;padding:10px 24px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">Crear sucursal</button>
-        <span id="sucMsg" style="margin-left:12px;font-size:13px"></span>
-      </div>
-
-      <div id="listaSucursales"><p style="color:#999;text-align:center;padding:20px">Cargando sucursales...</p></div>
-
-      <div style="margin-top:24px;background:#f8f9fa;border-radius:12px;padding:20px;border:1px solid #e0e0e0">
-        <h3 style="margin-bottom:16px;font-size:15px">➕ Agregar número de WhatsApp a sucursal</h3>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
-          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Sucursal</label>
-            <select id="num_sucursal" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;background:#fff">
-              <option value="">Seleccionar sucursal</option>
-            </select></div>
-          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Nombre del número</label>
-            <input id="num_nombre" type="text" placeholder="Ej: Caralinda Insurgentes" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
-          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Phone Number ID</label>
-            <input id="num_phone_id" type="text" placeholder="ID de Meta" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
-          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Token de WhatsApp</label>
-            <input id="num_token" type="text" placeholder="Token permanente" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
-          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">WABA ID <span style="color:#999">(para plantillas)</span></label>
-            <input id="num_waba_id" type="text" placeholder="ID de la cuenta de WhatsApp Business" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
-          <div><label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Nombre visible en sistema</label>
-            <input id="num_display" type="text" placeholder="Ej: WA Insurgentes" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px"></div>
-        </div>
-        <p style="font-size:12px;color:#666;margin:-8px 0 14px">El <strong>WABA ID</strong> permite importar y sincronizar las plantillas de tu Administrador comercial. Lo encuentras en Administrador de WhatsApp → Configuración de la cuenta.</p>
-        <button onclick="agregarNumeroSucursal()" style="background:#1f5c4a;color:#fff;border:none;padding:10px 24px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">Agregar número</button>
-        <span id="numSucMsg" style="margin-left:12px;font-size:13px"></span>
-      </div>
-    </div>
+    <!-- (La seccion Sucursales se movio a la pestaña Usuarios para gestion unificada) -->
 
     <!-- ========== AUTOMATIZACIONES (WORKFLOWS) ========== -->
     <div class="section" id="sec-workflows">
@@ -520,8 +533,7 @@ tr:last-child td{border-bottom:none}
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
               <h3 style="font-size:15px;color:#333;margin:0">Configuracion por numero</h3>
               <div style="display:flex;gap:8px">
-                <button onclick="coexIniciar()" style="padding:6px 12px;background:#25D366;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">📱 Conectar WhatsApp del celular</button>
-                <button onclick="fbMostrarFormNuevo()" style="padding:6px 12px;background:#1877F2;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px">+ Agregar numero (manual)</button>
+                <button onclick="fbMostrarFormNuevo()" style="padding:6px 12px;background:#1877F2;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px">+ Agregar numero</button>
                 <button onclick="fbLoadNumeros()" style="padding:6px 12px;background:white;border:1px solid #ddd;border-radius:6px;cursor:pointer;font-size:12px">&#8635; Actualizar</button>
               </div>
             </div>
@@ -559,10 +571,6 @@ tr:last-child td{border-bottom:none}
                 <span id="nuevo-msg" style="font-size:12px;color:#666"></span>
               </div>
             </div>
-            <div style="background:#e8f9ef;border-left:3px solid #25D366;border-radius:4px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#1b7a45">
-              <b>📱 Conectar WhatsApp del celular (Coexistencia):</b> el numero sigue funcionando en la app WhatsApp Business del telefono <b>y</b> aqui en la plataforma, con los chats y contactos sincronizados. Requiere WhatsApp Business ≥ 2.24.17 en el telefono. La opcion "Agregar numero (manual)" es solo para pegar credenciales a mano.
-            </div>
-            <div id="coex-msg" style="display:none;background:#fff;border:1px solid #cde;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:13px;color:#333"></div>
             <div style="background:#e7f0fd;border-left:3px solid #1877F2;border-radius:4px;padding:10px 12px;margin-bottom:16px;font-size:12px;color:#1565d8">
               Cada numero puede tener su propio Pixel ID y token CAPI. Los eventos se enviaran al pixel del numero que atendio al contacto.
             </div>
@@ -899,7 +907,7 @@ function showTab(id,el){
   document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active');});
   document.getElementById('sec-'+id).classList.add('active');
   el.classList.add('active');
-  if(id==='sucursales'){cargarSucursales();cargarNumerosEnSelectSucursal();}
+  if(id==='usuarios'){cargarSucursales();cargarNumerosEnSelectSucursal();}
   if(id==='reportes')cargarReportes();
     if(id==='biblioteca')cargarBiblioteca();
     if(id==='facebook'){setTimeout(function(){fbLoadNumeros();fbLoadStats();},100);}
@@ -908,7 +916,7 @@ function showTab(id,el){
 
 function h(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):''}
 
-function cargarTodo(){cargarUsuarios();cargarPlantillas();cargarNumeros();cargarDifusiones();cargarNumerosEnSelectores();cargarSucursalesEnSelect();}
+function cargarTodo(){cargarUsuarios();cargarPlantillas();cargarNumeros();cargarDifusiones();cargarNumerosEnSelectores();cargarSucursalesEnSelect();cargarSucursales();cargarNumerosEnSelectSucursal();}
 function cargarSucursalesEnSelect(){
   fetch('/api/sucursales',{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})

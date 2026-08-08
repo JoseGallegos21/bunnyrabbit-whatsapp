@@ -160,7 +160,11 @@ db.serialize(() => {
   ensureColumns('numeros', [
     ['waba_id', 'TEXT'],
     ['pixel_id', 'TEXT'], ['capi_token', 'TEXT'], ['capi_version', "TEXT DEFAULT 'v21.0'"],
-    ['capi_test_code', 'TEXT'], ['capi_activo', 'INTEGER DEFAULT 0'], ['capi_triggers', "TEXT DEFAULT '[]'"]
+    ['capi_test_code', 'TEXT'], ['capi_activo', 'INTEGER DEFAULT 0'], ['capi_triggers', "TEXT DEFAULT '[]'"],
+    // Coexistencia (el numero sigue en la app del celular Y en la plataforma)
+    ['es_coexistencia', 'INTEGER DEFAULT 0'],   // 1 = conectado por Embedded Signup en modo coexistencia
+    ['sync_estado', 'TEXT'],                    // pendiente | sincronizando | listo | error
+    ['sync_progreso', 'INTEGER DEFAULT 0']      // 0-100, avance de la sincronizacion de historial
   ]);
 });
 
@@ -661,8 +665,85 @@ function textoDeMensaje(msg) {
   return { texto: msg.text?.body || '[media]', esBoton: false };
 }
 
+// ==================== COEXISTENCIA: webhooks de sincronizacion ====================
+// Cuando un numero se conecta en modo coexistencia, Meta manda 3 tipos de eventos
+// ademas de los normales. Los procesamos de forma tolerante (siempre 200, nunca
+// rompen el flujo existente) y registramos el payload crudo la primera vez para
+// poder afinar el parseo contra datos reales.
+let _coexLogueado = { history: 0, smb_app_state_sync: 0, smb_message_echoes: 0 };
+function coexLogPrimeraVez(field, value) {
+  if (_coexLogueado[field] != null && _coexLogueado[field] < 2) {
+    _coexLogueado[field]++;
+    try { console.log('[COEX] payload ' + field + ':', JSON.stringify(value).slice(0, 1500)); } catch (e) {}
+  }
+}
+
+// Mensajes que la recepcionista escribe DESDE la app WhatsApp Business del celular.
+// Llegan como "echoes"; los guardamos como salientes para que aparezcan en el CRM.
+async function coexProcesarEchoes(value) {
+  try {
+    const numero_id = value?.metadata?.phone_number_id;
+    const echoes = value?.message_echoes || value?.messages || [];
+    for (const m of echoes) {
+      const telefono = m.to || m.recipient_id || m.from;
+      if (!telefono) continue;
+      const { texto } = textoDeMensaje(m);
+      db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, origen) VALUES (?,?,?,?,?)',
+        [numero_id, telefono, texto, 'saliente', 'celular']);
+      db.run("INSERT INTO contactos (telefono, numero_id, etapa, prioridad, origen) VALUES (?,?,'Nuevo','Media','celular') ON CONFLICT(telefono) DO NOTHING", [telefono, numero_id]);
+    }
+  } catch (e) { console.error('[COEX] echoes:', e.message); }
+}
+
+// Altas/cambios de contactos sincronizados desde la libreta del celular.
+async function coexProcesarStateSync(value) {
+  try {
+    const numero_id = value?.metadata?.phone_number_id;
+    const items = value?.state_sync || value?.contacts || [];
+    for (const it of items) {
+      const c = it.contact || it;
+      const telefono = c.phone_number || c.wa_id || c.phone || (c.profile && c.profile.phone);
+      const nombre = c.full_name || c.name || (c.profile && c.profile.name) || null;
+      if (!telefono) continue;
+      db.run("INSERT INTO contactos (telefono, nombre, numero_id, etapa, prioridad, origen) VALUES (?,?,?,'Nuevo','Media','celular') ON CONFLICT(telefono) DO UPDATE SET nombre=COALESCE(excluded.nombre, contactos.nombre)",
+        [telefono, nombre, numero_id]);
+    }
+  } catch (e) { console.error('[COEX] state_sync:', e.message); }
+}
+
+// Historial (hasta 180 dias) que Meta envia por fases. Guardamos los mensajes y
+// registramos el progreso en la tabla numeros para poder mostrarlo en el panel.
+async function coexProcesarHistorial(value) {
+  try {
+    const numero_id = value?.metadata?.phone_number_id;
+    const threads = value?.history || value?.threads || [];
+    let guardados = 0;
+    for (const th of threads) {
+      const mensajes = th.messages || [];
+      for (const m of mensajes) {
+        const deMi = (m.history_context && m.history_context.from_me) || m.from === numero_id;
+        const telefono = deMi ? (m.to || th.id || m.recipient_id) : m.from;
+        if (!telefono) continue;
+        const { texto } = textoDeMensaje(m);
+        let ts = null;
+        if (m.timestamp) { const d = new Date(Number(m.timestamp) * 1000); if (!isNaN(d)) ts = d.toISOString().slice(0, 19).replace('T', ' '); }
+        db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, timestamp, origen) VALUES (?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP),?)',
+          [numero_id, telefono, texto, deMi ? 'saliente' : 'entrante', ts, 'historial']);
+        guardados++;
+      }
+    }
+    const prog = value?.metadata?.progress ?? value?.progress;
+    if (numero_id && prog != null) {
+      db.run("UPDATE numeros SET sync_progreso=?, sync_estado=CASE WHEN ?>=100 THEN 'listo' ELSE 'sincronizando' END WHERE phone_number_id=?", [Number(prog), Number(prog), numero_id]);
+    }
+    console.log('[COEX] historial: guardados ' + guardados + ' mensajes, progreso ' + prog);
+  } catch (e) { console.error('[COEX] history:', e.message); }
+}
+
 app.post('/webhook', verificarFirmaMeta, (req, res) => {
-  const entry = req.body.entry?.[0]?.changes?.[0]?.value;
+  const cambio = req.body.entry?.[0]?.changes?.[0];
+  const field = cambio?.field;
+  const entry = cambio?.value;
   if (entry?.messages) {
     const msg = entry.messages[0];
     const numero_id = entry.metadata.phone_number_id;
@@ -682,7 +763,23 @@ app.post('/webhook', verificarFirmaMeta, (req, res) => {
       }
     }
   }
+  // Coexistencia: mensajes del celular, contactos e historial sincronizado
+  if (field === 'smb_message_echoes' || entry?.message_echoes) { coexLogPrimeraVez('smb_message_echoes', entry); coexProcesarEchoes(entry); }
+  if (field === 'smb_app_state_sync' || entry?.state_sync)    { coexLogPrimeraVez('smb_app_state_sync', entry); coexProcesarStateSync(entry); }
+  if (field === 'history' || entry?.history)                  { coexLogPrimeraVez('history', entry); coexProcesarHistorial(entry); }
   res.sendStatus(200);
+});
+
+// Datos publicos (App ID + config) que el panel necesita para abrir el Embedded
+// Signup de Meta. El App Secret NUNCA sale de aqui; solo se usa en el backend.
+app.get('/api/meta/embedded-config', auth, (req, res) => {
+  if (req.user.rol !== 'admin' && req.user.rol !== 'supervisor') return res.status(403).json({ error: 'Sin acceso' });
+  res.json({
+    app_id: process.env.META_APP_ID || '',
+    config_id: process.env.META_ES_CONFIG_ID || '',
+    graph_version: process.env.META_GRAPH_VERSION || 'v21.0',
+    configurado: !!(process.env.META_APP_ID && process.env.META_APP_SECRET && process.env.META_ES_CONFIG_ID)
+  });
 });
 
 const ROLES_VALIDOS = ['admin', 'supervisor', 'recepcionista', 'tecnica'];

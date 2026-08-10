@@ -1744,7 +1744,7 @@ function enviar(){
   var msg=input.value.trim();
   if(!msg||!chatActivo)return;
   input.value='';
-  fetch('/api/enviar',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({telefono:chatActivo,mensaje:msg,numero_id:'354166651115198'})})
+  fetch('/api/enviar',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({telefono:chatActivo,mensaje:msg,numero_id:usuario.numero_id||null})})
   .then(function(){cargarMensajes();});
 }
 
@@ -1864,7 +1864,7 @@ function accionPerfil(accion, tel){
 
 function guardarPerfil(tel){
   var etqs=Array.from(document.querySelectorAll('.etiqueta-tag.selected')).map(function(e){return parseInt(e.dataset.id);});
-  fetch('/api/contactos/'+tel,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+  fetch('/api/contactos/tel/'+tel,{method:'PUT',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
     body:JSON.stringify({nombre:document.getElementById('p_nombre').value,etapa:document.getElementById('p_etapa').value,prioridad:document.getElementById('p_prioridad').value,notas:document.getElementById('p_notas').value,etiquetas:etqs})})
   .then(function(){
     cargarMensajes();abrirChat(tel);

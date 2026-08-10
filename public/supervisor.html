@@ -307,7 +307,7 @@ function switchTab(tab, el) {
 
 // ── MÉTRICAS ──
 async function cargarMetricas() {
-  const data = await api('/api/metricas');
+  const data = await api('/api/metricas/supervisor');
   const grid = document.getElementById('metricasGrid');
   const ch = data.citasHoy || {};
   grid.innerHTML = `

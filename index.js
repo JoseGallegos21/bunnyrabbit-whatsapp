@@ -543,6 +543,14 @@ app.get('/api/mensajes', auth, (req, res) => {
   db.all(`SELECT * FROM mensajes ${where} ORDER BY timestamp DESC LIMIT ${limit}`, params, (err, rows) => res.json(rows || []));
 });
 
+// Historial de mensajes de un contacto (lo usa el panel de supervisor al abrir un chat)
+app.get('/api/mensajes/:telefono', auth, (req, res) => {
+  const numero_id = req.user.rol === 'supervisor' ? req.query.numero_id : req.user.numero_id;
+  const cond = ['contacto = ?'], params = [req.params.telefono];
+  if (numero_id) { cond.push('numero_id = ?'); params.push(numero_id); }
+  db.all(`SELECT * FROM mensajes WHERE ${cond.join(' AND ')} ORDER BY timestamp ASC LIMIT 500`, params, (err, rows) => res.json(rows || []));
+});
+
 app.get('/api/numeros', auth, (req, res) => {
   if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
   db.all('SELECT id, nombre, sucursal, phone_number_id FROM numeros', [], (err, rows) => res.json(rows || []));
@@ -553,6 +561,40 @@ app.get('/api/metricas', auth, (req, res) => {
   const where = numero_id ? 'WHERE numero_id = ?' : '';
   const params = numero_id ? [numero_id] : [];
   db.get(`SELECT COUNT(*) as total, SUM(CASE WHEN direccion='entrante' THEN 1 ELSE 0 END) as entrantes, SUM(CASE WHEN direccion='saliente' THEN 1 ELSE 0 END) as salientes, SUM(CASE WHEN leido=0 AND direccion='entrante' THEN 1 ELSE 0 END) as no_leidos FROM mensajes ${where}`, params, (err, row) => res.json(row || {}));
+});
+
+// Metricas del panel de supervisor: citas de hoy + actividad por recepcionista.
+// Un supervisor solo ve su sucursal; un admin ve todo.
+app.get('/api/metricas/supervisor', auth, requireRole('admin', 'supervisor'), (req, res) => {
+  const esSuper = req.user.rol === 'supervisor';
+  const sucursal = esSuper ? req.user.sucursal : null;
+  const sucCond = sucursal ? ' AND sucursal = ?' : '';
+  const sucParam = sucursal ? [sucursal] : [];
+  db.get(`SELECT COUNT(*) total_citas_hoy,
+                 SUM(CASE WHEN estado='pendiente' THEN 1 ELSE 0 END) pendientes,
+                 SUM(CASE WHEN estado='completada' THEN 1 ELSE 0 END) completadas,
+                 SUM(CASE WHEN estado='cancelada' THEN 1 ELSE 0 END) canceladas
+          FROM citas WHERE fecha = date('now','localtime')${sucCond}`, sucParam, (e1, citasHoy) => {
+    const uCond = esSuper ? "WHERE rol='recepcionista' AND sucursal=?" : "WHERE rol='recepcionista'";
+    const uParam = esSuper ? [sucursal] : [];
+    db.all(`SELECT id, nombre, sucursal, numero_id FROM usuarios ${uCond}`, uParam, (e2, recs) => {
+      recs = recs || [];
+      if (!recs.length) return res.json({ citasHoy: citasHoy || {}, recepcionistas: [] });
+      const out = [];
+      recs.forEach(r => {
+        db.get(`SELECT SUM(CASE WHEN date(timestamp)=date('now','localtime') THEN 1 ELSE 0 END) mensajes_hoy,
+                       SUM(CASE WHEN timestamp >= datetime('now','-7 days') THEN 1 ELSE 0 END) mensajes_semana
+                FROM mensajes WHERE numero_id=?`, [r.numero_id], (e3, ms) => {
+          db.get('SELECT COUNT(*) total_contactos FROM contactos WHERE numero_id=?', [r.numero_id], (e4, cs) => {
+            out.push({ nombre: r.nombre, sucursal: r.sucursal,
+                       mensajes_hoy: ms?.mensajes_hoy || 0, mensajes_semana: ms?.mensajes_semana || 0,
+                       total_contactos: cs?.total_contactos || 0 });
+            if (out.length === recs.length) res.json({ citasHoy: citasHoy || {}, recepcionistas: out });
+          });
+        });
+      });
+    });
+  });
 });
 
 app.post('/api/enviar', auth, async (req, res) => {
@@ -578,7 +620,9 @@ app.get('/api/contactos/:telefono', auth, (req, res) => {
   });
 });
 
-app.put('/api/contactos/:telefono', auth, (req, res) => {
+// Ruta bajo /tel/ para NO chocar con PUT /api/contactos/:id (Express matcheaba
+// siempre :id y esta quedaba muerta: el upsert por telefono + etiquetas nunca corria).
+app.put('/api/contactos/tel/:telefono', auth, (req, res) => {
   const { nombre, notas, etapa, prioridad, etiquetas } = req.body;
   const numero_id = req.user.numero_id || req.body.numero_id;
   db.run(`INSERT INTO contactos (telefono, nombre, notas, etapa, prioridad, numero_id) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(telefono) DO UPDATE SET nombre=excluded.nombre, notas=excluded.notas, etapa=excluded.etapa, prioridad=excluded.prioridad`,
@@ -741,32 +785,40 @@ async function coexProcesarHistorial(value) {
 }
 
 app.post('/webhook', verificarFirmaMeta, (req, res) => {
-  const cambio = req.body.entry?.[0]?.changes?.[0];
-  const field = cambio?.field;
-  const entry = cambio?.value;
-  if (entry?.messages) {
-    const msg = entry.messages[0];
-    const numero_id = entry.metadata.phone_number_id;
-    const telefono = msg.from;
-    const { texto, esBoton } = textoDeMensaje(msg);
-    const origen = origenDelMensaje(msg, texto);
-    db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, origen) VALUES (?, ?, ?, ?, ?)', [numero_id, telefono, texto, 'entrante', origen]);
-    db.run(`INSERT INTO contactos (telefono, numero_id, etapa, prioridad, origen) VALUES (?, ?, 'Nuevo', 'Media', ?) ON CONFLICT(telefono) DO NOTHING`, [telefono, numero_id, origen]);
-    // Si un workflow esta esperando la respuesta de este contacto, enrutar por el boton
-    wfRutearRespuesta(telefono, texto).catch(e => console.error('[WF] rutear respuesta:', e.message));
-  }
-  // Estados de entrega: si un mensaje que se esperaba FALLO, enrutar a "no entregado"
-  if (entry?.statuses) {
-    for (const st of entry.statuses) {
-      if (st.status === 'failed') {
-        wfRutearUndelivered(st.id).catch(e => console.error('[WF] rutear undelivered:', e.message));
+  // Meta envia en lote: varias entry, varios changes y varios messages en un
+  // solo POST. Iteramos TODO (antes solo se procesaba el primero y se perdian
+  // los demas). Envuelto en try/catch: siempre respondemos 200 para que Meta no
+  // reintente, aunque un payload venga malformado.
+  try {
+    for (const e of (req.body?.entry || [])) {
+      for (const cambio of (e.changes || [])) {
+        const field = cambio?.field;
+        const value = cambio?.value;
+        if (!value) continue;
+        const numero_id = value.metadata?.phone_number_id;
+        // Mensajes entrantes (puede venir mas de uno)
+        for (const msg of (value.messages || [])) {
+          const telefono = msg.from;
+          const { texto } = textoDeMensaje(msg);
+          const origen = origenDelMensaje(msg, texto);
+          db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, origen) VALUES (?, ?, ?, ?, ?)', [numero_id, telefono, texto, 'entrante', origen]);
+          db.run(`INSERT INTO contactos (telefono, numero_id, etapa, prioridad, origen) VALUES (?, ?, 'Nuevo', 'Media', ?) ON CONFLICT(telefono) DO NOTHING`, [telefono, numero_id, origen]);
+          // Si un workflow esta esperando la respuesta de este contacto, enrutar por el boton
+          wfRutearRespuesta(telefono, texto).catch(err => console.error('[WF] rutear respuesta:', err.message));
+        }
+        // Estados de entrega: si un mensaje que se esperaba FALLO, enrutar a "no entregado"
+        for (const st of (value.statuses || [])) {
+          if (st.status === 'failed') wfRutearUndelivered(st.id).catch(err => console.error('[WF] rutear undelivered:', err.message));
+        }
+        // Coexistencia: mensajes del celular, contactos e historial sincronizado
+        if (field === 'smb_message_echoes' || value.message_echoes) { coexLogPrimeraVez('smb_message_echoes', value); coexProcesarEchoes(value); }
+        if (field === 'smb_app_state_sync' || value.state_sync)    { coexLogPrimeraVez('smb_app_state_sync', value); coexProcesarStateSync(value); }
+        if (field === 'history' || value.history)                  { coexLogPrimeraVez('history', value); coexProcesarHistorial(value); }
       }
     }
+  } catch (err) {
+    console.error('[WEBHOOK] error procesando payload:', err.message);
   }
-  // Coexistencia: mensajes del celular, contactos e historial sincronizado
-  if (field === 'smb_message_echoes' || entry?.message_echoes) { coexLogPrimeraVez('smb_message_echoes', entry); coexProcesarEchoes(entry); }
-  if (field === 'smb_app_state_sync' || entry?.state_sync)    { coexLogPrimeraVez('smb_app_state_sync', entry); coexProcesarStateSync(entry); }
-  if (field === 'history' || entry?.history)                  { coexLogPrimeraVez('history', entry); coexProcesarHistorial(entry); }
   res.sendStatus(200);
 });
 
@@ -864,14 +916,30 @@ app.get('/api/usuarios', auth, (req, res) => {
 });
 
 app.put('/api/usuarios/:id', auth, async (req, res) => {
-  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
+  if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
   const { nombre, sucursal, numero_id, rol, password } = req.body;
-  if (password) {
-    const hash = await require('bcryptjs').hash(password, 10);
-    db.run('UPDATE usuarios SET nombre=?, sucursal=?, numero_id=?, rol=?, password=? WHERE id=?', [nombre, sucursal, numero_id, rol, hash, req.params.id], (err) => res.json({ ok: !err }));
-  } else {
-    db.run('UPDATE usuarios SET nombre=?, sucursal=?, numero_id=?, rol=? WHERE id=?', [nombre, sucursal, numero_id, rol, req.params.id], (err) => res.json({ ok: !err }));
+  // Mismas guardas que crear: no aceptar roles invalidos ni dejar que un
+  // supervisor se ascienda a admin/supervisor (escalada de privilegios).
+  if (rol && !ROLES_VALIDOS.includes(rol)) return res.status(400).json({ error: 'Rol inválido' });
+  if (req.user.rol === 'supervisor' && (rol === 'admin' || rol === 'supervisor')) {
+    return res.status(403).json({ error: 'Un supervisor solo puede asignar recepcionista o técnica' });
   }
+  // Verificar el usuario destino: un supervisor no puede editar admins/supervisores
+  // ni usuarios de otra sucursal.
+  db.get('SELECT rol, sucursal FROM usuarios WHERE id=?', [req.params.id], async (eDest, destino) => {
+    if (eDest || !destino) return res.status(404).json({ error: 'Usuario no encontrado' });
+    if (req.user.rol === 'supervisor') {
+      if (destino.rol === 'admin' || destino.rol === 'supervisor') return res.status(403).json({ error: 'No puedes editar admins ni supervisores' });
+      if (destino.sucursal !== req.user.sucursal) return res.status(403).json({ error: 'Solo puedes editar usuarios de tu sucursal' });
+    }
+    const done = (err) => res.json({ ok: !err, error: err?.message });
+    if (password) {
+      const hash = await bcrypt.hash(password, 10);
+      db.run('UPDATE usuarios SET nombre=?, sucursal=?, numero_id=?, rol=?, password=? WHERE id=?', [nombre, sucursal, numero_id, rol, hash, req.params.id], done);
+    } else {
+      db.run('UPDATE usuarios SET nombre=?, sucursal=?, numero_id=?, rol=? WHERE id=?', [nombre, sucursal, numero_id, rol, req.params.id], done);
+    }
+  });
 });
 
 app.delete('/api/usuarios/:id', auth, (req, res) => {
@@ -1096,8 +1164,10 @@ app.post('/api/difusion', auth, requireRole('admin', 'supervisor'), async (req, 
     if (!num) return res.status(404).json({ error: 'No hay un número de WhatsApp configurado para enviar.' });
     if (!num.token) return res.status(400).json({ error: 'El número no tiene token de WhatsApp configurado.' });
 
-    let query = 'SELECT telefono, MAX(nombre) nombre FROM contactos WHERE 1=1';
-    const params = [];
+    // Solo contactos de ESTE numero: antes mandaba (con costo real) a los contactos
+    // de TODAS las sucursales sin importar desde que numero se lanzara.
+    let query = 'SELECT telefono, MAX(nombre) nombre FROM contactos WHERE numero_id = ?';
+    const params = [num.phone_number_id];
     if (filtro_etapa) { query += ' AND etapa=?'; params.push(filtro_etapa); }
     query += ' GROUP BY telefono';
     const contactos = await new Promise(r => db.all(query, params, (e, x) => r(x || [])));
@@ -1188,8 +1258,10 @@ app.post('/api/difusion/estimar', auth, requireRole('admin', 'supervisor'), asyn
       ? await new Promise(r => db.get('SELECT nombre, categoria, estado_meta FROM plantillas WHERE id=?', [plantilla_id], (e, x) => r(x)))
       : null;
 
-    let q = 'SELECT DISTINCT telefono FROM contactos WHERE 1=1';
-    const p = [];
+    // Mismo alcance que el envio real: contactos del numero desde el que se lanzaria.
+    const num = await resolverNumeroEnvio(req, req.body.numero_id);
+    let q = 'SELECT DISTINCT telefono FROM contactos WHERE numero_id = ?';
+    const p = [num ? num.phone_number_id : '__sin_numero__'];
     if (filtro_etapa) { q += ' AND etapa=?'; p.push(filtro_etapa); }
     const contactos = await new Promise(r => db.all(q, p, (e, x) => r(x || [])));
 

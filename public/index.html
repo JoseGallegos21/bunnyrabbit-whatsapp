@@ -135,6 +135,16 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
   .main-section [style*="position:sticky"]{position:static!important}
   /* Reducir padding lateral del contenedor central en móvil */
   #msec-plantillas>div,#msec-difusion>div,#msec-contactos>div,#msec-etiquetas>div{padding-left:12px!important;padding-right:12px!important}
+  /* CLAVE: las secciones (Plantillas/Difusion/Contactos/Etiquetas) son HERMANAS
+     del panel del chat, no hijas. En movil competian por el ancho (chat oscuro a
+     un lado, seccion cortada al otro). Aqui la seccion activa ocupa TODA la
+     pantalla, sin competir con nada. */
+  .layout.chat-open>.main-section.active{
+    position:fixed !important;top:0;right:0;bottom:0;left:0;width:100% !important;
+    z-index:150;overflow-y:auto;-webkit-overflow-scrolling:touch;background:#f0f2f5;
+  }
+  /* La barra "Menu" queda fija arriba para volver siempre */
+  .barra-volver-movil{position:sticky;top:0;z-index:5}
 }
 </style>
 <link rel="stylesheet" type="text/css" href="/boxicons.min.css"></head>

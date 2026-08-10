@@ -329,9 +329,9 @@ app.get('/api/contactos', auth, (req, res) => {
   db.all(`SELECT * FROM contactos ${where} ORDER BY nombre, telefono`, params, (err, rows) => res.json(rows || []));
 });
 
-app.put('/api/contactos/:id', auth, async (req, res) => {
+app.put('/api/contactos/:id', auth, requireRole('admin', 'supervisor', 'recepcionista'), async (req, res) => {
   const { nombre, etapa, prioridad, notas } = req.body;
-  db.get('SELECT etapa, telefono, nombre as nombre_actual FROM contactos WHERE id=?', [req.params.id], (err, contactoAnterior) => {
+  db.get('SELECT etapa, telefono, numero_id, nombre as nombre_actual FROM contactos WHERE id=?', [req.params.id], (err, contactoAnterior) => {
     db.run('UPDATE contactos SET nombre=?, etapa=?, prioridad=?, notas=? WHERE id=?',
       [nombre, etapa||'Nuevo', prioridad||'Media', notas||'', req.params.id],
       async (err2) => {
@@ -383,7 +383,7 @@ app.put('/api/contactos/:id', auth, async (req, res) => {
   });
 });
 
-app.delete('/api/contactos/:id', auth, (req, res) => {
+app.delete('/api/contactos/:id', auth, requireRole('admin', 'supervisor', 'recepcionista'), (req, res) => {
   db.run('DELETE FROM contactos WHERE id=?', [req.params.id], (err) => res.json({ ok: !err }));
 });
 
@@ -622,7 +622,7 @@ app.get('/api/contactos/:telefono', auth, (req, res) => {
 
 // Ruta bajo /tel/ para NO chocar con PUT /api/contactos/:id (Express matcheaba
 // siempre :id y esta quedaba muerta: el upsert por telefono + etiquetas nunca corria).
-app.put('/api/contactos/tel/:telefono', auth, (req, res) => {
+app.put('/api/contactos/tel/:telefono', auth, requireRole('admin', 'supervisor', 'recepcionista'), (req, res) => {
   const { nombre, notas, etapa, prioridad, etiquetas } = req.body;
   const numero_id = req.user.numero_id || req.body.numero_id;
   db.run(`INSERT INTO contactos (telefono, nombre, notas, etapa, prioridad, numero_id) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(telefono) DO UPDATE SET nombre=excluded.nombre, notas=excluded.notas, etapa=excluded.etapa, prioridad=excluded.prioridad`,
@@ -647,7 +647,11 @@ app.put('/api/contactos/tel/:telefono', auth, (req, res) => {
 
 app.put('/api/leer/:contacto', auth, (req, res) => {
   const numero_id = req.user.rol === 'supervisor' ? req.query.numero_id : req.user.numero_id;
-  db.run('UPDATE mensajes SET leido = 1 WHERE contacto = ? AND direccion = ?', [req.params.contacto, 'entrante'], () => res.json({ ok: true }));
+  // Solo los mensajes de ESTE numero: si dos sucursales comparten el telefono de
+  // un cliente, marcar leido en una ya no afecta a la otra.
+  const cond = ['contacto = ?', "direccion = 'entrante'"], params = [req.params.contacto];
+  if (numero_id) { cond.push('numero_id = ?'); params.push(numero_id); }
+  db.run(`UPDATE mensajes SET leido = 1 WHERE ${cond.join(' AND ')}`, params, () => res.json({ ok: true }));
 });
 
 app.get('/webhook', (req, res) => {
@@ -963,7 +967,7 @@ app.get('/api/plantillas', auth, (req, res) => {
   }
 });
 
-app.post('/api/plantillas', auth, async (req, res) => {
+app.post('/api/plantillas', auth, requireRole('admin', 'supervisor', 'recepcionista'), async (req, res) => {
   const { nombre, categoria, contenido, phone_number_id } = req.body;
   const numId = phone_number_id || req.user.numero_id;
   db.run('INSERT INTO plantillas (nombre, categoria, contenido, phone_number_id, estado_meta) VALUES (?, ?, ?, ?, ?)',
@@ -997,12 +1001,12 @@ app.post('/api/plantillas', auth, async (req, res) => {
   });
 });
 
-app.put('/api/plantillas/:id', auth, (req, res) => {
+app.put('/api/plantillas/:id', auth, requireRole('admin', 'supervisor', 'recepcionista'), (req, res) => {
   const { nombre, categoria, contenido } = req.body;
   db.run('UPDATE plantillas SET nombre=?, categoria=?, contenido=? WHERE id=?', [nombre, categoria, contenido, req.params.id], (err) => res.json({ ok: !err }));
 });
 
-app.delete('/api/plantillas/:id', auth, (req, res) => {
+app.delete('/api/plantillas/:id', auth, requireRole('admin', 'supervisor', 'recepcionista'), (req, res) => {
   db.run('DELETE FROM plantillas WHERE id=?', [req.params.id], (err) => res.json({ ok: !err }));
 });
 
@@ -2258,10 +2262,20 @@ async function dispararWorkflows(tipo, datos) {
       // Filtros del disparador
       if (cfg.etiqueta && cfg.etiqueta !== datos.etiqueta) continue;
       if (cfg.etapa && cfg.etapa !== datos.etapa) continue;
-      if (wf.sucursal && datos.sucursal && wf.sucursal !== datos.sucursal) continue;
 
-      const contacto = await wfGet('SELECT id, telefono FROM contactos WHERE id=?', [datos.contacto_id]);
+      const contacto = await wfGet('SELECT id, telefono, sucursal, numero_id FROM contactos WHERE id=?', [datos.contacto_id]);
       if (!contacto) continue;
+      // Filtro por sucursal: un workflow acotado a una sucursal solo inscribe
+      // contactos de ESA sucursal. Antes `datos.sucursal` nunca llegaba y el
+      // filtro no actuaba, inscribiendo contactos de otras sucursales.
+      if (wf.sucursal) {
+        let sucContacto = contacto.sucursal;
+        if (!sucContacto && contacto.numero_id) {
+          const nr = await wfGet('SELECT sucursal FROM numeros WHERE phone_number_id=?', [contacto.numero_id]);
+          sucContacto = nr && nr.sucursal;
+        }
+        if (sucContacto !== wf.sucursal) continue;
+      }
       // No inscribir dos veces al mismo contacto en el mismo workflow.
       // Ademas se respeta un enfriamiento: aunque haya salido o terminado, no se
       // vuelve a inscribir enseguida. Sin esto, un disparador que se repite (doble

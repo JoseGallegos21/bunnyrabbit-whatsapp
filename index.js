@@ -30,19 +30,19 @@ app.use((err, req, res, next) => {
 app.use((req, res, next) => { if (req.body == null) req.body = {}; next(); });
 app.use(require('express').static('public'));
 
+// Extension anclada (antes /jpeg|jpg.../ dejaba pasar .gifx, .pngx, etc.)
+const EXT_IMG = /^\.(jpe?g|png|gif|webp)$/;
+// Nombre unico: Date.now solo colisiona si suben 2 en el mismo ms; agregamos aleatorio
+const nombreArchivo = (prefijo, file) => prefijo + Date.now() + '_' + Math.floor(Math.random() * 1e6) + path.extname(file.originalname).toLowerCase();
 const multerStorage = multer.diskStorage({
   destination: function(req, file, cb){ cb(null, './public/uploads/'); },
-  filename: function(req, file, cb){
-    const ext = path.extname(file.originalname);
-    cb(null, 'img_' + Date.now() + ext);
-  }
+  filename: function(req, file, cb){ cb(null, nombreArchivo('img_', file)); }
 });
 const upload = multer({
   storage: multerStorage,
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: function(req, file, cb){
-    const allowed = /jpeg|jpg|png|gif|webp/;
-    cb(null, allowed.test(path.extname(file.originalname).toLowerCase()));
+    cb(null, EXT_IMG.test(path.extname(file.originalname).toLowerCase()));
   }
 });
 
@@ -166,6 +166,10 @@ db.serialize(() => {
     ['sync_estado', 'TEXT'],                    // pendiente | sincronizando | listo | error
     ['sync_progreso', 'INTEGER DEFAULT 0']      // 0-100, avance de la sincronizacion de historial
   ]);
+  // Al reiniciar, una difusion que quedo 'enviando' ya no se reanuda (el envio
+  // corre en segundo plano y se corta con el reinicio). La marcamos 'interrumpida'
+  // para que no aparezca eternamente "en progreso".
+  db.run("UPDATE difusiones SET estado='interrumpida' WHERE estado='enviando'");
 });
 
 // ==================== COSTOS DE META ====================
@@ -284,14 +288,11 @@ app.post('/api/upload', auth, upload.single('imagen'), (req, res) => {
 const uploadBiblioteca = multer({
   storage: multer.diskStorage({
     destination: function(req, file, cb){ cb(null, './public/uploads/'); },
-    filename: function(req, file, cb){
-      const ext = require('path').extname(file.originalname);
-      cb(null, 'bib_' + Date.now() + ext);
-    }
+    filename: function(req, file, cb){ cb(null, nombreArchivo('bib_', file)); }
   }),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: function(req, file, cb){
-    cb(null, /jpeg|jpg|png|gif|webp/.test(require('path').extname(file.originalname).toLowerCase()));
+    cb(null, EXT_IMG.test(path.extname(file.originalname).toLowerCase()));
   }
 });
 
@@ -1215,12 +1216,19 @@ app.get('/api/difusiones', auth, (req, res) => {
 
 app.get('/api/reportes', auth, (req, res) => {
   const dias = parseInt(req.query.dias) || 7;
-  const numero_id = req.query.numero_id || null;
-  db.all('SELECT date(timestamp) as dia, numero_id, COUNT(*) as total, SUM(CASE WHEN direccion=? THEN 1 ELSE 0 END) as entrantes, SUM(CASE WHEN direccion=? THEN 1 ELSE 0 END) as salientes FROM mensajes WHERE timestamp >= datetime("now", "-" || ? || " days") GROUP BY dia, numero_id ORDER BY dia DESC', ['entrante', 'saliente', dias], (err, rows) => res.json(rows || []));
+  // Una recepcionista solo ve su numero; supervisor/admin pueden ver todo o filtrar.
+  const numero_id = (req.user.rol === 'supervisor' || req.user.rol === 'admin') ? (req.query.numero_id || null) : req.user.numero_id;
+  let where = 'WHERE timestamp >= datetime("now", "-" || ? || " days")';
+  const params = ['entrante', 'saliente', dias];
+  if (numero_id) { where += ' AND numero_id = ?'; params.push(numero_id); }
+  db.all(`SELECT date(timestamp) as dia, numero_id, COUNT(*) as total, SUM(CASE WHEN direccion=? THEN 1 ELSE 0 END) as entrantes, SUM(CASE WHEN direccion=? THEN 1 ELSE 0 END) as salientes FROM mensajes ${where} GROUP BY dia, numero_id ORDER BY dia DESC`, params, (err, rows) => res.json(rows || []));
 });
 
 app.get('/api/reportes/etapas', auth, (req, res) => {
-  db.all('SELECT etapa, COUNT(*) as total FROM contactos GROUP BY etapa', [], (err, rows) => res.json(rows || []));
+  const numero_id = (req.user.rol === 'supervisor' || req.user.rol === 'admin') ? (req.query.numero_id || null) : req.user.numero_id;
+  const where = numero_id ? 'WHERE numero_id = ?' : '';
+  const params = numero_id ? [numero_id] : [];
+  db.all(`SELECT etapa, COUNT(*) as total FROM contactos ${where} GROUP BY etapa`, params, (err, rows) => res.json(rows || []));
 });
 
 // ==================== REPORTES FINANCIEROS ====================
@@ -1828,7 +1836,9 @@ const cronJobs = require('node-cron');
 async function enviarMensajeWhatsApp(phoneNumberId, token, telefono, mensaje) {
   try {
     const telefonoLimpio = telefono.replace(/\D/g, '');
-    const telefonoFinal = telefonoLimpio.startsWith('52') ? telefonoLimpio : '52' + telefonoLimpio;
+    // Solo anteponer 52 a numeros locales MX de 10 digitos. Si ya trae codigo de
+    // pais (11+ digitos, p.ej. US con 1) se respeta tal cual.
+    const telefonoFinal = telefonoLimpio.length === 10 ? '52' + telefonoLimpio : telefonoLimpio;
     const response = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },

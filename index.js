@@ -1749,19 +1749,50 @@ app.get('/api/google-calendar/eventos', auth, (req, res) => {
       ? new Date(fecha_fin + 'T23:59:59').toISOString()
       : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    try {
+    const pedir = async (accessToken) => {
       const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendar_id)}/events?timeMin=${timeMin}&timeMax=${timeMax}&singleEvents=true&orderBy=startTime`;
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${config.access_token}` }
-      });
-      const data = await response.json();
-      if (data.error) return res.json({ eventos: [], error: data.error.message, configurado: true });
-      res.json({ eventos: data.items || [], configurado: true });
+      const response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      return { status: response.status, data: await response.json() };
+    };
+    try {
+      let r = await pedir(config.access_token);
+      // El access token de Google caduca a ~1h. Si expiro, lo refrescamos con el
+      // refresh_token guardado y reintentamos una vez (antes el calendario dejaba
+      // de funcionar sin avisar).
+      const expirado = r.status === 401 || (r.data && r.data.error && r.data.error.code === 401);
+      if (expirado && config.refresh_token) {
+        const nuevo = await refrescarTokenGoogle(config.refresh_token);
+        if (nuevo) {
+          db.run('UPDATE google_calendar_config SET access_token=? WHERE id=?', [nuevo, config.id]);
+          r = await pedir(nuevo);
+        }
+      }
+      if (r.data && r.data.error) return res.json({ eventos: [], error: r.data.error.message, configurado: true });
+      res.json({ eventos: r.data.items || [], configurado: true });
     } catch(e) {
       res.status(500).json({ error: e.message });
     }
   });
 });
+
+// Refresca el access token de Google con el refresh_token guardado. Requiere
+// GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET en el .env (las mismas credenciales
+// OAuth con las que se generaron los tokens). Sin ellas devuelve null y el
+// calendario se comporta como antes (deja de cargar al caducar el token).
+async function refrescarTokenGoogle(refreshToken) {
+  const id = process.env.GOOGLE_CLIENT_ID, secret = process.env.GOOGLE_CLIENT_SECRET;
+  if (!id || !secret) { console.warn('[GCAL] falta GOOGLE_CLIENT_ID/SECRET en .env: no se puede refrescar el token'); return null; }
+  try {
+    const resp = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id: id, client_secret: secret, refresh_token: refreshToken, grant_type: 'refresh_token' })
+    });
+    const d = await resp.json();
+    if (!d.access_token) { console.error('[GCAL] refresh sin token:', JSON.stringify(d).slice(0, 200)); return null; }
+    return d.access_token;
+  } catch (e) { console.error('[GCAL] error al refrescar:', e.message); return null; }
+}
 
 // Config Google Calendar (solo admin)
 app.post('/api/google-calendar/config', auth, requireRole('admin'), (req, res) => {

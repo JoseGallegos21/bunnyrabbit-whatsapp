@@ -370,6 +370,8 @@ async function cargarCitas() {
   let url = `/api/citas?fecha_inicio=${fi}&fecha_fin=${ff}`;
   const data = await api(url);
   citasData = Array.isArray(data) ? data : [];
+  // Filtro por técnica: antes se leía el valor pero nunca se aplicaba.
+  if (tecnicaId) citasData = citasData.filter(c => String(c.tecnica_id) === String(tecnicaId));
 
   renderCalendario(dias);
 }

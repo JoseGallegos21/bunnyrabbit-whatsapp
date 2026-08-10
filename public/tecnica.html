@@ -93,6 +93,33 @@
   .section-title::before { content: ''; width: 3px; height: 18px; background: #a855f7; border-radius: 2px; display: inline-block; }
   .loading { text-align: center; padding: 40px; color: #8696a0; }
   .empty-state { text-align: center; padding: 40px; color: #8696a0; }
+
+  /* ===== MÓVIL ===== */
+  @media (max-width: 640px) {
+    .topbar { padding: 10px 14px; }
+    .tabs { padding: 0 6px; overflow-x: auto; }
+    .tab { padding: 12px 12px; font-size: 13px; white-space: nowrap; }
+    .content { padding: 14px; }
+    /* Encabezado del día: apilar la fecha y los chips */
+    .hoy-header { flex-direction: column; align-items: flex-start; gap: 12px; }
+    .fecha-grande { font-size: 22px; }
+    .resumen-chips { width: 100%; }
+    .chip { padding: 6px 12px; font-size: 12px; }
+    /* Tarjeta de cita más compacta */
+    .cita-card { padding: 14px; gap: 12px; }
+    .hora-bloque { min-width: 54px; }
+    .hora-inicio { font-size: 18px; }
+    .btn-completar { padding: 6px 10px; font-size: 11px; }
+    /* Barra de navegación de la semana */
+    .semana-nav { flex-wrap: wrap; gap: 12px; }
+    .semana-titulo { min-width: 0; flex: 1; font-size: 16px; }
+    /* Semana: de 7 columnas a lista vertical (un día por fila) — legible en celular */
+    .dias-semana { grid-template-columns: 1fr; gap: 10px; }
+    .dia-col { min-height: auto; }
+    .dia-col-header { display: flex; align-items: baseline; gap: 10px; text-align: left; }
+    .dia-col-header .dd { font-size: 18px; }
+    .mini-cita .mc-nombre { white-space: normal; }
+  }
 </style>
 </head>
 <body>

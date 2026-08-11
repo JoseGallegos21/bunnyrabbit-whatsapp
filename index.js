@@ -1974,13 +1974,24 @@ app.get('/api/google-calendar/eventos', auth, (req, res) => {
 // Token de la CUENTA DE SERVICIO de Google (JWT firmado -> access token, cacheado
 // ~55min). Requiere GOOGLE_SA_EMAIL y GOOGLE_SA_PRIVATE_KEY en el .env. Lee
 // calendarios compartidos con esa cuenta de servicio (solo lectura).
+// Credenciales de la cuenta de servicio: desde un archivo JSON (mas facil) o desde
+// dos variables de entorno. El archivo es lo recomendado: es el JSON que descargas
+// de Google tal cual, sin pelearte con los saltos de linea de la llave.
+function _gcalSACreds() {
+  if (process.env.GOOGLE_SA_KEY_FILE) {
+    try { const j = JSON.parse(require('fs').readFileSync(process.env.GOOGLE_SA_KEY_FILE, 'utf8')); return { email: j.client_email, key: j.private_key }; }
+    catch (e) { console.error('[GCAL] no se pudo leer GOOGLE_SA_KEY_FILE:', e.message); return {}; }
+  }
+  return { email: process.env.GOOGLE_SA_EMAIL, key: process.env.GOOGLE_SA_PRIVATE_KEY };
+}
 let _gcalSA = { token: null, exp: 0 };
 async function googleServiceToken() {
   if (_gcalSA.token && Date.now() < _gcalSA.exp) return _gcalSA.token;
-  const email = process.env.GOOGLE_SA_EMAIL;
-  let key = process.env.GOOGLE_SA_PRIVATE_KEY;
-  if (!email || !key) { if (!_gcalSA.aviso) { console.warn('[GCAL] falta GOOGLE_SA_EMAIL/PRIVATE_KEY en .env (cuenta de servicio)'); _gcalSA.aviso = true; } return null; }
-  key = key.replace(/\\n/g, '\n'); // en el .env los saltos de linea van escapados
+  const cr = _gcalSACreds();
+  const email = cr.email;
+  let key = cr.key;
+  if (!email || !key) { if (!_gcalSA.aviso) { console.warn('[GCAL] falta la cuenta de servicio (GOOGLE_SA_KEY_FILE o GOOGLE_SA_EMAIL/PRIVATE_KEY)'); _gcalSA.aviso = true; } return null; }
+  key = key.replace(/\\n/g, '\n'); // por si vienen escapados en el .env
   try {
     const now = Math.floor(Date.now() / 1000);
     const assertion = jwt.sign(
@@ -2014,7 +2025,8 @@ async function refrescarTokenGoogle(refreshToken) {
 
 // Correo de la cuenta de servicio (con el que hay que compartir los calendarios)
 app.get('/api/google-calendar/service-account', auth, requireRole('admin', 'supervisor'), (req, res) => {
-  res.json({ email: process.env.GOOGLE_SA_EMAIL || null, configurado: !!(process.env.GOOGLE_SA_EMAIL && process.env.GOOGLE_SA_PRIVATE_KEY) });
+  const cr = _gcalSACreds();
+  res.json({ email: cr.email || null, configurado: !!(cr.email && cr.key) });
 });
 
 // Lista de configuraciones (para la pantalla de admin)

@@ -176,7 +176,7 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
       <div class="main-tabs">
         <div class="main-tab active" onclick="switchMainTab('chat',this)"><i class="bx bx-chat" aria-hidden="true"></i> Chat</div>
         <div class="main-tab" onclick="switchMainTab('plantillas',this)"><i class="bx bx-news" aria-hidden="true"></i> Plantillas</div>
-        <div class="main-tab" onclick="switchMainTab('difusion',this)"><i class="bx bx-broadcast" aria-hidden="true"></i> Difusión</div>
+        <div class="main-tab" onclick="switchMainTab('remarketing',this)"><i class="bx bx-broadcast" aria-hidden="true"></i> Remarketing</div>
         <div class="main-tab" onclick="switchMainTab('contactos',this)"><i class="bx bx-group" aria-hidden="true"></i> Contactos</div>
         <div class="main-tab" onclick="switchMainTab('etiquetas',this)"><i class="bx bx-purchase-tag-alt" aria-hidden="true"></i> Etiquetas</div>
       </div>
@@ -357,6 +357,38 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
           <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08)">
             <h2 style="margin:0 0 16px;font-size:18px;color:#111">Historial de difusiones</h2>
             <div id="historialDifPanel"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- REMARKETING (con aprobación del gerente) -->
+      <div class="main-section" id="msec-remarketing" style="flex:1;flex-direction:column;overflow-y:auto;background:#f0f2f5">
+        <div style="max-width:700px;margin:0 auto;width:100%;padding:24px;box-sizing:border-box">
+          <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:20px">
+            <h2 style="margin:0 0 6px;font-size:18px;color:#111">📣 Remarketing</h2>
+            <p style="font-size:13px;color:#666;margin:0 0 16px">Elige el mensaje y los contactos. Se enviará una <b>solicitud a tu gerente</b> para aprobar antes de mandar.</p>
+            <div style="margin-bottom:12px">
+              <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Mensaje (plantilla aprobada)</label>
+              <select id="remk_plantilla" onchange="remkPreview()" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px"><option value="">Cargando...</option></select>
+            </div>
+            <div id="remk_preview" style="display:none;background:#f0f2f5;border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;color:#333;white-space:pre-wrap"></div>
+            <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Contactos</label>
+            <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+              <input type="text" id="remk_buscar" placeholder="Buscar por nombre o teléfono..." oninput="remkRender()" style="flex:1;min-width:120px;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">
+              <select id="remk_etapa" onchange="remkRender()" style="padding:7px;border:1px solid #ddd;border-radius:6px;font-size:13px"><option value="">Todas las etapas</option><option>Nuevo</option><option>Seguimiento</option><option>Propuesta</option><option>Cerrado</option></select>
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:8px">
+              <button type="button" onclick="remkSelAll(true)" style="padding:5px 10px;background:#e7f0fd;border:1px solid #cfe0f7;border-radius:6px;cursor:pointer;font-size:12px">✓ Seleccionar visibles</button>
+              <button type="button" onclick="remkSelAll(false)" style="padding:5px 10px;background:#fff;border:1px solid #ddd;border-radius:6px;cursor:pointer;font-size:12px">Quitar todos</button>
+            </div>
+            <div id="remk_lista" style="max-height:260px;overflow-y:auto;border:1px solid #eee;border-radius:8px;padding:4px"><p style="color:#999;font-size:13px;text-align:center;padding:12px">Cargando contactos...</p></div>
+            <div id="remk_resumen" style="background:#e8f5e9;border-radius:8px;padding:10px 12px;margin:12px 0;font-size:13px;color:#1b5e20;font-weight:600">0 contactos seleccionados</div>
+            <button id="remk_btn" onclick="remkEnviar()" style="width:100%;padding:10px;background:#075e54;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px">Enviar solicitud al gerente</button>
+            <p id="remk_msg" style="font-size:13px;margin-top:8px;text-align:center"></p>
+          </div>
+          <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08)">
+            <h2 style="margin:0 0 16px;font-size:18px;color:#111">Mis solicitudes</h2>
+            <div id="remk_mis"><p style="color:#999;font-size:13px">Cargando...</p></div>
           </div>
         </div>
       </div>
@@ -1057,6 +1089,7 @@ function switchMainTab(tab, btn){
   sec.classList.add('active');
   if(tab==='plantillas'){ cargarPlantillasPanel(); cargarRespuestasRapidas(); }
   if(tab==='difusion'){ cargarHistorialDifPanel(); cargarPlantillasDifusion(); }
+  if(tab==='remarketing') remkInit();
   if(tab==='contactos') cargarContactos();
   if(tab==='etiquetas') cargarEtiquetas();
   // En móvil: las secciones viven dentro de .main (oculto por defecto). Para Chat
@@ -1081,6 +1114,94 @@ function ponerBotonVolverSeccion(sec){
 // Volver del contenido al menú (lista + pestañas) en móvil
 function volverAlMenu(){
   var lay=document.querySelector('.layout'); if(lay) lay.classList.remove('chat-open');
+}
+
+// ==================== REMARKETING (solicitud con aprobación del gerente) ====================
+var remkContactos=[], remkSel={};
+function remkEsc(s){ return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):''; }
+function remkInit(){
+  // Plantillas aprobadas
+  fetch('/api/plantillas',{headers:{Authorization:'Bearer '+token}}).then(function(r){return r.json();}).then(function(d){
+    var apr=(Array.isArray(d)?d:[]).filter(function(p){return p.estado_meta==='aprobada';});
+    var sel=document.getElementById('remk_plantilla');
+    sel.innerHTML = apr.length
+      ? '<option value="">Elige una plantilla...</option>'+apr.map(function(p){return '<option value="'+p.id+'" data-cont="'+encodeURIComponent(p.contenido||'')+'">'+remkEsc(p.nombre)+' ('+remkEsc(p.categoria)+')</option>';}).join('')
+      : '<option value="">No tienes plantillas aprobadas</option>';
+  });
+  // Contactos
+  fetch('/api/contactos',{headers:{Authorization:'Bearer '+token}}).then(function(r){return r.json();}).then(function(d){
+    remkContactos = Array.isArray(d)?d:[]; remkRender();
+  });
+  remkMisSolicitudes();
+}
+function remkPreview(){
+  var o=document.getElementById('remk_plantilla').selectedOptions[0];
+  var c=o?decodeURIComponent(o.getAttribute('data-cont')||''):'';
+  var p=document.getElementById('remk_preview');
+  if(c){ p.style.display='block'; p.textContent=c; } else p.style.display='none';
+}
+function remkFiltrados(){
+  var q=(document.getElementById('remk_buscar').value||'').toLowerCase();
+  var et=document.getElementById('remk_etapa').value;
+  return remkContactos.filter(function(c){
+    if(et && c.etapa!==et) return false;
+    if(q && ((c.nombre||'').toLowerCase().indexOf(q)<0 && (c.telefono||'').indexOf(q)<0)) return false;
+    return true;
+  });
+}
+function remkRender(){
+  var el=document.getElementById('remk_lista'); if(!el) return;
+  var lista=remkFiltrados();
+  el.innerHTML = lista.length ? lista.map(function(c){
+    var chk = remkSel[c.telefono]?'checked':'';
+    return '<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid #f2f2f2;cursor:pointer;font-size:13px">'+
+      '<input type="checkbox" '+chk+' onchange="remkToggle(\''+remkEsc(c.telefono)+'\',this.checked)">'+
+      '<span><b>'+remkEsc(c.nombre||'Sin nombre')+'</b> <span style="color:#888">'+remkEsc(c.telefono)+'</span>'+(c.etapa?' · <span style="color:#888">'+remkEsc(c.etapa)+'</span>':'')+'</span></label>';
+  }).join('') : '<p style="color:#999;font-size:13px;text-align:center;padding:12px">Sin contactos</p>';
+  remkResumen();
+}
+function remkToggle(tel,on){ if(on) remkSel[tel]=1; else delete remkSel[tel]; remkResumen(); }
+function remkSelAll(on){
+  remkFiltrados().forEach(function(c){ if(on) remkSel[c.telefono]=1; else delete remkSel[c.telefono]; });
+  remkRender();
+}
+function remkResumen(){
+  var n=Object.keys(remkSel).length;
+  var e=document.getElementById('remk_resumen'); if(e) e.textContent = n+' contacto'+(n===1?'':'s')+' seleccionado'+(n===1?'':'s');
+}
+function remkEnviar(){
+  var pid=document.getElementById('remk_plantilla').value;
+  var tels=Object.keys(remkSel);
+  var msg=document.getElementById('remk_msg');
+  if(!pid){ msg.style.color='#c62828'; msg.textContent='Elige una plantilla.'; return; }
+  if(!tels.length){ msg.style.color='#c62828'; msg.textContent='Selecciona al menos un contacto.'; return; }
+  msg.style.color='#666'; msg.textContent='Enviando solicitud...';
+  var btn=document.getElementById('remk_btn'); btn.disabled=true;
+  fetch('/api/remarketing/solicitud',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({plantilla_id:parseInt(pid),telefonos:tels})})
+  .then(function(r){return r.json();}).then(function(d){
+    btn.disabled=false;
+    if(d.ok){
+      msg.style.color='#1b5e20';
+      msg.textContent='✅ Solicitud enviada al gerente: '+d.total_contactos+' contactos'+(d.costo_mxn!=null?', costo estimado $'+d.costo_mxn+' MXN':'')+'. Espera su aprobación.';
+      remkSel={}; remkRender(); remkMisSolicitudes();
+    } else { msg.style.color='#c62828'; msg.textContent='❌ '+(d.error||'Error al enviar'); }
+  }).catch(function(){ btn.disabled=false; msg.style.color='#c62828'; msg.textContent='Error de red'; });
+}
+function remkMisSolicitudes(){
+  fetch('/api/remarketing/mis-solicitudes',{headers:{Authorization:'Bearer '+token}}).then(function(r){return r.json();}).then(function(d){
+    var el=document.getElementById('remk_mis'); if(!el) return;
+    if(!Array.isArray(d)||!d.length){ el.innerHTML='<p style="color:#999;font-size:13px">Aún no has enviado solicitudes.</p>'; return; }
+    var badge={pendiente:['⏳ Pendiente','#b8860b','#fff8e1'],aprobada:['✅ Aprobada','#2e7d32','#e8f5e9'],rechazada:['❌ Rechazada','#c62828','#ffebee']};
+    el.innerHTML=d.map(function(s){
+      var b=badge[s.estado]||[s.estado,'#555','#eee'];
+      return '<div style="border:1px solid #eee;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:13px">'+
+        '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b>'+remkEsc(s.plantilla_nombre||'')+'</b>'+
+        '<span style="padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:'+b[1]+';background:'+b[2]+';white-space:nowrap">'+b[0]+'</span></div>'+
+        '<div style="color:#888;margin-top:2px">'+s.total_contactos+' contactos'+(s.costo_mxn!=null?' · ~$'+s.costo_mxn+' MXN':'')+'</div>'+
+        (s.estado==='rechazada'&&s.motivo?'<div style="color:#c62828;margin-top:2px">Motivo: '+remkEsc(s.motivo)+'</div>':'')+
+      '</div>';
+    }).join('');
+  });
 }
 
 function switchPanelTab(tab, btn){

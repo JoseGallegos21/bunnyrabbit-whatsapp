@@ -132,6 +132,7 @@
 
 <div class="tabs">
   <div class="tab active" onclick="switchTab('metricas', this)">📊 Métricas</div>
+  <div class="tab" onclick="switchTab('solicitudes', this)">📣 Solicitudes <span id="solicitudesBadge" style="display:none;background:#e74c3c;color:#fff;border-radius:10px;padding:0 6px;font-size:11px;margin-left:2px"></span></div>
   <div class="tab" onclick="switchTab('calendario', this)">📅 Calendario</div>
   <div class="tab" onclick="switchTab('chats', this)">💬 Chats</div>
   <div class="tab" onclick="switchTab('usuarios', this)">👥 Equipo</div>
@@ -151,6 +152,13 @@
         <tbody id="tablaRecepcionistas"><tr><td colspan="5" class="loading">Cargando...</td></tr></tbody>
       </table>
     </div>
+  </div>
+
+  <!-- TAB SOLICITUDES (remarketing con aprobación) -->
+  <div class="tab-panel" id="tab-solicitudes">
+    <div class="section-title">Solicitudes de remarketing</div>
+    <p style="color:#8696a0;font-size:13px;margin:-8px 0 16px">Tus recepcionistas piden aprobación antes de enviar. Revisa contenido, costo y # de contactos.</p>
+    <div id="solicitudesLista"><div class="loading">Cargando solicitudes...</div></div>
   </div>
 
   <!-- TAB CALENDARIO -->
@@ -300,6 +308,7 @@ function switchTab(tab, el) {
   el.classList.add('active');
   document.getElementById('tab-' + tab).classList.add('active');
   if (tab === 'metricas') cargarMetricas();
+  if (tab === 'solicitudes') cargarSolicitudes();
   if (tab === 'calendario') { cargarTecnicas(); cargarCitas(); }
   if (tab === 'chats') cargarChats();
   if (tab === 'usuarios') cargarUsuarios();
@@ -577,8 +586,53 @@ async function guardarUsuario() {
 
 function cerrarModal(id) { document.getElementById(id).classList.remove('open'); }
 
+// ── SOLICITUDES DE REMARKETING ──
+function supEsc(s){ return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):''; }
+function actualizarBadgeSolicitudes(n){
+  const b=document.getElementById('solicitudesBadge'); if(!b) return;
+  if(n>0){ b.style.display='inline-block'; b.textContent=n; } else b.style.display='none';
+}
+async function cargarSolicitudes(){
+  const data = await api('/api/remarketing/solicitudes');
+  const lista = Array.isArray(data) ? data : [];
+  actualizarBadgeSolicitudes(lista.filter(s=>s.estado==='pendiente').length);
+  const el = document.getElementById('solicitudesLista');
+  if(!lista.length){ el.innerHTML='<div class="empty-state">No hay solicitudes por ahora.</div>'; return; }
+  const badges={pendiente:['⏳ Pendiente','#f39c12'],aprobada:['✅ Aprobada','#3d85c8'],rechazada:['❌ Rechazada','#e74c3c']};
+  el.innerHTML = lista.map(s=>{
+    const bd=badges[s.estado]||[s.estado,'#8696a0'];
+    const costo = s.costo_mxn!=null ? ('$'+s.costo_mxn+' MXN') : ('$'+Number(s.costo_usd||0).toFixed(4)+' USD');
+    const acciones = s.estado==='pendiente'
+      ? '<div style="display:flex;gap:8px;margin-top:12px"><button class="btn-primary" onclick="aprobarSolicitud('+s.id+')">✓ Aprobar y enviar</button><button onclick="rechazarSolicitud('+s.id+')" style="background:#3d1a1a;border:1px solid #e74c3c;color:#e74c3c;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px">Rechazar</button></div>'
+      : (s.motivo?'<div style="color:#e74c3c;font-size:12px;margin-top:8px">Motivo: '+supEsc(s.motivo)+'</div>':'');
+    return '<div style="background:#1f2c34;border:1px solid #2a3942;border-radius:12px;padding:16px;margin-bottom:12px">'+
+      '<div style="display:flex;justify-content:space-between;gap:10px;align-items:center">'+
+        '<div><b>'+supEsc(s.solicitante_nombre||'—')+'</b> <span style="color:#8696a0;font-size:12px">· '+supEsc(s.plantilla_nombre||'')+'</span></div>'+
+        '<span style="color:'+bd[1]+';font-weight:600;font-size:12px;white-space:nowrap">'+bd[0]+'</span>'+
+      '</div>'+
+      '<div style="background:#0b141a;border-radius:8px;padding:10px;margin:10px 0;font-size:13px;white-space:pre-wrap;color:#e9edef">'+supEsc(s.plantilla_contenido||'(sin contenido)')+'</div>'+
+      '<div style="display:flex;gap:20px;flex-wrap:wrap;font-size:13px;color:#8696a0">'+
+        '<div>👥 <b style="color:#e9edef">'+s.total_contactos+'</b> contactos</div>'+
+        '<div>💰 <b style="color:#e9edef">'+costo+'</b> estimado</div>'+
+      '</div>'+acciones+
+    '</div>';
+  }).join('');
+}
+async function aprobarSolicitud(id){
+  if(!confirm('¿Aprobar y enviar esta solicitud de remarketing a los contactos?')) return;
+  const r = await api('/api/remarketing/solicitud/'+id+'/aprobar',{method:'POST',body:'{}'});
+  if(r && r.ok){ cargarSolicitudes(); } else alert('Error: '+((r&&r.error)||'no se pudo aprobar'));
+}
+async function rechazarSolicitud(id){
+  const motivo = prompt('Motivo del rechazo (opcional):','');
+  if(motivo===null) return;
+  const r = await api('/api/remarketing/solicitud/'+id+'/rechazar',{method:'POST',body:JSON.stringify({motivo:motivo})});
+  if(r && r.ok){ cargarSolicitudes(); } else alert('Error al rechazar la solicitud.');
+}
+
 // Init
 cargarMetricas();
+cargarSolicitudes(); // para mostrar el aviso de pendientes desde el inicio
 </script>
 <script>
 // Ojito para ver/ocultar contraseñas en todos los campos type=password

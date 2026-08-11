@@ -92,6 +92,7 @@ tr:last-child td{border-bottom:none}
         <div class="tab" onclick="showTab('biblioteca',this)">Biblioteca</div>
         <div class="tab" onclick="showTab('facebook',this)">&#128279; Facebook CAPI</div>
         <div class="tab" onclick="showTab('workflows',this)">⚡ Automatizaciones</div>
+        <div class="tab" onclick="showTab('calendario',this)">📅 Calendario</div>
   </div>
 
   <div class="content">
@@ -610,6 +611,16 @@ tr:last-child td{border-bottom:none}
             <button onclick="fbLoadLogs()" style="margin-top:12px;padding:7px 14px;background:white;border:1px solid #ddd;border-radius:6px;cursor:pointer;font-size:13px">Actualizar</button>
           </div>
     </div>
+
+    <!-- ========== GOOGLE CALENDAR ========== -->
+    <div class="section" id="sec-calendario">
+      <div class="card">
+        <h2>📅 Google Calendar → calendario de las técnicas</h2>
+        <div id="calSaBanner" style="background:#e7f0fd;border-left:3px solid #1877F2;border-radius:6px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#1565d8">Cargando estado de la cuenta de servicio...</div>
+        <p style="font-size:13px;color:#666;margin-bottom:12px">Pega el <b>ID del calendario</b> de cada sucursal (lo encuentras en Google Calendar → Configuración del calendario → "Integrar calendario" → <i>ID del calendario</i>). Las citas de ese calendario aparecerán en la pestaña de las técnicas.</p>
+        <div id="calListaSuc"><p style="color:#999;text-align:center;padding:20px">Cargando sucursales...</p></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -823,6 +834,49 @@ function showTab(id,el){
     if(id==='biblioteca')cargarBiblioteca();
     if(id==='facebook'){setTimeout(function(){fbLoadNumeros();fbLoadStats();},100);}
     if(id==='workflows')wfCargar();
+    if(id==='calendario')cargarCalendarioConfig();
+}
+
+// ── GOOGLE CALENDAR (config por sucursal) ──
+function cargarCalendarioConfig(){
+  var hdr={headers:{Authorization:'Bearer '+token}};
+  fetch('/api/google-calendar/service-account',hdr).then(function(r){return r.json();}).then(function(sa){
+    var b=document.getElementById('calSaBanner');
+    if(sa.configurado && sa.email){
+      b.style.borderLeftColor='#16a34a'; b.style.background='#e8f5e9'; b.style.color='#1b7a45';
+      b.innerHTML='✅ Cuenta de servicio activa. <b>Comparte cada calendario</b> (solo lectura) con este correo:<br><code style="user-select:all;background:#fff;padding:2px 6px;border-radius:4px;display:inline-block;margin-top:4px">'+h(sa.email)+'</code>';
+    } else {
+      b.style.borderLeftColor='#f59e0b'; b.style.background='#fff8e1'; b.style.color='#b45309';
+      b.innerHTML='⚠️ Falta configurar la cuenta de servicio en el servidor (GOOGLE_SA_EMAIL / GOOGLE_SA_PRIVATE_KEY). Sigue la guía y avísame para verificar.';
+    }
+  });
+  Promise.all([
+    fetch('/api/sucursales',hdr).then(function(r){return r.json();}),
+    fetch('/api/google-calendar/config',hdr).then(function(r){return r.json();})
+  ]).then(function(res){
+    var sucs=Array.isArray(res[0])?res[0]:[]; var cfgs=Array.isArray(res[1])?res[1]:[];
+    var map={}; cfgs.forEach(function(c){ map[c.sucursal]=c; });
+    var el=document.getElementById('calListaSuc');
+    if(!sucs.length){ el.innerHTML='<p style="color:#999">No hay sucursales. Créalas primero en la pestaña Usuarios.</p>'; return; }
+    el.innerHTML=sucs.map(function(s){
+      var c=map[s.nombre]||{};
+      return '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:1px solid #eee;border-radius:8px;padding:12px;margin-bottom:8px">'+
+        '<div style="min-width:150px;font-weight:600">'+h(s.nombre)+'</div>'+
+        '<input type="text" id="cal_'+s.id+'" value="'+h(c.calendar_id||'')+'" placeholder="ID del calendario (ej: xxx@group.calendar.google.com)" style="flex:1;min-width:240px;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">'+
+        '<button onclick="guardarCalendario('+s.id+',this)" data-suc="'+h(s.nombre)+'" style="padding:7px 14px;background:#1f5c4a;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">Guardar</button>'+
+        (c.calendar_id?'<span style="color:#16a34a;font-size:12px">✓ configurado</span>':'')+
+      '</div>';
+    }).join('');
+  });
+}
+function guardarCalendario(id, btn){
+  var calId=document.getElementById('cal_'+id).value.trim();
+  var suc=btn.getAttribute('data-suc');
+  if(!calId){ alert('Pega el ID del calendario primero.'); return; }
+  fetch('/api/google-calendar/config',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({sucursal:suc,calendar_id:calId})})
+  .then(function(r){return r.json();}).then(function(d){
+    if(d.ok){ cargarCalendarioConfig(); } else alert('Error: '+(d.error||'no se pudo guardar'));
+  });
 }
 
 function h(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):''}

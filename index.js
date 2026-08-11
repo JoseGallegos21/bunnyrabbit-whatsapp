@@ -1946,17 +1946,22 @@ app.get('/api/google-calendar/eventos', auth, (req, res) => {
       return { status: response.status, data: await response.json() };
     };
     try {
-      let r = await pedir(config.access_token);
-      // El access token de Google caduca a ~1h. Si expiro, lo refrescamos con el
-      // refresh_token guardado y reintentamos una vez (antes el calendario dejaba
-      // de funcionar sin avisar).
-      const expirado = r.status === 401 || (r.data && r.data.error && r.data.error.code === 401);
-      if (expirado && config.refresh_token) {
-        const nuevo = await refrescarTokenGoogle(config.refresh_token);
-        if (nuevo) {
-          db.run('UPDATE google_calendar_config SET access_token=? WHERE id=?', [nuevo, config.id]);
-          r = await pedir(nuevo);
+      // 1) Preferimos la CUENTA DE SERVICIO (lee cualquier calendario compartido con
+      //    ella, sin tokens por sucursal ni refresh). 2) Si no esta configurada, caemos
+      //    al metodo viejo (OAuth con refresh) por compatibilidad.
+      const saToken = await googleServiceToken();
+      let r;
+      if (saToken) {
+        r = await pedir(saToken);
+      } else if (config.access_token) {
+        r = await pedir(config.access_token);
+        const expirado = r.status === 401 || (r.data && r.data.error && r.data.error.code === 401);
+        if (expirado && config.refresh_token) {
+          const nuevo = await refrescarTokenGoogle(config.refresh_token);
+          if (nuevo) { db.run('UPDATE google_calendar_config SET access_token=? WHERE id=?', [nuevo, config.id]); r = await pedir(nuevo); }
         }
+      } else {
+        return res.json({ eventos: [], configurado: true, error: 'Falta la cuenta de servicio de Google en el servidor (GOOGLE_SA_EMAIL / GOOGLE_SA_PRIVATE_KEY).' });
       }
       if (r.data && r.data.error) return res.json({ eventos: [], error: r.data.error.message, configurado: true });
       res.json({ eventos: r.data.items || [], configurado: true });
@@ -1966,34 +1971,67 @@ app.get('/api/google-calendar/eventos', auth, (req, res) => {
   });
 });
 
-// Refresca el access token de Google con el refresh_token guardado. Requiere
-// GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET en el .env (las mismas credenciales
-// OAuth con las que se generaron los tokens). Sin ellas devuelve null y el
-// calendario se comporta como antes (deja de cargar al caducar el token).
+// Token de la CUENTA DE SERVICIO de Google (JWT firmado -> access token, cacheado
+// ~55min). Requiere GOOGLE_SA_EMAIL y GOOGLE_SA_PRIVATE_KEY en el .env. Lee
+// calendarios compartidos con esa cuenta de servicio (solo lectura).
+let _gcalSA = { token: null, exp: 0 };
+async function googleServiceToken() {
+  if (_gcalSA.token && Date.now() < _gcalSA.exp) return _gcalSA.token;
+  const email = process.env.GOOGLE_SA_EMAIL;
+  let key = process.env.GOOGLE_SA_PRIVATE_KEY;
+  if (!email || !key) { if (!_gcalSA.aviso) { console.warn('[GCAL] falta GOOGLE_SA_EMAIL/PRIVATE_KEY en .env (cuenta de servicio)'); _gcalSA.aviso = true; } return null; }
+  key = key.replace(/\\n/g, '\n'); // en el .env los saltos de linea van escapados
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const assertion = jwt.sign(
+      { iss: email, scope: 'https://www.googleapis.com/auth/calendar.readonly', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 },
+      key, { algorithm: 'RS256' });
+    const resp = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion })
+    });
+    const d = await resp.json();
+    if (!d.access_token) { console.error('[GCAL] service token:', JSON.stringify(d).slice(0, 200)); return null; }
+    _gcalSA = { token: d.access_token, exp: Date.now() + ((d.expires_in || 3600) - 60) * 1000 };
+    return d.access_token;
+  } catch (e) { console.error('[GCAL] error firmando/obteniendo service token:', e.message); return null; }
+}
+
+// (Legado) Refresca un access token OAuth con su refresh_token. Solo se usa si
+// una sucursal quedo configurada con el metodo viejo y no hay cuenta de servicio.
 async function refrescarTokenGoogle(refreshToken) {
   const id = process.env.GOOGLE_CLIENT_ID, secret = process.env.GOOGLE_CLIENT_SECRET;
-  if (!id || !secret) { console.warn('[GCAL] falta GOOGLE_CLIENT_ID/SECRET en .env: no se puede refrescar el token'); return null; }
+  if (!id || !secret) return null;
   try {
     const resp = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ client_id: id, client_secret: secret, refresh_token: refreshToken, grant_type: 'refresh_token' })
     });
     const d = await resp.json();
-    if (!d.access_token) { console.error('[GCAL] refresh sin token:', JSON.stringify(d).slice(0, 200)); return null; }
-    return d.access_token;
+    return d.access_token || null;
   } catch (e) { console.error('[GCAL] error al refrescar:', e.message); return null; }
 }
 
-// Config Google Calendar (solo admin)
+// Correo de la cuenta de servicio (con el que hay que compartir los calendarios)
+app.get('/api/google-calendar/service-account', auth, requireRole('admin', 'supervisor'), (req, res) => {
+  res.json({ email: process.env.GOOGLE_SA_EMAIL || null, configurado: !!(process.env.GOOGLE_SA_EMAIL && process.env.GOOGLE_SA_PRIVATE_KEY) });
+});
+
+// Lista de configuraciones (para la pantalla de admin)
+app.get('/api/google-calendar/config', auth, requireRole('admin', 'supervisor'), (req, res) => {
+  db.all('SELECT sucursal, calendar_id, activo FROM google_calendar_config ORDER BY sucursal', [], (e, rows) => res.json(rows || []));
+});
+
+// Guardar/actualizar el calendario de una sucursal. Con cuenta de servicio solo
+// hace falta el ID del calendario (los tokens son opcionales, solo para el metodo viejo).
 app.post('/api/google-calendar/config', auth, requireRole('admin'), (req, res) => {
-  const { sucursal, calendar_id, access_token, refresh_token } = req.body;
-  if (!sucursal || !calendar_id || !access_token) return res.status(400).json({ error: 'Faltan campos' });
+  const { sucursal, calendar_id, access_token, refresh_token, activo } = req.body;
+  if (!sucursal || !calendar_id) return res.status(400).json({ error: 'Sucursal y ID de calendario son obligatorios' });
   db.run(
     `INSERT INTO google_calendar_config (sucursal, calendar_id, access_token, refresh_token, activo)
-     VALUES (?,?,?,?,1)
-     ON CONFLICT(sucursal) DO UPDATE SET calendar_id=excluded.calendar_id, access_token=excluded.access_token, refresh_token=excluded.refresh_token, activo=1`,
-    [sucursal, calendar_id, access_token, refresh_token || null],
+     VALUES (?,?,?,?,?)
+     ON CONFLICT(sucursal) DO UPDATE SET calendar_id=excluded.calendar_id, activo=excluded.activo`,
+    [sucursal, calendar_id, access_token || null, refresh_token || null, activo === 0 ? 0 : 1],
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ ok: true });

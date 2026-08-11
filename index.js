@@ -14,7 +14,10 @@ const app = express();
 app.use(cors());
 // Guardar el cuerpo crudo: la firma de Meta se calcula sobre los bytes exactos
 // recibidos, no sobre el JSON reserializado.
-app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
+// limit alto: los webhooks de sincronizacion de coexistencia (history) traen
+// muchos mensajes y superan el limite por defecto de Express (100kb) -> se
+// rechazaban con 413 y no llegaba el historial.
+app.use(express.json({ limit: '25mb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 
 // Los bots que escanean la URL publica mandan JSON malformado o peticiones sin
 // cuerpo. Sin esto, body-parser lanza y deja un stack trace en los logs por cada

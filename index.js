@@ -169,6 +169,12 @@ db.serialize(() => {
     ['sync_estado', 'TEXT'],                    // pendiente | sincronizando | listo | error
     ['sync_progreso', 'INTEGER DEFAULT 0']      // 0-100, avance de la sincronizacion de historial
   ]);
+  // Remarketing: soportar tambien enviar un WORKFLOW (no solo una plantilla)
+  ensureColumns('remarketing_solicitudes', [
+    ['tipo', "TEXT DEFAULT 'plantilla'"],   // plantilla | workflow
+    ['workflow_id', 'INTEGER'],
+    ['workflow_nombre', 'TEXT']
+  ]);
   // Al reiniciar, una difusion que quedo 'enviando' ya no se reanuda (el envio
   // corre en segundo plano y se corta con el reinicio). La marcamos 'interrumpida'
   // para que no aparezca eternamente "en progreso".
@@ -1223,14 +1229,60 @@ app.get('/api/difusiones', auth, (req, res) => {
 // contenido, costo estimado y # de contactos antes de aprobar.
 function _getPlantilla(id) { return new Promise(r => db.get('SELECT * FROM plantillas WHERE id=?', [id], (e, x) => r(x))); }
 
-// Crear solicitud (recepcionista / supervisor / admin)
+// Busca la plantilla de envio de un workflow (para estimar costo y mostrar el
+// mensaje al gerente). Recorre los pasos buscando un enviar_esperar/enviar_plantilla.
+function _wfPlantillaDeEnvio(wf) {
+  let pasos = []; try { pasos = JSON.parse(wf.pasos || '[]'); } catch (e) {}
+  const buscar = (arr) => {
+    for (const p of (arr || [])) {
+      const pid = p.config && p.config.plantilla_id;
+      if ((p.tipo === 'enviar_esperar' || p.tipo === 'enviar_plantilla') && pid) return pid;
+      if (p.tipo === 'ramas' && p.config && Array.isArray(p.config.ramas)) {
+        for (const rama of p.config.ramas) { const f = buscar(rama.pasos); if (f) return f; }
+      }
+    }
+    return null;
+  };
+  return buscar(pasos);
+}
+
+// Inscribe un contacto en un workflow (mismo mecanismo que dispararWorkflows, directo).
+async function wfInscribirContacto(wf, contacto) {
+  const ya = await wfGet(`SELECT id FROM workflow_inscripciones WHERE workflow_id=? AND contacto_id=? AND (estado='activo' OR created_at > datetime('now','-24 hours')) LIMIT 1`, [wf.id, contacto.id]);
+  if (ya) return false;
+  const r = await wfRun('INSERT INTO workflow_inscripciones (workflow_id, contacto_id, telefono) VALUES (?,?,?)', [wf.id, contacto.id, contacto.telefono]);
+  const insc = await wfGet('SELECT * FROM workflow_inscripciones WHERE id=?', [r.lastID]);
+  await wfAvanzar(insc);
+  return true;
+}
+
+// Mapa telefono -> [etiqueta_id], para filtrar contactos por etiqueta en el panel
+app.get('/api/contactos-etiquetas', auth, (req, res) => {
+  const numero_id = (req.user.rol === 'supervisor' || req.user.rol === 'admin') ? req.query.numero_id : req.user.numero_id;
+  const cond = numero_id ? 'WHERE c.numero_id = ?' : '';
+  const params = numero_id ? [numero_id] : [];
+  db.all(`SELECT c.telefono, ce.etiqueta_id FROM contactos c JOIN contacto_etiquetas ce ON ce.contacto_id=c.id ${cond}`, params, (e, rows) => {
+    const map = {};
+    (rows || []).forEach(x => { (map[x.telefono] = map[x.telefono] || []).push(x.etiqueta_id); });
+    res.json(map);
+  });
+});
+
+// Workflows activos disponibles para remarketing (accesible a la recepcionista)
+app.get('/api/remarketing/workflows', auth, requireRole('recepcionista', 'supervisor', 'admin'), async (req, res) => {
+  const suc = req.user.rol === 'admin' ? null : req.user.sucursal;
+  const wfs = await wfAll('SELECT id, nombre, sucursal FROM workflows WHERE activo=1');
+  res.json((wfs || []).filter(w => !w.sucursal || !suc || w.sucursal === suc).map(w => ({ id: w.id, nombre: w.nombre })));
+});
+
+// Crear solicitud: puede ser una PLANTILLA o un WORKFLOW
 app.post('/api/remarketing/solicitud', auth, requireRole('recepcionista', 'supervisor', 'admin'), async (req, res) => {
-  const { plantilla_id, telefonos } = req.body;
-  if (!plantilla_id) return res.status(400).json({ error: 'Selecciona una plantilla.' });
+  const { tipo, plantilla_id, workflow_id, telefonos } = req.body;
+  const esWorkflow = tipo === 'workflow';
+  if (!esWorkflow && !plantilla_id) return res.status(400).json({ error: 'Selecciona una plantilla.' });
+  if (esWorkflow && !workflow_id) return res.status(400).json({ error: 'Selecciona un workflow.' });
   if (!Array.isArray(telefonos) || !telefonos.length) return res.status(400).json({ error: 'Selecciona al menos un contacto.' });
   try {
-    const plantilla = await _getPlantilla(plantilla_id);
-    if (!plantilla) return res.status(404).json({ error: 'Plantilla no encontrada.' });
     const num = await resolverNumeroEnvio(req, req.body.numero_id);
     const numero_id = num ? num.phone_number_id : req.user.numero_id;
     // Solo se aceptan contactos REALES del numero (evita mandar a numeros sueltos)
@@ -1239,14 +1291,30 @@ app.post('/api/remarketing/solicitud', auth, requireRole('recepcionista', 'super
       `SELECT DISTINCT telefono FROM contactos WHERE telefono IN (${ph})` + (numero_id ? ' AND numero_id=?' : ''),
       numero_id ? [...telefonos, numero_id] : telefonos, (e, rows) => r((rows || []).map(x => x.telefono))));
     if (!validos.length) return res.status(400).json({ error: 'Ningún contacto válido seleccionado.' });
+
+    let categoria = 'MARKETING', plNombre = null, plContenido = null, wfNombre = null;
+    if (esWorkflow) {
+      const workflow = await wfGet('SELECT * FROM workflows WHERE id=?', [workflow_id]);
+      if (!workflow) return res.status(404).json({ error: 'Workflow no encontrado.' });
+      wfNombre = workflow.nombre;
+      const plId = _wfPlantillaDeEnvio(workflow);
+      const plEnvio = plId ? await _getPlantilla(plId) : null;
+      categoria = (plEnvio && plEnvio.categoria) || 'MARKETING';
+      plNombre = plEnvio ? plEnvio.nombre : null;        // para mostrarle al gerente qué manda el workflow
+      plContenido = plEnvio ? plEnvio.contenido : null;
+    } else {
+      const plantilla = await _getPlantilla(plantilla_id);
+      if (!plantilla) return res.status(404).json({ error: 'Plantilla no encontrada.' });
+      categoria = plantilla.categoria; plNombre = plantilla.nombre; plContenido = plantilla.contenido;
+    }
     let costo = 0;
-    for (const t of validos) { const c = await calcularCosto(t, plantilla.categoria); costo += c.costo_usd; }
+    for (const t of validos) { const c = await calcularCosto(t, categoria); costo += c.costo_usd; }
     const tc = parseFloat(await configGet('tipo_cambio_usd_mxn'));
     const costo_mxn = tc ? Number((costo * tc).toFixed(2)) : null;
     const id = await new Promise((resolve, reject) => db.run(
-      `INSERT INTO remarketing_solicitudes (solicitante_id, solicitante_nombre, sucursal, numero_id, plantilla_id, plantilla_nombre, plantilla_contenido, categoria, telefonos, total_contactos, costo_usd, costo_mxn, estado)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'pendiente')`,
-      [req.user.id, req.user.nombre || '', req.user.sucursal || null, numero_id, plantilla_id, plantilla.nombre, plantilla.contenido, plantilla.categoria, JSON.stringify(validos), validos.length, Number(costo.toFixed(4)), costo_mxn],
+      `INSERT INTO remarketing_solicitudes (solicitante_id, solicitante_nombre, sucursal, numero_id, tipo, plantilla_id, plantilla_nombre, plantilla_contenido, workflow_id, workflow_nombre, categoria, telefonos, total_contactos, costo_usd, costo_mxn, estado)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'pendiente')`,
+      [req.user.id, req.user.nombre || '', req.user.sucursal || null, numero_id, esWorkflow ? 'workflow' : 'plantilla', esWorkflow ? null : plantilla_id, plNombre, plContenido, esWorkflow ? workflow_id : null, wfNombre, categoria, JSON.stringify(validos), validos.length, Number(costo.toFixed(4)), costo_mxn],
       function (e) { e ? reject(e) : resolve(this.lastID); }));
     res.json({ ok: true, id, total_contactos: validos.length, costo_usd: Number(costo.toFixed(4)), costo_mxn });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1262,7 +1330,7 @@ app.get('/api/remarketing/solicitudes', auth, requireRole('supervisor', 'admin')
 
 // Las propias solicitudes de la recepcionista (para ver el estado)
 app.get('/api/remarketing/mis-solicitudes', auth, (req, res) => {
-  db.all('SELECT id, plantilla_nombre, total_contactos, costo_usd, costo_mxn, estado, motivo, created_at, resolved_at FROM remarketing_solicitudes WHERE solicitante_id=? ORDER BY created_at DESC LIMIT 30', [req.user.id], (e, rows) => res.json(rows || []));
+  db.all('SELECT id, tipo, plantilla_nombre, workflow_nombre, total_contactos, costo_usd, costo_mxn, estado, motivo, created_at, resolved_at FROM remarketing_solicitudes WHERE solicitante_id=? ORDER BY created_at DESC LIMIT 30', [req.user.id], (e, rows) => res.json(rows || []));
 });
 
 // Aprobar -> envia la plantilla a esos contactos (envio simple, en 2do plano)
@@ -1272,12 +1340,31 @@ app.post('/api/remarketing/solicitud/:id/aprobar', auth, requireRole('supervisor
     if (!sol) return res.status(404).json({ error: 'Solicitud no encontrada.' });
     if (req.user.rol === 'supervisor' && sol.sucursal !== req.user.sucursal) return res.status(403).json({ error: 'No es de tu sucursal.' });
     if (sol.estado !== 'pendiente') return res.status(400).json({ error: 'La solicitud ya fue ' + sol.estado + '.' });
+    let telefonos = []; try { telefonos = JSON.parse(sol.telefonos || '[]'); } catch (e) {}
+
+    // WORKFLOW: inscribir a los contactos (dispara el envio + ramas del workflow)
+    if (sol.tipo === 'workflow') {
+      const wf = await wfGet('SELECT * FROM workflows WHERE id=?', [sol.workflow_id]);
+      if (!wf) return res.status(404).json({ error: 'El workflow ya no existe.' });
+      if (!wf.activo) return res.status(400).json({ error: 'El workflow está apagado. Actívalo (admin → Automatizaciones) antes de aprobar.' });
+      db.run("UPDATE remarketing_solicitudes SET estado='aprobada', aprobador_id=?, aprobador_nombre=?, resolved_at=CURRENT_TIMESTAMP WHERE id=?", [req.user.id, req.user.nombre || '', sol.id]);
+      res.json({ ok: true, tipo: 'workflow', total: telefonos.length });
+      (async () => {
+        for (const tel of telefonos) {
+          const c = await wfGet('SELECT id, telefono FROM contactos WHERE telefono=?', [tel]);
+          if (c) { try { await wfInscribirContacto(wf, c); } catch (e) { console.error('[REMARKETING wf] inscribir ' + tel + ':', e.message); } }
+        }
+        console.log('[REMARKETING ' + sol.id + '] inscritos ' + telefonos.length + ' en workflow ' + wf.nombre);
+      })();
+      return;
+    }
+
+    // PLANTILLA: envio simple
     const plantilla = await _getPlantilla(sol.plantilla_id);
     if (!plantilla) return res.status(404).json({ error: 'La plantilla ya no existe.' });
     if (plantilla.estado_meta !== 'aprobada') return res.status(400).json({ error: `La plantilla "${plantilla.nombre}" no está aprobada por Meta (${plantilla.estado_meta}). Meta rechazará el envío.` });
     const num = await new Promise(r => db.get('SELECT * FROM numeros WHERE phone_number_id=?', [sol.numero_id], (e, x) => r(x)));
     if (!num || !num.token) return res.status(400).json({ error: 'El número no tiene token de WhatsApp configurado.' });
-    let telefonos = []; try { telefonos = JSON.parse(sol.telefonos || '[]'); } catch (e) {}
     const contactos = await new Promise(r => {
       if (!telefonos.length) return r([]);
       const ph = telefonos.map(() => '?').join(',');

@@ -367,15 +367,28 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
           <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:20px">
             <h2 style="margin:0 0 6px;font-size:18px;color:#111">📣 Remarketing</h2>
             <p style="font-size:13px;color:#666;margin:0 0 16px">Elige el mensaje y los contactos. Se enviará una <b>solicitud a tu gerente</b> para aprobar antes de mandar.</p>
-            <div style="margin-bottom:12px">
+            <div style="display:flex;gap:8px;margin-bottom:12px">
+              <button type="button" id="remk_tab_pl" onclick="remkSetTipo('plantilla')" style="flex:1;padding:8px;border:1px solid #075e54;background:#075e54;color:#fff;border-radius:6px;cursor:pointer;font-size:13px">Plantilla</button>
+              <button type="button" id="remk_tab_wf" onclick="remkSetTipo('workflow')" style="flex:1;padding:8px;border:1px solid #ddd;background:#fff;color:#333;border-radius:6px;cursor:pointer;font-size:13px">Workflow</button>
+            </div>
+            <div id="remk_box_plantilla" style="margin-bottom:12px">
               <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Mensaje (plantilla aprobada)</label>
               <select id="remk_plantilla" onchange="remkPreview()" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px"><option value="">Cargando...</option></select>
+            </div>
+            <div id="remk_box_workflow" style="margin-bottom:12px;display:none">
+              <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Workflow (automatización con respuestas)</label>
+              <select id="remk_workflow" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px"><option value="">Cargando...</option></select>
+              <p style="font-size:11px;color:#888;margin:6px 0 0">El workflow manda su mensaje y maneja las respuestas automáticamente (ej. QUIERO AGENDAR / DETENER).</p>
             </div>
             <div id="remk_preview" style="display:none;background:#f0f2f5;border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;color:#333;white-space:pre-wrap"></div>
             <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Contactos</label>
             <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
               <input type="text" id="remk_buscar" placeholder="Buscar por nombre o teléfono..." oninput="remkRender()" style="flex:1;min-width:120px;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">
               <select id="remk_etapa" onchange="remkRender()" style="padding:7px;border:1px solid #ddd;border-radius:6px;font-size:13px"><option value="">Todas las etapas</option><option>Nuevo</option><option>Seguimiento</option><option>Propuesta</option><option>Cerrado</option></select>
+            </div>
+            <div id="remk_tags_wrap" style="margin-bottom:8px;display:none">
+              <div style="font-size:11px;color:#888;margin-bottom:4px">Filtrar por etiqueta — clic para alternar: <span style="color:#2e7d32">✓ solo con esta</span> · <span style="color:#c62828">✗ excluir</span></div>
+              <div id="remk_tags" style="display:flex;flex-wrap:wrap;gap:6px"></div>
             </div>
             <div style="display:flex;gap:8px;margin-bottom:8px">
               <button type="button" onclick="remkSelAll(true)" style="padding:5px 10px;background:#e7f0fd;border:1px solid #cfe0f7;border-radius:6px;cursor:pointer;font-size:12px">✓ Seleccionar visibles</button>
@@ -1117,22 +1130,60 @@ function volverAlMenu(){
 }
 
 // ==================== REMARKETING (solicitud con aprobación del gerente) ====================
-var remkContactos=[], remkSel={};
+var remkContactos=[], remkSel={}, remkTipo='plantilla', remkTagMap={}, remkTagState={}, remkEtiquetas=[];
 function remkEsc(s){ return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):''; }
 function remkInit(){
+  var hdr={headers:{Authorization:'Bearer '+token}};
   // Plantillas aprobadas
-  fetch('/api/plantillas',{headers:{Authorization:'Bearer '+token}}).then(function(r){return r.json();}).then(function(d){
+  fetch('/api/plantillas',hdr).then(function(r){return r.json();}).then(function(d){
     var apr=(Array.isArray(d)?d:[]).filter(function(p){return p.estado_meta==='aprobada';});
     var sel=document.getElementById('remk_plantilla');
     sel.innerHTML = apr.length
       ? '<option value="">Elige una plantilla...</option>'+apr.map(function(p){return '<option value="'+p.id+'" data-cont="'+encodeURIComponent(p.contenido||'')+'">'+remkEsc(p.nombre)+' ('+remkEsc(p.categoria)+')</option>';}).join('')
       : '<option value="">No tienes plantillas aprobadas</option>';
   });
+  // Workflows activos
+  fetch('/api/remarketing/workflows',hdr).then(function(r){return r.json();}).then(function(d){
+    var w=Array.isArray(d)?d:[];
+    document.getElementById('remk_workflow').innerHTML = w.length
+      ? '<option value="">Elige un workflow...</option>'+w.map(function(x){return '<option value="'+x.id+'">'+remkEsc(x.nombre)+'</option>';}).join('')
+      : '<option value="">No hay workflows activos</option>';
+  });
+  // Etiquetas + mapa contacto→etiquetas (para filtrar)
+  fetch('/api/etiquetas',hdr).then(function(r){return r.json();}).then(function(d){ remkEtiquetas=Array.isArray(d)?d:[]; remkRenderTags(); });
+  fetch('/api/contactos-etiquetas',hdr).then(function(r){return r.json();}).then(function(d){ remkTagMap=(d&&typeof d==='object')?d:{}; remkRender(); });
   // Contactos
-  fetch('/api/contactos',{headers:{Authorization:'Bearer '+token}}).then(function(r){return r.json();}).then(function(d){
+  fetch('/api/contactos',hdr).then(function(r){return r.json();}).then(function(d){
     remkContactos = Array.isArray(d)?d:[]; remkRender();
   });
   remkMisSolicitudes();
+}
+function remkSetTipo(t){
+  remkTipo=t;
+  document.getElementById('remk_box_plantilla').style.display = t==='plantilla'?'block':'none';
+  document.getElementById('remk_box_workflow').style.display = t==='workflow'?'block':'none';
+  var pl=document.getElementById('remk_tab_pl'), wf=document.getElementById('remk_tab_wf');
+  var on='flex:1;padding:8px;border:1px solid #075e54;background:#075e54;color:#fff;border-radius:6px;cursor:pointer;font-size:13px';
+  var off='flex:1;padding:8px;border:1px solid #ddd;background:#fff;color:#333;border-radius:6px;cursor:pointer;font-size:13px';
+  pl.style.cssText = t==='plantilla'?on:off; wf.style.cssText = t==='workflow'?on:off;
+  if(t==='workflow') document.getElementById('remk_preview').style.display='none';
+}
+function remkRenderTags(){
+  var wrap=document.getElementById('remk_tags_wrap'), cont=document.getElementById('remk_tags');
+  if(!remkEtiquetas.length){ wrap.style.display='none'; return; }
+  wrap.style.display='block';
+  cont.innerHTML = remkEtiquetas.map(function(e){
+    var st=remkTagState[e.id]; // undefined | 'inc' | 'exc'
+    var bg = st==='inc'?'#e8f5e9':(st==='exc'?'#ffebee':'#f0f2f5');
+    var col = st==='inc'?'#2e7d32':(st==='exc'?'#c62828':'#555');
+    var pre = st==='inc'?'✓ ':(st==='exc'?'✗ ':'');
+    return '<span onclick="remkTagToggle('+e.id+')" style="cursor:pointer;padding:4px 10px;border-radius:14px;font-size:12px;background:'+bg+';color:'+col+';border:1px solid '+col+'33">'+pre+remkEsc(e.nombre)+'</span>';
+  }).join('');
+}
+function remkTagToggle(id){
+  var st=remkTagState[id];
+  if(!st) remkTagState[id]='inc'; else if(st==='inc') remkTagState[id]='exc'; else delete remkTagState[id];
+  remkRenderTags(); remkRender();
 }
 function remkPreview(){
   var o=document.getElementById('remk_plantilla').selectedOptions[0];
@@ -1143,9 +1194,14 @@ function remkPreview(){
 function remkFiltrados(){
   var q=(document.getElementById('remk_buscar').value||'').toLowerCase();
   var et=document.getElementById('remk_etapa').value;
+  var inc=[], exc=[];
+  for(var id in remkTagState){ if(remkTagState[id]==='inc') inc.push(parseInt(id)); else if(remkTagState[id]==='exc') exc.push(parseInt(id)); }
   return remkContactos.filter(function(c){
     if(et && c.etapa!==et) return false;
     if(q && ((c.nombre||'').toLowerCase().indexOf(q)<0 && (c.telefono||'').indexOf(q)<0)) return false;
+    var tags = remkTagMap[c.telefono]||[];
+    if(inc.length && !inc.some(function(i){return tags.indexOf(i)>=0;})) return false; // solo con alguna incluida
+    if(exc.length && exc.some(function(i){return tags.indexOf(i)>=0;})) return false;   // ninguna excluida
     return true;
   });
 }
@@ -1170,14 +1226,22 @@ function remkResumen(){
   var e=document.getElementById('remk_resumen'); if(e) e.textContent = n+' contacto'+(n===1?'':'s')+' seleccionado'+(n===1?'':'s');
 }
 function remkEnviar(){
-  var pid=document.getElementById('remk_plantilla').value;
-  var tels=Object.keys(remkSel);
   var msg=document.getElementById('remk_msg');
-  if(!pid){ msg.style.color='#c62828'; msg.textContent='Elige una plantilla.'; return; }
+  var tels=Object.keys(remkSel);
+  var body={telefonos:tels};
+  if(remkTipo==='workflow'){
+    var wid=document.getElementById('remk_workflow').value;
+    if(!wid){ msg.style.color='#c62828'; msg.textContent='Elige un workflow.'; return; }
+    body.tipo='workflow'; body.workflow_id=parseInt(wid);
+  } else {
+    var pid=document.getElementById('remk_plantilla').value;
+    if(!pid){ msg.style.color='#c62828'; msg.textContent='Elige una plantilla.'; return; }
+    body.tipo='plantilla'; body.plantilla_id=parseInt(pid);
+  }
   if(!tels.length){ msg.style.color='#c62828'; msg.textContent='Selecciona al menos un contacto.'; return; }
   msg.style.color='#666'; msg.textContent='Enviando solicitud...';
   var btn=document.getElementById('remk_btn'); btn.disabled=true;
-  fetch('/api/remarketing/solicitud',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({plantilla_id:parseInt(pid),telefonos:tels})})
+  fetch('/api/remarketing/solicitud',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify(body)})
   .then(function(r){return r.json();}).then(function(d){
     btn.disabled=false;
     if(d.ok){
@@ -1195,7 +1259,7 @@ function remkMisSolicitudes(){
     el.innerHTML=d.map(function(s){
       var b=badge[s.estado]||[s.estado,'#555','#eee'];
       return '<div style="border:1px solid #eee;border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:13px">'+
-        '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b>'+remkEsc(s.plantilla_nombre||'')+'</b>'+
+        '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b>'+(s.tipo==='workflow'?'⚙️ ':'')+remkEsc(s.tipo==='workflow'?(s.workflow_nombre||'Workflow'):(s.plantilla_nombre||''))+'</b>'+
         '<span style="padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:'+b[1]+';background:'+b[2]+';white-space:nowrap">'+b[0]+'</span></div>'+
         '<div style="color:#888;margin-top:2px">'+s.total_contactos+' contactos'+(s.costo_mxn!=null?' · ~$'+s.costo_mxn+' MXN':'')+'</div>'+
         (s.estado==='rechazada'&&s.motivo?'<div style="color:#c62828;margin-top:2px">Motivo: '+remkEsc(s.motivo)+'</div>':'')+

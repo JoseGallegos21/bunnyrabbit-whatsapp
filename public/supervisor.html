@@ -607,7 +607,7 @@ async function cargarSolicitudes(){
       : (s.motivo?'<div style="color:#e74c3c;font-size:12px;margin-top:8px">Motivo: '+supEsc(s.motivo)+'</div>':'');
     return '<div style="background:#1f2c34;border:1px solid #2a3942;border-radius:12px;padding:16px;margin-bottom:12px">'+
       '<div style="display:flex;justify-content:space-between;gap:10px;align-items:center">'+
-        '<div><b>'+supEsc(s.solicitante_nombre||'—')+'</b> <span style="color:#8696a0;font-size:12px">· '+supEsc(s.plantilla_nombre||'')+'</span></div>'+
+        '<div><b>'+supEsc(s.solicitante_nombre||'—')+'</b> <span style="color:#8696a0;font-size:12px">· '+(s.tipo==='workflow'?'⚙️ Workflow: '+supEsc(s.workflow_nombre||''):supEsc(s.plantilla_nombre||''))+'</span></div>'+
         '<span style="color:'+bd[1]+';font-weight:600;font-size:12px;white-space:nowrap">'+bd[0]+'</span>'+
       '</div>'+
       '<div style="background:#0b141a;border-radius:8px;padding:10px;margin:10px 0;font-size:13px;white-space:pre-wrap;color:#e9edef">'+supEsc(s.plantilla_contenido||'(sin contenido)')+'</div>'+

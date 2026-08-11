@@ -60,6 +60,9 @@ db.serialize(() => {
   // Tablas adicionales que usa la app (antes no se creaban al arrancar)
   db.run(`CREATE TABLE IF NOT EXISTS plantillas (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, categoria TEXT DEFAULT 'General', contenido TEXT, phone_number_id TEXT, estado_meta TEXT DEFAULT 'pendiente', meta_template_id TEXT, idioma TEXT DEFAULT 'es', created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
   db.run(`CREATE TABLE IF NOT EXISTS difusiones (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, mensaje TEXT, filtro_etapa TEXT, total INTEGER DEFAULT 0, enviados INTEGER DEFAULT 0, estado TEXT DEFAULT 'pendiente', phone_number_id TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  // Remarketing con aprobacion: la recepcionista crea una solicitud y el
+  // supervisor la aprueba antes de enviar (con contenido, costo y # de contactos).
+  db.run(`CREATE TABLE IF NOT EXISTS remarketing_solicitudes (id INTEGER PRIMARY KEY AUTOINCREMENT, solicitante_id INTEGER, solicitante_nombre TEXT, sucursal TEXT, numero_id TEXT, plantilla_id INTEGER, plantilla_nombre TEXT, plantilla_contenido TEXT, categoria TEXT, telefonos TEXT, total_contactos INTEGER, costo_usd REAL DEFAULT 0, costo_mxn REAL, estado TEXT DEFAULT 'pendiente', aprobador_id INTEGER, aprobador_nombre TEXT, motivo TEXT, difusion_id INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, resolved_at DATETIME)`);
   db.run(`CREATE TABLE IF NOT EXISTS citas (id INTEGER PRIMARY KEY AUTOINCREMENT, contacto_id INTEGER, tecnica_id INTEGER, recepcionista_id INTEGER, numero_id TEXT, sucursal TEXT, fecha TEXT, hora_inicio TEXT, hora_fin TEXT, servicio TEXT, notas TEXT, estado TEXT DEFAULT 'pendiente', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
   db.run(`CREATE TABLE IF NOT EXISTS sucursales (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, direccion TEXT, phone_number_id TEXT, logo_url TEXT, activo INTEGER DEFAULT 1)`);
   db.run(`CREATE TABLE IF NOT EXISTS biblioteca_imagenes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, url TEXT, subido_por INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
@@ -1212,6 +1215,99 @@ app.get('/api/difusiones', auth, (req, res) => {
   } else {
     db.all('SELECT * FROM difusiones WHERE phone_number_id=? ORDER BY created_at DESC LIMIT 20', [req.user.numero_id], (err, rows) => res.json(rows || []));
   }
+});
+
+// ==================== REMARKETING CON APROBACIÓN ====================
+// La recepcionista arma una solicitud (plantilla + contactos). Se guarda como
+// 'pendiente' y NO se envia hasta que su supervisor la apruebe. El supervisor ve
+// contenido, costo estimado y # de contactos antes de aprobar.
+function _getPlantilla(id) { return new Promise(r => db.get('SELECT * FROM plantillas WHERE id=?', [id], (e, x) => r(x))); }
+
+// Crear solicitud (recepcionista / supervisor / admin)
+app.post('/api/remarketing/solicitud', auth, requireRole('recepcionista', 'supervisor', 'admin'), async (req, res) => {
+  const { plantilla_id, telefonos } = req.body;
+  if (!plantilla_id) return res.status(400).json({ error: 'Selecciona una plantilla.' });
+  if (!Array.isArray(telefonos) || !telefonos.length) return res.status(400).json({ error: 'Selecciona al menos un contacto.' });
+  try {
+    const plantilla = await _getPlantilla(plantilla_id);
+    if (!plantilla) return res.status(404).json({ error: 'Plantilla no encontrada.' });
+    const num = await resolverNumeroEnvio(req, req.body.numero_id);
+    const numero_id = num ? num.phone_number_id : req.user.numero_id;
+    // Solo se aceptan contactos REALES del numero (evita mandar a numeros sueltos)
+    const ph = telefonos.map(() => '?').join(',');
+    const validos = await new Promise(r => db.all(
+      `SELECT DISTINCT telefono FROM contactos WHERE telefono IN (${ph})` + (numero_id ? ' AND numero_id=?' : ''),
+      numero_id ? [...telefonos, numero_id] : telefonos, (e, rows) => r((rows || []).map(x => x.telefono))));
+    if (!validos.length) return res.status(400).json({ error: 'Ningún contacto válido seleccionado.' });
+    let costo = 0;
+    for (const t of validos) { const c = await calcularCosto(t, plantilla.categoria); costo += c.costo_usd; }
+    const tc = parseFloat(await configGet('tipo_cambio_usd_mxn'));
+    const costo_mxn = tc ? Number((costo * tc).toFixed(2)) : null;
+    const id = await new Promise((resolve, reject) => db.run(
+      `INSERT INTO remarketing_solicitudes (solicitante_id, solicitante_nombre, sucursal, numero_id, plantilla_id, plantilla_nombre, plantilla_contenido, categoria, telefonos, total_contactos, costo_usd, costo_mxn, estado)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'pendiente')`,
+      [req.user.id, req.user.nombre || '', req.user.sucursal || null, numero_id, plantilla_id, plantilla.nombre, plantilla.contenido, plantilla.categoria, JSON.stringify(validos), validos.length, Number(costo.toFixed(4)), costo_mxn],
+      function (e) { e ? reject(e) : resolve(this.lastID); }));
+    res.json({ ok: true, id, total_contactos: validos.length, costo_usd: Number(costo.toFixed(4)), costo_mxn });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Lista para el gerente (pendientes primero), acotada a su sucursal
+app.get('/api/remarketing/solicitudes', auth, requireRole('supervisor', 'admin'), (req, res) => {
+  const esSuper = req.user.rol === 'supervisor';
+  const cond = esSuper ? 'WHERE sucursal = ?' : '';
+  const params = esSuper ? [req.user.sucursal] : [];
+  db.all(`SELECT * FROM remarketing_solicitudes ${cond} ORDER BY (estado='pendiente') DESC, created_at DESC LIMIT 50`, params, (e, rows) => res.json(rows || []));
+});
+
+// Las propias solicitudes de la recepcionista (para ver el estado)
+app.get('/api/remarketing/mis-solicitudes', auth, (req, res) => {
+  db.all('SELECT id, plantilla_nombre, total_contactos, costo_usd, costo_mxn, estado, motivo, created_at, resolved_at FROM remarketing_solicitudes WHERE solicitante_id=? ORDER BY created_at DESC LIMIT 30', [req.user.id], (e, rows) => res.json(rows || []));
+});
+
+// Aprobar -> envia la plantilla a esos contactos (envio simple, en 2do plano)
+app.post('/api/remarketing/solicitud/:id/aprobar', auth, requireRole('supervisor', 'admin'), async (req, res) => {
+  try {
+    const sol = await new Promise(r => db.get('SELECT * FROM remarketing_solicitudes WHERE id=?', [req.params.id], (e, x) => r(x)));
+    if (!sol) return res.status(404).json({ error: 'Solicitud no encontrada.' });
+    if (req.user.rol === 'supervisor' && sol.sucursal !== req.user.sucursal) return res.status(403).json({ error: 'No es de tu sucursal.' });
+    if (sol.estado !== 'pendiente') return res.status(400).json({ error: 'La solicitud ya fue ' + sol.estado + '.' });
+    const plantilla = await _getPlantilla(sol.plantilla_id);
+    if (!plantilla) return res.status(404).json({ error: 'La plantilla ya no existe.' });
+    if (plantilla.estado_meta !== 'aprobada') return res.status(400).json({ error: `La plantilla "${plantilla.nombre}" no está aprobada por Meta (${plantilla.estado_meta}). Meta rechazará el envío.` });
+    const num = await new Promise(r => db.get('SELECT * FROM numeros WHERE phone_number_id=?', [sol.numero_id], (e, x) => r(x)));
+    if (!num || !num.token) return res.status(400).json({ error: 'El número no tiene token de WhatsApp configurado.' });
+    let telefonos = []; try { telefonos = JSON.parse(sol.telefonos || '[]'); } catch (e) {}
+    const contactos = await new Promise(r => {
+      if (!telefonos.length) return r([]);
+      const ph = telefonos.map(() => '?').join(',');
+      db.all(`SELECT telefono, MAX(nombre) nombre FROM contactos WHERE telefono IN (${ph}) GROUP BY telefono`, telefonos, (e, rows) => {
+        const map = {}; (rows || []).forEach(x => map[x.telefono] = x.nombre);
+        r(telefonos.map(t => ({ telefono: t, nombre: map[t] || null })));
+      });
+    });
+    const difId = await new Promise((resolve, reject) => db.run(
+      'INSERT INTO difusiones (nombre, mensaje, total, estado, phone_number_id, plantilla_id, categoria) VALUES (?,?,?,?,?,?,?)',
+      ['Remarketing aprobado: ' + sol.plantilla_nombre, '[Plantilla: ' + sol.plantilla_nombre + ']', contactos.length, 'enviando', sol.numero_id, sol.plantilla_id, plantilla.categoria],
+      function (e) { e ? reject(e) : resolve(this.lastID); }));
+    db.run("UPDATE remarketing_solicitudes SET estado='aprobada', aprobador_id=?, aprobador_nombre=?, difusion_id=?, resolved_at=CURRENT_TIMESTAMP WHERE id=?", [req.user.id, req.user.nombre || '', difId, sol.id]);
+    res.json({ ok: true, difusion_id: difId, total: contactos.length });
+    ejecutarDifusion(difId, num, plantilla, contactos).catch(e => {
+      console.error('[REMARKETING ' + sol.id + '] error:', e.message);
+      db.run("UPDATE difusiones SET estado='error' WHERE id=?", [difId]);
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Rechazar (con motivo opcional)
+app.post('/api/remarketing/solicitud/:id/rechazar', auth, requireRole('supervisor', 'admin'), (req, res) => {
+  const { motivo } = req.body;
+  db.get('SELECT * FROM remarketing_solicitudes WHERE id=?', [req.params.id], (e, sol) => {
+    if (!sol) return res.status(404).json({ error: 'Solicitud no encontrada.' });
+    if (req.user.rol === 'supervisor' && sol.sucursal !== req.user.sucursal) return res.status(403).json({ error: 'No es de tu sucursal.' });
+    if (sol.estado !== 'pendiente') return res.status(400).json({ error: 'La solicitud ya fue ' + sol.estado + '.' });
+    db.run("UPDATE remarketing_solicitudes SET estado='rechazada', aprobador_id=?, aprobador_nombre=?, motivo=?, resolved_at=CURRENT_TIMESTAMP WHERE id=?", [req.user.id, req.user.nombre || '', motivo || null, sol.id], (er) => res.json({ ok: !er }));
+  });
 });
 
 app.get('/api/reportes', auth, (req, res) => {

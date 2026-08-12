@@ -619,6 +619,35 @@ app.get('/api/metricas', auth, (req, res) => {
   db.get(`SELECT COUNT(*) as total, SUM(CASE WHEN direccion='entrante' THEN 1 ELSE 0 END) as entrantes, SUM(CASE WHEN direccion='saliente' THEN 1 ELSE 0 END) as salientes, SUM(CASE WHEN leido=0 AND direccion='entrante' THEN 1 ELSE 0 END) as no_leidos FROM mensajes ${where}`, params, (err, row) => res.json(row || {}));
 });
 
+// Métricas contadas por CONVERSACIÓN (clientes distintos), no por mensaje. Útil
+// para contabilidad: cuántas conversaciones hubo en el periodo, cuántas nuevas,
+// a cuántas se respondió y cuántas quedan sin leer. Acepta fecha_inicio/fecha_fin.
+app.get('/api/metricas/conversaciones', auth, (req, res) => {
+  const numero_id = req.user.rol === 'supervisor' ? req.query.numero_id || null : req.user.numero_id;
+  const cond = [], params = [];
+  if (numero_id) { cond.push('numero_id = ?'); params.push(numero_id); }
+  if (req.query.fecha_inicio) { cond.push('date(timestamp) >= date(?)'); params.push(req.query.fecha_inicio); }
+  if (req.query.fecha_fin) { cond.push('date(timestamp) <= date(?)'); params.push(req.query.fecha_fin); }
+  const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
+  db.get(`SELECT
+      COUNT(DISTINCT contacto) as conversaciones,
+      COUNT(DISTINCT CASE WHEN direccion='saliente' THEN contacto END) as respondidas,
+      COUNT(DISTINCT CASE WHEN leido=0 AND direccion='entrante' THEN contacto END) as sin_leer
+    FROM mensajes ${where}`, params, (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    // Nuevas: conversaciones cuyo PRIMER mensaje histórico cae en el periodo.
+    const condN = [], paramsN = [];
+    if (numero_id) { condN.push('numero_id = ?'); paramsN.push(numero_id); }
+    const whereN = condN.length ? 'WHERE ' + condN.join(' AND ') : '';
+    const dCond = [], dParams = [];
+    if (req.query.fecha_inicio) { dCond.push('date(mn) >= date(?)'); dParams.push(req.query.fecha_inicio); }
+    if (req.query.fecha_fin) { dCond.push('date(mn) <= date(?)'); dParams.push(req.query.fecha_fin); }
+    const dWhere = dCond.length ? 'WHERE ' + dCond.join(' AND ') : '';
+    db.get(`SELECT COUNT(*) as nuevas FROM (SELECT contacto, MIN(timestamp) mn FROM mensajes ${whereN} GROUP BY contacto) ${dWhere}`,
+      paramsN.concat(dParams), (e2, r2) => res.json(Object.assign({ conversaciones: 0, respondidas: 0, sin_leer: 0, nuevas: 0 }, row || {}, r2 || {})));
+  });
+});
+
 // Metricas del panel de supervisor: citas de hoy + actividad por recepcionista.
 // Un supervisor solo ve su sucursal; un admin ve todo.
 app.get('/api/metricas/supervisor', auth, requireRole('admin', 'supervisor'), (req, res) => {

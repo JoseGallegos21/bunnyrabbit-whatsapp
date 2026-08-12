@@ -1640,16 +1640,16 @@ function cargarMetricas(){
   var qs=[];
   if(fi&&fi.value)qs.push('fecha_inicio='+fi.value);
   if(ff&&ff.value)qs.push('fecha_fin='+ff.value);
-  var url='/api/metricas'+(qs.length?'?'+qs.join('&'):'');
+  var url='/api/metricas/conversaciones'+(qs.length?'?'+qs.join('&'):'');
   fetch(url,{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
   .then(function(m){
-    var conRango=(fi&&fi.value)||(ff&&ff.value);
+    // Conteo por CONVERSACIÓN (clientes distintos), no por mensaje.
     document.getElementById('metricsBar').innerHTML=
-      '<div class="metric"><span>'+(m.total||0)+'</span><span>'+(conRango?'En periodo':'Total')+'</span></div>'+
-      '<div class="metric"><span>'+(m.entrantes||0)+'</span><span>Recibidos</span></div>'+
-      '<div class="metric"><span>'+(m.salientes||0)+'</span><span>Enviados</span></div>'+
-      '<div class="metric"><span style="color:#ffeb3b">'+(m.no_leidos||0)+'</span><span>Sin leer</span></div>';
+      '<div class="metric"><span>'+(m.conversaciones||0)+'</span><span>Conversaciones</span></div>'+
+      '<div class="metric"><span style="color:#00e5a0">'+(m.nuevas||0)+'</span><span>Nuevas</span></div>'+
+      '<div class="metric"><span>'+(m.respondidas||0)+'</span><span>Respondidas</span></div>'+
+      '<div class="metric"><span style="color:#ffeb3b">'+(m.sin_leer||0)+'</span><span>Sin leer</span></div>';
   });
 }
 function limpiarRangoMetricas(){

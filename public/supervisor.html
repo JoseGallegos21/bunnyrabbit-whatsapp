@@ -68,6 +68,8 @@
   .cita-bloque .cita-tecnica { font-size: 10px; color: #8696a0; }
   .cita-bloque.cancelada { background: #3d1a1a; border-left-color: #e74c3c; opacity: 0.6; }
   .cita-bloque.completada { background: #1a2e3d; border-left-color: #3d85c8; }
+  .cita-bloque.gcal { background: #16283a; border-left-color: #4285f4; }
+  .cita-bloque.gcal .cita-hora { color: #4285f4; }
 
   /* Chats */
   .chats-grid { display: grid; grid-template-columns: 280px 1fr; gap: 16px; height: calc(100vh - 200px); }
@@ -321,12 +323,23 @@ function switchTab(tab, el) {
 async function cargarMetricas() {
   const data = await api('/api/metricas/supervisor');
   const grid = document.getElementById('metricasGrid');
-  const ch = data.citasHoy || {};
+  // Citas de HOY desde Google Calendar + palomeo de asistencias (datos reales),
+  // en vez de la tabla interna de citas (que está vacía).
+  const hoy = ymdLocal(new Date());
+  const suc = USER.sucursal || '';
+  let citasHoy = 0, vino = 0, noVino = 0;
+  if (suc) {
+    const g = await api(`/api/google-calendar/eventos?fecha_inicio=${hoy}&fecha_fin=${hoy}&sucursal=${encodeURIComponent(suc)}`);
+    citasHoy = (g && g.configurado && Array.isArray(g.eventos)) ? g.eventos.length : 0;
+    const asis = await api(`/api/asistencias?fecha=${hoy}&sucursal=${encodeURIComponent(suc)}`);
+    (Array.isArray(asis) ? asis : []).forEach(a => { if (a.estado === 'asistio') vino++; else if (a.estado === 'no_asistio') noVino++; });
+  }
+  const pendientes = Math.max(0, citasHoy - vino - noVino);
   grid.innerHTML = `
-    <div class="metrica-card"><div class="valor">${ch.total_citas_hoy || 0}</div><div class="label">Citas hoy</div></div>
-    <div class="metrica-card"><div class="valor" style="color:#f39c12">${ch.pendientes || 0}</div><div class="label">Pendientes</div></div>
-    <div class="metrica-card"><div class="valor" style="color:#3d85c8">${ch.completadas || 0}</div><div class="label">Completadas</div></div>
-    <div class="metrica-card"><div class="valor" style="color:#e74c3c">${ch.canceladas || 0}</div><div class="label">Canceladas</div></div>
+    <div class="metrica-card"><div class="valor">${citasHoy}</div><div class="label">Citas hoy</div></div>
+    <div class="metrica-card"><div class="valor" style="color:#f39c12">${pendientes}</div><div class="label">Pendientes</div></div>
+    <div class="metrica-card"><div class="valor" style="color:#2ecc71">${vino}</div><div class="label">Atendidas</div></div>
+    <div class="metrica-card"><div class="valor" style="color:#e74c3c">${noVino}</div><div class="label">No vino</div></div>
   `;
   const tbody = document.getElementById('tablaRecepcionistas');
   if (!data.recepcionistas || !data.recepcionistas.length) {
@@ -369,33 +382,64 @@ async function cargarTecnicas() {
   if (selCita) selCita.innerHTML = '<option value="">Sin asignar</option>' + tecnicasData.map(t => `<option value="${t.id}">${t.nombre}</option>`).join('');
 }
 
+// El título de la cita en Google Calendar termina con el "tag" de la técnica tras
+// un guion ("Maria Velazquez-Bel"). Mismo criterio que tecnica.html.
+function _normTagSup(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]/g,''); }
+function tagDeEvento(summary){ const p=String(summary||'').split('-'); return p.length<2?'':_normTagSup(p[p.length-1]); }
+function eventoEsDeTecnica(summary, tecnicaNombre){
+  const tag=tagDeEvento(summary); if(!tag) return false;
+  const primer=_normTagSup(String(tecnicaNombre||'').split(/\s+/)[0]); if(!primer) return false;
+  return primer.startsWith(tag)||tag.startsWith(primer);
+}
+function ymdLocal(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+
 async function cargarCitas() {
   const dias = getSemanaFechas();
-  const fi = dias[0].toISOString().split('T')[0];
-  const ff = dias[6].toISOString().split('T')[0];
+  const fi = ymdLocal(dias[0]);
+  const ff = ymdLocal(dias[6]);
   const tecnicaId = document.getElementById('filtroPorTecnica')?.value || '';
 
   document.getElementById('fechaTitulo').textContent =
     dias[0].toLocaleDateString('es-MX', { day:'numeric', month:'short' }) + ' – ' +
     dias[6].toLocaleDateString('es-MX', { day:'numeric', month:'short', year:'numeric' });
 
-  let url = `/api/citas?fecha_inicio=${fi}&fecha_fin=${ff}`;
-  const data = await api(url);
-  citasData = Array.isArray(data) ? data : [];
-  // Filtro por técnica: antes se leía el valor pero nunca se aplicaba.
-  if (tecnicaId) citasData = citasData.filter(c => String(c.tecnica_id) === String(tecnicaId));
+  // 1) Citas internas (tabla citas). 2) Google Calendar de la sucursal.
+  const data = await api(`/api/citas?fecha_inicio=${fi}&fecha_fin=${ff}`);
+  let internas = Array.isArray(data) ? data : [];
+  let gcalCitas = [];
+  const suc = USER.sucursal || '';
+  if (suc) {
+    const g = await api(`/api/google-calendar/eventos?fecha_inicio=${fi}&fecha_fin=${ff}&sucursal=${encodeURIComponent(suc)}`);
+    if (g && g.configurado && Array.isArray(g.eventos)) {
+      const hhmm = d => String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+      gcalCitas = g.eventos.map(e => {
+        const ini = e.start && e.start.dateTime ? new Date(e.start.dateTime) : null;
+        const fin = e.end && e.end.dateTime ? new Date(e.end.dateTime) : null;
+        const f = String((e.start && (e.start.dateTime || e.start.date)) || '').split('T')[0];
+        const tag = tagDeEvento(e.summary);
+        return { id:'g_'+e.id, fecha:f, hora_inicio: ini?hhmm(ini):'', hora_fin: fin?hhmm(fin):'',
+                 contacto_nombre: e.summary || 'Cita', tecnica_nombre: tag?tag.charAt(0).toUpperCase()+tag.slice(1):'',
+                 estado:'gcal', esGcal:true, summary: e.summary || '' };
+      });
+    }
+  }
+  citasData = internas.concat(gcalCitas);
+  if (tecnicaId) {
+    const tname = (tecnicasData.find(t => String(t.id)===String(tecnicaId)) || {}).nombre || '';
+    citasData = citasData.filter(c => String(c.tecnica_id)===String(tecnicaId) || (c.esGcal && eventoEsDeTecnica(c.summary, tname)));
+  }
 
   renderCalendario(dias);
 }
 
 function renderCalendario(dias) {
-  const hoy = new Date().toISOString().split('T')[0];
+  const hoy = ymdLocal(new Date());
   const horas = ['08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00','20:00'];
   const diasNombres = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
 
   let html = `<div class="hora-label"></div>`;
   dias.forEach((d, i) => {
-    const fechaStr = d.toISOString().split('T')[0];
+    const fechaStr = ymdLocal(d);
     const esHoy = fechaStr === hoy;
     html += `<div class="dia-header ${esHoy ? 'hoy' : ''}">
       <div class="dia-nombre">${diasNombres[i]}</div>
@@ -406,15 +450,17 @@ function renderCalendario(dias) {
   horas.forEach(hora => {
     html += `<div class="hora-label">${hora}</div>`;
     dias.forEach(d => {
-      const fechaStr = d.toISOString().split('T')[0];
+      const fechaStr = ymdLocal(d);
       const citasDia = citasData.filter(c => c.fecha === fechaStr && c.hora_inicio && c.hora_inicio.startsWith(hora.split(':')[0]));
-      let citasHtml = citasDia.map(c => `
-        <div class="cita-bloque ${c.estado}" onclick="verCita(${c.id})">
-          <div class="cita-hora">${c.hora_inicio?.slice(0,5)} ${c.hora_fin ? '– '+c.hora_fin.slice(0,5) : ''}</div>
+      let citasHtml = citasDia.map(c => {
+        // Los eventos de Google Calendar (id 'g_...') no abren el modal de cita interna.
+        const onc = c.esGcal ? 'event.stopPropagation()' : `event.stopPropagation();verCita(${c.id})`;
+        return `<div class="cita-bloque ${c.estado}" onclick="${onc}" title="${(c.contacto_nombre||'').replace(/"/g,'&quot;')}">
+          <div class="cita-hora">${(c.hora_inicio||'').slice(0,5)} ${c.hora_fin ? '– '+c.hora_fin.slice(0,5) : ''}</div>
           <div class="cita-nombre">${c.contacto_nombre || 'Sin clienta'}</div>
           <div class="cita-tecnica">${c.tecnica_nombre || ''}</div>
-        </div>
-      `).join('');
+        </div>`;
+      }).join('');
       html += `<div class="celda" onclick="abrirModalCita('${fechaStr}','${hora}')">${citasHtml}</div>`;
     });
   });

@@ -669,8 +669,8 @@ app.get('/api/metricas/supervisor', auth, requireRole('admin', 'supervisor'), (r
       recs.forEach(r => {
         db.get(`SELECT SUM(CASE WHEN date(timestamp)=date('now','localtime') THEN 1 ELSE 0 END) mensajes_hoy,
                        SUM(CASE WHEN timestamp >= datetime('now','-7 days') THEN 1 ELSE 0 END) mensajes_semana
-                FROM mensajes WHERE numero_id=?`, [r.numero_id], (e3, ms) => {
-          db.get('SELECT COUNT(*) total_contactos FROM contactos WHERE numero_id=?', [r.numero_id], (e4, cs) => {
+                FROM mensajes WHERE numero_id=? AND (origen IS NULL OR origen != 'formulario_ads')`, [r.numero_id], (e3, ms) => {
+          db.get("SELECT COUNT(*) total_contactos FROM contactos WHERE numero_id=? AND (origen IS NULL OR origen != 'formulario_ads')", [r.numero_id], (e4, cs) => {
             out.push({ nombre: r.nombre, sucursal: r.sucursal,
                        mensajes_hoy: ms?.mensajes_hoy || 0, mensajes_semana: ms?.mensajes_semana || 0,
                        total_contactos: cs?.total_contactos || 0 });

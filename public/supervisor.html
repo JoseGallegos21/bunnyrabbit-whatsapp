@@ -561,16 +561,41 @@ async function abrirChat(id, nombre) {
       </div>
     </div>
     <div class="chat-mensajes" id="mensajesContainer">
-      ${mensajes.length ? mensajes.map(m => `
-        <div class="msg ${m.direccion === 'saliente' ? 'saliente' : 'entrante'}">
-          ${m.mensaje || ''}
+      ${mensajes.length ? mensajes.map(m => {
+        const esc = s => String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        let cont;
+        if (m.media_tipo && m.id) {
+          const etq = {image:'📷 Foto',video:'🎥 Video',audio:'🎙️ Audio',document:'📄 Documento',sticker:'🌟 Sticker'};
+          const cap = (m.mensaje && m.mensaje !== etq[m.media_tipo] && m.mensaje !== '[media]') ? '<div style="margin-top:4px">'+esc(m.mensaje)+'</div>' : '';
+          cont = '<div class="media-wrap" data-mid="'+m.id+'" data-mtipo="'+m.media_tipo+'"><div style="font-size:12px;color:#8696a0">⏳ cargando '+(etq[m.media_tipo]||'archivo')+'…</div></div>'+cap;
+        } else { cont = esc(m.mensaje || ''); }
+        return `<div class="msg ${m.direccion === 'saliente' ? 'saliente' : 'entrante'}">
+          ${cont}
           <div class="msg-tiempo">${new Date(m.timestamp).toLocaleTimeString('es-MX', {hour:'2-digit',minute:'2-digit'})}</div>
-        </div>
-      `).join('') : '<div class="empty-state">Sin mensajes</div>'}
+        </div>`;
+      }).join('') : '<div class="empty-state">Sin mensajes</div>'}
     </div>
   `;
   const mc = document.getElementById('mensajesContainer');
   if (mc) mc.scrollTop = mc.scrollHeight;
+  cargarMediaVisibles();
+}
+// Descarga los adjuntos visibles vía el proxy /api/media/:id y los pinta como blob.
+function cargarMediaVisibles(){
+  document.querySelectorAll('.media-wrap[data-mid]:not([data-cargado])').forEach(function(w){
+    var id=w.getAttribute('data-mid'), tipo=w.getAttribute('data-mtipo');
+    w.setAttribute('data-cargado','1');
+    fetch('/api/media/'+id,{headers:{Authorization:'Bearer '+TOKEN}})
+    .then(function(r){ if(!r.ok) throw new Error('no'); return r.blob(); })
+    .then(function(b){
+      var u=URL.createObjectURL(b);
+      if(tipo==='image'||tipo==='sticker') w.innerHTML='<img src="'+u+'" style="max-width:240px;max-height:300px;border-radius:8px;display:block;cursor:pointer" onclick="window.open(this.src)">';
+      else if(tipo==='video') w.innerHTML='<video src="'+u+'" controls style="max-width:240px;border-radius:8px;display:block"></video>';
+      else if(tipo==='audio') w.innerHTML='<audio src="'+u+'" controls style="max-width:220px"></audio>';
+      else w.innerHTML='<a href="'+u+'" download style="color:#53bdeb;text-decoration:none">📄 Descargar documento</a>';
+    })
+    .catch(function(){ w.innerHTML='<div style="font-size:12px;color:#8696a0">📎 Archivo no disponible</div>'; });
+  });
 }
 
 // ── USUARIOS ──

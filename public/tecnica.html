@@ -169,6 +169,10 @@
     <div class="gcal-section" id="gcalSection" style="display:none">
       <div class="gcal-header">
         <div class="gcal-titulo">📆 Google Calendar <span class="gcal-badge">Sincronizado</span></div>
+        <select id="filtroTecnica" onchange="cambiarFiltroTecnica()" style="display:none;background:#1a2e3d;color:#e9edef;border:1px solid #2a3942;border-radius:8px;padding:6px 10px;font-size:13px">
+          <option value="mias">Solo mis citas</option>
+          <option value="todas">Todas las citas</option>
+        </select>
       </div>
       <div id="gcalEventos"><div class="loading">Cargando eventos...</div></div>
     </div>
@@ -202,6 +206,42 @@ if (USER.rol !== 'tecnica' && USER.rol !== 'admin') window.location.href = '/';
 
 document.getElementById('nombreUsuario').textContent = USER.nombre || 'Técnica';
 document.getElementById('sucursalNombre').textContent = USER.sucursal || 'Sin sucursal asignada';
+
+// ── Identificar de quién es cada cita ──────────────────────────────
+// En Google Calendar el título termina con el "tag" de la técnica tras un
+// guion: "Elvira Trejo-Naim", "Maria Velazquez-Bel". Cada técnica ve solo
+// las suyas (su primer nombre calza con el tag); admin ve todas. El toggle
+// permite ver todas por si alguna cita quedó sin etiquetar.
+let verSoloMias = USER.rol === 'tecnica';
+function normalizaTxt(s){
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+}
+function tagTecnico(summary){
+  const partes = String(summary || '').split('-');
+  if (partes.length < 2) return '';
+  return normalizaTxt(partes[partes.length - 1]);
+}
+function esMiCita(summary){
+  const tag = tagTecnico(summary);
+  if (!tag) return true;            // sin tag reconocible: no se le oculta a nadie
+  const primer = normalizaTxt(String(USER.nombre || '').split(/\s+/)[0]);
+  if (!primer) return false;
+  return primer.startsWith(tag) || tag.startsWith(primer);
+}
+function filtrarEventos(eventos){
+  return verSoloMias ? (eventos || []).filter(e => esMiCita(e.summary)) : (eventos || []);
+}
+function cambiarFiltroTecnica(){
+  verSoloMias = document.getElementById('filtroTecnica').value === 'mias';
+  if (window._gcalFi) cargarGoogleCalendar(window._gcalFi, window._gcalFf);
+  if (typeof cargarSemana === 'function' && document.getElementById('tab-semana').classList.contains('active')) cargarSemana();
+}
+(function initFiltroTecnica(){
+  const f = document.getElementById('filtroTecnica');
+  if (!f) return;
+  f.style.display = USER.rol === 'tecnica' ? '' : 'none';
+  f.value = verSoloMias ? 'mias' : 'todas';
+})();
 
 const hoy = new Date();
 document.getElementById('fechaHoyTitulo').textContent = hoy.toLocaleDateString('es-MX', {
@@ -306,9 +346,19 @@ async function cargarGoogleCalendar(fi, ff) {
 
   if (!data.configurado) { section.style.display = 'none'; return; }
   section.style.display = 'block';
+  window._gcalFi = fi; window._gcalFf = ff;
 
-  if (!data.eventos || !data.eventos.length) {
-    el.innerHTML = '<div class="gcal-empty">Sin eventos en Google Calendar para hoy</div>'; return;
+  const todos = data.eventos || [];
+  const eventos = filtrarEventos(todos);
+  const ocultas = todos.length - eventos.length;
+
+  if (!eventos.length) {
+    el.innerHTML = '<div class="gcal-empty">' +
+      (verSoloMias && ocultas > 0
+        ? 'No tienes citas para hoy. Hay ' + ocultas + ' de otras técnicas — cambia el filtro a “Todas” para verlas.'
+        : 'Sin eventos en Google Calendar para hoy') +
+      '</div>';
+    return;
   }
 
   // Estados de asistencia (palomeo) del día
@@ -318,7 +368,10 @@ async function cargarGoogleCalendar(fi, ff) {
   window._asisMapa = mapa;
   window._gcalHoy = {};
 
-  el.innerHTML = data.eventos.map(e => {
+  const aviso = (verSoloMias && ocultas > 0)
+    ? `<div class="gcal-empty" style="padding:8px 0 12px">Mostrando tus ${eventos.length} cita(s). ${ocultas} de otras técnicas ocultas.</div>`
+    : '';
+  el.innerHTML = aviso + eventos.map(e => {
     const inicio = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString('es-MX', {hour:'2-digit',minute:'2-digit'}) : (e.start?.date || '');
     const fin = e.end?.dateTime ? new Date(e.end.dateTime).toLocaleTimeString('es-MX', {hour:'2-digit',minute:'2-digit'}) : '';
     const fecha = (e.start?.dateTime || '').split('T')[0] || fi;
@@ -385,9 +438,9 @@ async function cargarSemana() {
   const citas = await api(`/api/citas?fecha_inicio=${fi}&fecha_fin=${ff}`);
   citasSemana = Array.isArray(citas) ? citas : [];
 
-  // Cargar también Google Calendar para la semana
+  // Cargar también Google Calendar para la semana (solo las de la técnica activa)
   const gcal = await api(`/api/google-calendar/eventos?fecha_inicio=${fi}&fecha_fin=${ff}`);
-  const eventosGcal = gcal.configurado ? (gcal.eventos || []) : [];
+  const eventosGcal = gcal.configurado ? filtrarEventos(gcal.eventos || []) : [];
 
   const el = document.getElementById('diasSemana');
   el.innerHTML = dias.map((d, i) => {

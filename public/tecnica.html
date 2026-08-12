@@ -86,6 +86,15 @@
   .gcal-nombre { font-size: 13px; font-weight: 600; }
   .gcal-desc { font-size: 12px; color: #8696a0; margin-top: 2px; }
   .gcal-empty { color: #8696a0; font-size: 13px; text-align: center; padding: 20px; }
+  .gcal-evento { border-left: 3px solid transparent; padding-left: 10px; }
+  .gcal-evento.asis-asistio { border-left-color: #25d366; }
+  .gcal-evento.asis-no_asistio { border-left-color: #e74c3c; }
+  .asis-btns { display: flex; gap: 6px; align-items: center; margin-left: auto; }
+  .asis-btn { border: 1px solid #2a3942; background: transparent; color: #8696a0; border-radius: 7px; padding: 6px 10px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .asis-btn:active { transform: scale(0.96); }
+  .asis-btn.vino.on { background: #0b6b3a; border-color: #0b6b3a; color: #fff; }
+  .asis-btn.novino.on { background: #8b2e2e; border-color: #8b2e2e; color: #fff; }
+  @media (max-width: 640px) { .asis-btn { padding: 8px 10px; } .gcal-evento { flex-wrap: wrap; } }
   .gcal-no-config { text-align: center; padding: 20px; }
   .gcal-no-config p { color: #8696a0; font-size: 13px; }
 
@@ -208,6 +217,10 @@ function api(path, opts = {}) {
 
 function logout() { localStorage.clear(); window.location.href = '/'; }
 
+// Fecha local YYYY-MM-DD sin pasar por UTC. Usar toISOString() aqui corre el dia
+// en la noche (Mexico -06): la hora de la tarde ya es el dia siguiente en UTC.
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+
 function switchTab(tab, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -219,7 +232,7 @@ function switchTab(tab, el) {
 
 // ── HOY ──
 async function cargarHoy() {
-  const fechaHoy = new Date().toISOString().split('T')[0];
+  const fechaHoy = ymd(new Date());
   const citas = await api(`/api/citas?fecha_inicio=${fechaHoy}&fecha_fin=${fechaHoy}`);
   const lista = Array.isArray(citas) ? citas : [];
 
@@ -264,7 +277,7 @@ async function cargarHoy() {
 async function marcarCompletada(id) {
   const cita = { estado: 'completada' };
   // Obtener datos actuales de la cita
-  const fechaHoy = new Date().toISOString().split('T')[0];
+  const fechaHoy = ymd(new Date());
   const citas = await api(`/api/citas?fecha_inicio=${fechaHoy}&fecha_fin=${fechaHoy}`);
   const c = (Array.isArray(citas) ? citas : []).find(x => x.id === id);
   if (!c) return;
@@ -298,19 +311,46 @@ async function cargarGoogleCalendar(fi, ff) {
     el.innerHTML = '<div class="gcal-empty">Sin eventos en Google Calendar para hoy</div>'; return;
   }
 
+  // Estados de asistencia (palomeo) del día
+  const asis = await api(`/api/asistencias?fecha=${fi}`);
+  const mapa = {};
+  (Array.isArray(asis) ? asis : []).forEach(a => { mapa[a.event_id] = a.estado; });
+  window._asisMapa = mapa;
+  window._gcalHoy = {};
+
   el.innerHTML = data.eventos.map(e => {
     const inicio = e.start?.dateTime ? new Date(e.start.dateTime).toLocaleTimeString('es-MX', {hour:'2-digit',minute:'2-digit'}) : (e.start?.date || '');
     const fin = e.end?.dateTime ? new Date(e.end.dateTime).toLocaleTimeString('es-MX', {hour:'2-digit',minute:'2-digit'}) : '';
+    const fecha = (e.start?.dateTime || '').split('T')[0] || fi;
+    const est = mapa[e.id] || '';
+    window._gcalHoy[e.id] = { cliente: e.summary || '', servicio: '', hora: inicio, fecha };
     return `
-      <div class="gcal-evento">
+      <div class="gcal-evento asis-${est}">
         <div class="gcal-hora">${inicio}${fin ? ' – ' + fin : ''}</div>
-        <div>
+        <div style="flex:1">
           <div class="gcal-nombre">${e.summary || 'Sin título'}</div>
           ${e.description ? `<div class="gcal-desc">${e.description}</div>` : ''}
+        </div>
+        <div class="asis-btns">
+          <button class="asis-btn vino ${est==='asistio'?'on':''}" onclick="marcarAsistencia('${e.id}','asistio')">✓ Vino</button>
+          <button class="asis-btn novino ${est==='no_asistio'?'on':''}" onclick="marcarAsistencia('${e.id}','no_asistio')">✗ No vino</button>
         </div>
       </div>
     `;
   }).join('');
+}
+
+// Marca (o des-marca al re-tocar) la asistencia de una cita y refresca la vista.
+async function marcarAsistencia(eventId, estado) {
+  const info = (window._gcalHoy || {})[eventId] || {};
+  const actual = (window._asisMapa || {})[eventId] || '';
+  const nuevo = actual === estado ? '' : estado; // volver a tocar el mismo = limpiar
+  const r = await api('/api/asistencias', {
+    method: 'POST',
+    body: JSON.stringify({ event_id: eventId, fecha: info.fecha, cliente: info.cliente, servicio: info.servicio, hora: info.hora, estado: nuevo })
+  });
+  if (r && r.ok) cargarHoy();
+  else alert('No se pudo guardar: ' + (r && r.error ? r.error : 'error'));
 }
 
 // ── SEMANA ──
@@ -333,9 +373,9 @@ function navegarSemana(dir) { semanaOffset += dir; cargarSemana(); }
 
 async function cargarSemana() {
   const dias = getSemanaFechas();
-  const fi = dias[0].toISOString().split('T')[0];
-  const ff = dias[6].toISOString().split('T')[0];
-  const hoyStr = new Date().toISOString().split('T')[0];
+  const fi = ymd(dias[0]);
+  const ff = ymd(dias[6]);
+  const hoyStr = ymd(new Date());
   const diasNombres = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
 
   document.getElementById('semanaTitulo').textContent =
@@ -351,7 +391,7 @@ async function cargarSemana() {
 
   const el = document.getElementById('diasSemana');
   el.innerHTML = dias.map((d, i) => {
-    const fechaStr = d.toISOString().split('T')[0];
+    const fechaStr = ymd(d);
     const esHoy = fechaStr === hoyStr;
     const citasDia = citasSemana.filter(c => c.fecha === fechaStr);
     const gcalDia = eventosGcal.filter(e => {

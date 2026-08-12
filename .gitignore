@@ -6,3 +6,4 @@ whatsapp.db
 *.bak2
 public/uploads/
 *.bak.*
+gcal-sa.json

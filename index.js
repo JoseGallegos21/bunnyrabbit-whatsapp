@@ -73,6 +73,10 @@ db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS facebook_capi_config (id INTEGER PRIMARY KEY AUTOINCREMENT, pixel_id TEXT, access_token TEXT, test_event_code TEXT, api_version TEXT DEFAULT 'v21.0', triggers TEXT DEFAULT '[]', activo INTEGER DEFAULT 1, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
   db.run(`CREATE TABLE IF NOT EXISTS facebook_capi_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, contacto_nombre TEXT, contacto_telefono TEXT, evento_tipo TEXT, etapa TEXT, event_id TEXT, status_code INTEGER, respuesta TEXT, numero_id TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
   db.run(`CREATE TABLE IF NOT EXISTS google_calendar_config (id INTEGER PRIMARY KEY AUTOINCREMENT, sucursal TEXT UNIQUE, calendar_id TEXT, access_token TEXT, refresh_token TEXT, activo INTEGER DEFAULT 1)`);
+  // Asistencia por cita (palomeo Vino/No vino). Base del sistema de cortes del
+  // recepcionista. event_id = id del evento de Google (o 'cita:<id>' para citas
+  // nativas). monto/metodo_pago quedan listos para la fase de corte de caja.
+  db.run(`CREATE TABLE IF NOT EXISTS asistencias (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT UNIQUE, sucursal TEXT, fecha TEXT, cliente TEXT, servicio TEXT, hora TEXT, estado TEXT, monto REAL, metodo_pago TEXT, tecnica_id INTEGER, marcado_por INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
 
   // Tarifas de Meta por pais y categoria (USD por mensaje entregado).
   // Editables: Meta actualiza su tarifario y dejarlas fijas seria garantizar numeros viejos.
@@ -776,24 +780,36 @@ async function coexProcesarStateSync(value) {
 // registramos el progreso en la tabla numeros para poder mostrarlo en el panel.
 async function coexProcesarHistorial(value) {
   try {
+    // LOG CRUDO TEMPORAL para afinar el parseo contra el payload real de Meta.
+    console.log('[COEX] RAW history:', JSON.stringify(value).slice(0, 1500));
     const numero_id = value?.metadata?.phone_number_id;
-    const threads = value?.history || value?.threads || [];
     let guardados = 0;
-    for (const th of threads) {
-      const mensajes = th.messages || [];
-      for (const m of mensajes) {
-        const deMi = (m.history_context && m.history_context.from_me) || m.from === numero_id;
-        const telefono = deMi ? (m.to || th.id || m.recipient_id) : m.from;
-        if (!telefono) continue;
-        const { texto } = textoDeMensaje(m);
-        let ts = null;
-        if (m.timestamp) { const d = new Date(Number(m.timestamp) * 1000); if (!isNaN(d)) ts = d.toISOString().slice(0, 19).replace('T', ' '); }
-        db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, timestamp, origen) VALUES (?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP),?)',
-          [numero_id, telefono, texto, deMi ? 'saliente' : 'entrante', ts, 'historial']);
-        guardados++;
+    let prog = value?.metadata?.progress ?? value?.progress ?? null;
+    const guarda = (telefono, m, deMi) => {
+      if (!telefono) return;
+      const { texto } = textoDeMensaje(m);
+      let ts = null;
+      if (m.timestamp) { const d = new Date(Number(m.timestamp) * 1000); if (!isNaN(d)) ts = d.toISOString().slice(0, 19).replace('T', ' '); }
+      db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, timestamp, origen) VALUES (?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP),?)',
+        [numero_id, telefono, texto, deMi ? 'saliente' : 'entrante', ts, 'historial']);
+      db.run(`INSERT INTO contactos (telefono, numero_id, etapa, prioridad, origen) VALUES (?, ?, 'Nuevo', 'Media', 'historial') ON CONFLICT(telefono) DO NOTHING`, [telefono, numero_id]);
+      guardados++;
+    };
+    // Forma A (documentada): value.history = chunks -> threads -> messages
+    for (const chunk of (Array.isArray(value?.history) ? value.history : [])) {
+      if (chunk?.metadata?.progress != null) prog = chunk.metadata.progress;
+      const threads = chunk?.threads || (chunk?.messages ? [chunk] : []);
+      for (const th of threads) {
+        const cliente = th.id || th.thread_id || th.wa_id;
+        for (const m of (th.messages || [])) {
+          const deMi = (m.history_context && m.history_context.from_me) || m.from === numero_id;
+          guarda(cliente || (deMi ? (m.to || m.recipient_id) : m.from), m, deMi);
+        }
       }
     }
-    const prog = value?.metadata?.progress ?? value?.progress;
+    // Forma B (la que manda Meta aqui): messages/message_echoes directo en value
+    for (const m of (value.messages || [])) guarda(m.from, m, false);          // entrantes pasados
+    for (const m of (value.message_echoes || [])) guarda(m.to || m.recipient_id, m, true); // salientes pasados
     if (numero_id && prog != null) {
       db.run("UPDATE numeros SET sync_progreso=?, sync_estado=CASE WHEN ?>=100 THEN 'listo' ELSE 'sincronizando' END WHERE phone_number_id=?", [Number(prog), Number(prog), numero_id]);
     }
@@ -813,6 +829,11 @@ app.post('/webhook', verificarFirmaMeta, (req, res) => {
         const value = cambio?.value;
         if (!value) continue;
         const numero_id = value.metadata?.phone_number_id;
+        // HISTORIAL de coexistencia: llega bajo field 'history' con messages y/o
+        // message_echoes de conversaciones PASADAS. Se procesa SOLO como historial
+        // y se corta aqui para no mezclarlo con el trafico en vivo (evita que el
+        // handler de echoes lo re-guarde como 'celular').
+        if (field === 'history' || value.history) { coexLogPrimeraVez('history', value); coexProcesarHistorial(value); continue; }
         // Mensajes entrantes (puede venir mas de uno)
         for (const msg of (value.messages || [])) {
           const telefono = msg.from;
@@ -827,10 +848,9 @@ app.post('/webhook', verificarFirmaMeta, (req, res) => {
         for (const st of (value.statuses || [])) {
           if (st.status === 'failed') wfRutearUndelivered(st.id).catch(err => console.error('[WF] rutear undelivered:', err.message));
         }
-        // Coexistencia: mensajes del celular, contactos e historial sincronizado
+        // Coexistencia (trafico en vivo): mensajes del celular y contactos
         if (field === 'smb_message_echoes' || value.message_echoes) { coexLogPrimeraVez('smb_message_echoes', value); coexProcesarEchoes(value); }
         if (field === 'smb_app_state_sync' || value.state_sync)    { coexLogPrimeraVez('smb_app_state_sync', value); coexProcesarStateSync(value); }
-        if (field === 'history' || value.history)                  { coexLogPrimeraVez('history', value); coexProcesarHistorial(value); }
       }
     }
   } catch (err) {
@@ -1938,9 +1958,12 @@ app.get('/api/google-calendar/eventos', auth, (req, res) => {
     if (!config) return res.json({ eventos: [], configurado: false });
 
     const { fecha_inicio, fecha_fin } = req.query;
-    const timeMin = fecha_inicio ? new Date(fecha_inicio).toISOString() : new Date().toISOString();
+    // Interpretamos fecha_inicio/fecha_fin como DIAS LOCALES de Mexico (-06:00), que
+    // es la zona de los calendarios. Asi cubrimos el dia completo y no cortamos los
+    // eventos de la tarde/noche del ultimo dia (que en UTC caerian fuera del rango).
+    const timeMin = fecha_inicio ? new Date(fecha_inicio + 'T00:00:00-06:00').toISOString() : new Date().toISOString();
     const timeMax = fecha_fin
-      ? new Date(fecha_fin + 'T23:59:59').toISOString()
+      ? new Date(fecha_fin + 'T23:59:59-06:00').toISOString()
       : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
     const pedir = async (accessToken) => {
@@ -2051,6 +2074,42 @@ app.post('/api/google-calendar/config', auth, requireRole('admin'), (req, res) =
       if (err) return res.status(500).json({ error: err.message });
       res.json({ ok: true });
     }
+  );
+});
+
+// ── ASISTENCIAS (palomeo Vino / No vino) ───────────────────────────────────
+// Base del sistema de cortes del recepcionista. La tecnica marca en "Mis citas
+// de hoy" si la clienta asistio. Como los eventos de Google son de solo lectura,
+// el estado se guarda aqui, ligado al id del evento (event_id).
+app.get('/api/asistencias', auth, (req, res) => {
+  const sucursal = (req.user.rol === 'tecnica' || req.user.rol === 'recepcionista')
+    ? req.user.sucursal : req.query.sucursal;
+  if (!sucursal) return res.status(400).json({ error: 'Sucursal requerida' });
+  const cond = ['sucursal = ?']; const params = [sucursal];
+  if (req.query.fecha) { cond.push('fecha = ?'); params.push(req.query.fecha); }
+  db.all(`SELECT event_id, fecha, cliente, servicio, hora, estado, monto, metodo_pago, tecnica_id FROM asistencias WHERE ${cond.join(' AND ')}`,
+    params, (e, rows) => e ? res.status(500).json({ error: e.message }) : res.json(rows || []));
+});
+
+app.post('/api/asistencias', auth, requireRole('tecnica', 'recepcionista', 'admin', 'supervisor'), (req, res) => {
+  const { event_id, fecha, cliente, servicio, hora, estado } = req.body;
+  if (!event_id) return res.status(400).json({ error: 'event_id requerido' });
+  const sucursal = (req.user.rol === 'tecnica' || req.user.rol === 'recepcionista')
+    ? req.user.sucursal : (req.body.sucursal || null);
+  // Estado vacio = des-marcar (borrar la fila)
+  if (!estado) {
+    return db.run('DELETE FROM asistencias WHERE event_id = ?', [event_id],
+      err => err ? res.status(500).json({ error: err.message }) : res.json({ ok: true, estado: null }));
+  }
+  if (!['asistio', 'no_asistio'].includes(estado)) return res.status(400).json({ error: 'Estado invalido' });
+  const tecnicaId = req.user.rol === 'tecnica' ? req.user.id : null;
+  db.run(
+    `INSERT INTO asistencias (event_id, sucursal, fecha, cliente, servicio, hora, estado, tecnica_id, marcado_por, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+     ON CONFLICT(event_id) DO UPDATE SET estado=excluded.estado, fecha=excluded.fecha, cliente=excluded.cliente,
+       servicio=excluded.servicio, hora=excluded.hora, marcado_por=excluded.marcado_por, updated_at=CURRENT_TIMESTAMP`,
+    [event_id, sucursal, fecha || null, cliente || null, servicio || null, hora || null, estado, tecnicaId, req.user.id],
+    err => err ? res.status(500).json({ error: err.message }) : res.json({ ok: true, estado })
   );
 });
 

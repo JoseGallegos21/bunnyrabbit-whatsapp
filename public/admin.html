@@ -2763,10 +2763,12 @@ window.escanearPasswords = (function(){
     wrap.style.cssText='position:relative;display:block;width:100%;margin:'+cs.margin;
     inp.parentNode.insertBefore(wrap, inp);
     wrap.appendChild(inp);
-    inp.style.margin='0'; inp.style.width='100%'; inp.style.boxSizing='border-box'; inp.style.paddingRight='32px';
+    inp.style.margin='0'; inp.style.width='100%'; inp.style.boxSizing='border-box'; inp.style.paddingRight='44px';
     var b=document.createElement('button');
     b.type='button'; b.tabIndex=-1; b.title='Mostrar u ocultar contraseña'; b.textContent='👁';
-    b.style.cssText='position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:16px;opacity:.55;padding:0;line-height:1';
+    // Columna fija de 40px pegada a la orilla derecha, de alto completo: el ojo
+    // siempre queda al final y no invade la zona donde se escribe.
+    b.style.cssText='position:absolute;top:0;right:0;height:100%;width:40px;display:flex;align-items:center;justify-content:center;background:none;border:none;cursor:pointer;font-size:16px;opacity:.55;padding:0;line-height:1;z-index:2';
     b.onclick=function(){ var oculto=inp.type==='password'; inp.type=oculto?'text':'password'; b.style.opacity=oculto?'1':'.55'; };
     wrap.appendChild(b);
   }

@@ -150,6 +150,17 @@
     <div class="metricas-grid" id="metricasGrid">
       <div class="loading">Cargando métricas...</div>
     </div>
+
+    <div class="section-title">Contabilidad por periodo</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+      <span style="font-size:13px;color:#8696a0">Periodo:</span>
+      <input type="date" id="convFI" class="filter-input" style="padding:6px 8px" onchange="cargarConvMetricas()">
+      <span style="font-size:13px;color:#8696a0">a</span>
+      <input type="date" id="convFF" class="filter-input" style="padding:6px 8px" onchange="cargarConvMetricas()">
+      <button class="btn-hoy" style="padding:6px 12px" onclick="limpiarConvRango()">Todo</button>
+    </div>
+    <div class="metricas-grid" id="convGrid" style="margin-bottom:20px"></div>
+
     <div class="section-title">Actividad por recepcionista</div>
     <div class="tabla-container">
       <table>
@@ -350,6 +361,39 @@ async function cargarMetricas() {
     <div class="metrica-card"><div class="valor" style="color:#2ecc71">${vino}</div><div class="label">Atendidas</div></div>
     <div class="metrica-card"><div class="valor" style="color:#e74c3c">${noVino}</div><div class="label">No vino</div></div>
   `;
+  cargarConvMetricas();
+  cargarActividadRecepcionistas(data);
+}
+
+// Métricas por CONVERSACIÓN (clientes que escribieron) con rango de fechas,
+// scoped al número de la sucursal del supervisor (o todos para admin).
+let _sucNumCache = null;
+async function numeroDeSucursalActual() {
+  if (!USER.sucursal) return USER.numero_id || '';
+  if (!_sucNumCache) { const d = await api('/api/sucursales'); _sucNumCache = Array.isArray(d) ? d : []; }
+  const s = _sucNumCache.find(x => x.nombre === USER.sucursal);
+  return s ? (s.phone_number_id || '') : '';
+}
+async function cargarConvMetricas() {
+  const fi = document.getElementById('convFI'), ff = document.getElementById('convFF');
+  const numId = await numeroDeSucursalActual();
+  const qs = [];
+  if (numId) qs.push('numero_id=' + encodeURIComponent(numId));
+  if (fi && fi.value) qs.push('fecha_inicio=' + fi.value);
+  if (ff && ff.value) qs.push('fecha_fin=' + ff.value);
+  const m = await api('/api/metricas/conversaciones' + (qs.length ? '?' + qs.join('&') : ''));
+  document.getElementById('convGrid').innerHTML = `
+    <div class="metrica-card"><div class="valor">${m.conversaciones || 0}</div><div class="label">Conversaciones</div></div>
+    <div class="metrica-card"><div class="valor" style="color:#2ecc71">${m.nuevas || 0}</div><div class="label">Nuevas</div></div>
+    <div class="metrica-card"><div class="valor" style="color:#3d85c8">${m.respondidas || 0}</div><div class="label">Respondidas</div></div>
+    <div class="metrica-card"><div class="valor" style="color:#f1c40f">${m.sin_leer || 0}</div><div class="label">Sin leer</div></div>`;
+}
+function limpiarConvRango() {
+  const fi = document.getElementById('convFI'), ff = document.getElementById('convFF');
+  if (fi) fi.value = ''; if (ff) ff.value = '';
+  cargarConvMetricas();
+}
+function cargarActividadRecepcionistas(data) {
   const tbody = document.getElementById('tablaRecepcionistas');
   if (!data.recepcionistas || !data.recepcionistas.length) {
     tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Sin recepcionistas registradas</td></tr>'; return;

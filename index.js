@@ -624,27 +624,34 @@ app.get('/api/metricas', auth, (req, res) => {
 // a cuántas se respondió y cuántas quedan sin leer. Acepta fecha_inicio/fecha_fin.
 app.get('/api/metricas/conversaciones', auth, (req, res) => {
   const numero_id = req.user.rol === 'supervisor' ? req.query.numero_id || null : req.user.numero_id;
-  const cond = [], params = [];
-  if (numero_id) { cond.push('numero_id = ?'); params.push(numero_id); }
+  // Base: numero + excluir leads de anuncios + rango de fechas.
+  const cond = ["(origen IS NULL OR origen != 'formulario_ads')"], params = [];
+  if (numero_id) { cond.unshift('numero_id = ?'); params.push(numero_id); }
   if (req.query.fecha_inicio) { cond.push('date(timestamp) >= date(?)'); params.push(req.query.fecha_inicio); }
   if (req.query.fecha_fin) { cond.push('date(timestamp) <= date(?)'); params.push(req.query.fecha_fin); }
-  const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
+  const where = 'WHERE ' + cond.join(' AND ');
+  // Conversaciones = clientes DISTINTOS que ESCRIBIERON (entrante) en el periodo,
+  // no envíos salientes/difusiones. Sin leer = con entrantes sin leer.
   db.get(`SELECT
-      COUNT(DISTINCT contacto) as conversaciones,
-      COUNT(DISTINCT CASE WHEN direccion='saliente' THEN contacto END) as respondidas,
+      COUNT(DISTINCT CASE WHEN direccion='entrante' THEN contacto END) as conversaciones,
       COUNT(DISTINCT CASE WHEN leido=0 AND direccion='entrante' THEN contacto END) as sin_leer
     FROM mensajes ${where}`, params, (err, row) => {
     if (err) return res.status(500).json({ error: err.message });
-    // Nuevas: conversaciones cuyo PRIMER mensaje histórico cae en el periodo.
-    const condN = [], paramsN = [];
-    if (numero_id) { condN.push('numero_id = ?'); paramsN.push(numero_id); }
-    const whereN = condN.length ? 'WHERE ' + condN.join(' AND ') : '';
-    const dCond = [], dParams = [];
-    if (req.query.fecha_inicio) { dCond.push('date(mn) >= date(?)'); dParams.push(req.query.fecha_inicio); }
-    if (req.query.fecha_fin) { dCond.push('date(mn) <= date(?)'); dParams.push(req.query.fecha_fin); }
-    const dWhere = dCond.length ? 'WHERE ' + dCond.join(' AND ') : '';
-    db.get(`SELECT COUNT(*) as nuevas FROM (SELECT contacto, MIN(timestamp) mn FROM mensajes ${whereN} GROUP BY contacto) ${dWhere}`,
-      paramsN.concat(dParams), (e2, r2) => res.json(Object.assign({ conversaciones: 0, respondidas: 0, sin_leer: 0, nuevas: 0 }, row || {}, r2 || {})));
+    // Respondidas = clientes que escribieron Y a quienes se les respondió (two-way) en el periodo.
+    db.get(`SELECT COUNT(*) as respondidas FROM (
+        SELECT contacto FROM mensajes ${where} GROUP BY contacto
+        HAVING SUM(CASE WHEN direccion='entrante' THEN 1 ELSE 0 END) > 0
+           AND SUM(CASE WHEN direccion='saliente' THEN 1 ELSE 0 END) > 0)`, params, (e2, r2) => {
+      // Nuevas: clientes cuyo PRIMER mensaje ENTRANTE cae en el periodo.
+      const nCond = ["(origen IS NULL OR origen != 'formulario_ads')", "direccion='entrante'"], nParams = [];
+      if (numero_id) { nCond.unshift('numero_id = ?'); nParams.push(numero_id); }
+      const dCond = [], dParams = [];
+      if (req.query.fecha_inicio) { dCond.push('date(mn) >= date(?)'); dParams.push(req.query.fecha_inicio); }
+      if (req.query.fecha_fin) { dCond.push('date(mn) <= date(?)'); dParams.push(req.query.fecha_fin); }
+      const dWhere = dCond.length ? 'WHERE ' + dCond.join(' AND ') : '';
+      db.get(`SELECT COUNT(*) as nuevas FROM (SELECT contacto, MIN(timestamp) mn FROM mensajes WHERE ${nCond.join(' AND ')} GROUP BY contacto) ${dWhere}`,
+        nParams.concat(dParams), (e3, r3) => res.json(Object.assign({ conversaciones: 0, respondidas: 0, sin_leer: 0, nuevas: 0 }, row || {}, r2 || {}, r3 || {})));
+    });
   });
 });
 
@@ -842,8 +849,13 @@ async function coexProcesarEchoes(value) {
       const telefono = m.to || m.recipient_id || m.from;
       if (!telefono) continue;
       const { texto } = textoDeMensaje(m);
-      db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, origen) VALUES (?,?,?,?,?)',
-        [numero_id, telefono, texto, 'saliente', 'celular']);
+      // Usar la fecha REAL del mensaje (m.timestamp en segundos). Antes se omitía y
+      // tomaba CURRENT_TIMESTAMP -> ecos de mensajes viejos contaban como de hoy e
+      // inflaban las métricas del día.
+      let tsEco = null;
+      if (m.timestamp) { const d = new Date(Number(m.timestamp) * 1000); if (!isNaN(d)) tsEco = d.toISOString().slice(0, 19).replace('T', ' '); }
+      db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, timestamp, origen) VALUES (?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP),?)',
+        [numero_id, telefono, texto, 'saliente', tsEco, 'celular']);
       db.run("INSERT INTO contactos (telefono, numero_id, etapa, prioridad, origen) VALUES (?,?,'Nuevo','Media','celular') ON CONFLICT(telefono) DO NOTHING", [telefono, numero_id]);
     }
   } catch (e) { console.error('[COEX] echoes:', e.message); }

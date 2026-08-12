@@ -231,6 +231,16 @@ function esMiCita(summary){
 function filtrarEventos(eventos){
   return verSoloMias ? (eventos || []).filter(e => esMiCita(e.summary)) : (eventos || []);
 }
+// Pinta los chips del encabezado a partir del palomeo de asistencia.
+function pintarContadores(total, pendientes, vino, noVino){
+  const c = document.getElementById('resumenChips');
+  if (!c) return;
+  c.innerHTML =
+    '<div class="chip"><span>' + total + '</span> citas totales</div>' +
+    '<div class="chip"><span style="color:#f39c12">' + pendientes + '</span> pendientes</div>' +
+    '<div class="chip"><span style="color:#2ecc71">' + vino + '</span> vino</div>' +
+    '<div class="chip"><span style="color:#e74c3c">' + noVino + '</span> no vino</div>';
+}
 function cambiarFiltroTecnica(){
   verSoloMias = document.getElementById('filtroTecnica').value === 'mias';
   if (window._gcalFi) cargarGoogleCalendar(window._gcalFi, window._gcalFf);
@@ -353,6 +363,7 @@ async function cargarGoogleCalendar(fi, ff) {
   const ocultas = todos.length - eventos.length;
 
   if (!eventos.length) {
+    pintarContadores(0, 0, 0, 0);
     el.innerHTML = '<div class="gcal-empty">' +
       (verSoloMias && ocultas > 0
         ? 'No tienes citas para hoy. Hay ' + ocultas + ' de otras técnicas — cambia el filtro a “Todas” para verlas.'
@@ -367,6 +378,11 @@ async function cargarGoogleCalendar(fi, ff) {
   (Array.isArray(asis) ? asis : []).forEach(a => { mapa[a.event_id] = a.estado; });
   window._asisMapa = mapa;
   window._gcalHoy = {};
+
+  // Contadores del encabezado según el palomeo (vino / no vino / pendientes).
+  const vino = eventos.filter(e => mapa[e.id] === 'asistio').length;
+  const noVino = eventos.filter(e => mapa[e.id] === 'no_asistio').length;
+  pintarContadores(eventos.length, eventos.length - vino - noVino, vino, noVino);
 
   const aviso = (verSoloMias && ocultas > 0)
     ? `<div class="gcal-empty" style="padding:8px 0 12px">Mostrando tus ${eventos.length} cita(s). ${ocultas} de otras técnicas ocultas.</div>`

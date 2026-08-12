@@ -180,7 +180,14 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
         <div class="main-tab" onclick="switchMainTab('contactos',this)"><i class="bx bx-group" aria-hidden="true"></i> Contactos</div>
         <div class="main-tab" onclick="switchMainTab('etiquetas',this)"><i class="bx bx-purchase-tag-alt" aria-hidden="true"></i> Etiquetas</div>
       </div>
-      <div id="userInfo" style="padding:6px 12px;font-size:12px;color:#667781;background:#f9f9f9;border-bottom:1px solid #eee"></div>
+      <div id="userInfo" style="padding:7px 12px;font-size:12px;color:#8696a0;background:#111b21;border-bottom:1px solid #2a3942;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+      <div id="metricsRango" style="display:flex;gap:6px;align-items:center;padding:6px 12px 0;font-size:11px;color:#8696a0;flex-wrap:wrap">
+        <span>Periodo:</span>
+        <input type="date" id="mFI" onchange="cargarMetricas()" style="background:#2a3942;color:#e9edef;border:1px solid #2a3942;border-radius:6px;padding:3px 6px;font-size:11px">
+        <span>a</span>
+        <input type="date" id="mFF" onchange="cargarMetricas()" style="background:#2a3942;color:#e9edef;border:1px solid #2a3942;border-radius:6px;padding:3px 6px;font-size:11px">
+        <button onclick="limpiarRangoMetricas()" style="background:none;border:none;color:#00a884;cursor:pointer;font-size:11px">Todo</button>
+      </div>
       <div class="metrics-bar" id="metricsBar"></div>
       <div class="filters" id="filtros"></div>
       <div class="search-box"><input type="text" id="buscar" placeholder="Buscar..."></div>
@@ -589,6 +596,7 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
 </div>
 <script>
 var token='',usuario={},mensajes=[],chatActivo=null,etiquetas=[],filtroEtapa='',iv=null;
+var mensajesConv=[],convTel=null; // historial COMPLETO de la conversación abierta
 // ===== PANEL HERRAMIENTAS =====
 
 
@@ -1535,7 +1543,8 @@ function aplicarSesion(){
   // recepcionista y admin se quedan en el chat principal
   document.getElementById('loginBox').style.display='none';
   document.getElementById('app').style.display='block';
-  document.getElementById('userInfo').textContent=usuario.nombre+' - '+(usuario.sucursal||'');
+  var _esc=function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');};
+  document.getElementById('userInfo').innerHTML='<span style="color:#e9edef;font-weight:600">'+_esc(usuario.nombre)+'</span> · '+_esc(usuario.sucursal||'sin sucursal');
   var sub = document.getElementById('userSubtitle');
   if(sub) sub.textContent = usuario.nombre + ' · ' + (usuario.sucursal||'');
   fetch('/api/respuestas',{headers:{Authorization:'Bearer '+token}}).then(function(r){return r.json()}).then(function(d){misRespuestas=d;});
@@ -1623,19 +1632,30 @@ function renderFiltros(){
 function cargarMensajes(){
   fetch('/api/mensajes',{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
-  .then(function(d){mensajes=d;renderChats();cargarMetricas();if(chatActivo)renderMensajes(chatActivo);});
+  .then(function(d){mensajes=d;renderChats();cargarMetricas();if(chatActivo)cargarConversacion(chatActivo);});
 }
 
 function cargarMetricas(){
-  fetch('/api/metricas',{headers:{Authorization:'Bearer '+token}})
+  var fi=document.getElementById('mFI'), ff=document.getElementById('mFF');
+  var qs=[];
+  if(fi&&fi.value)qs.push('fecha_inicio='+fi.value);
+  if(ff&&ff.value)qs.push('fecha_fin='+ff.value);
+  var url='/api/metricas'+(qs.length?'?'+qs.join('&'):'');
+  fetch(url,{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
   .then(function(m){
+    var conRango=(fi&&fi.value)||(ff&&ff.value);
     document.getElementById('metricsBar').innerHTML=
-      '<div class="metric"><span>'+(m.total||0)+'</span><span>Total</span></div>'+
+      '<div class="metric"><span>'+(m.total||0)+'</span><span>'+(conRango?'En periodo':'Total')+'</span></div>'+
       '<div class="metric"><span>'+(m.entrantes||0)+'</span><span>Recibidos</span></div>'+
       '<div class="metric"><span>'+(m.salientes||0)+'</span><span>Enviados</span></div>'+
       '<div class="metric"><span style="color:#ffeb3b">'+(m.no_leidos||0)+'</span><span>Sin leer</span></div>';
   });
+}
+function limpiarRangoMetricas(){
+  var fi=document.getElementById('mFI'), ff=document.getElementById('mFF');
+  if(fi)fi.value=''; if(ff)ff.value='';
+  cargarMetricas();
 }
 
 function renderChats(){
@@ -1713,7 +1733,8 @@ function abrirChat(tel){
     iniciarAtajoRespuestas();
     document.getElementById('msgInput').addEventListener('keypress',function(e){if(e.key==='Enter')enviar();});
     document.getElementById('btnEnviar').addEventListener('click',function(){enviar();});
-    renderMensajes(tel);
+    renderMensajes(tel);        // pinta rápido lo que haya mientras llega el historial
+    cargarConversacion(tel);    // trae el historial completo de esta conversación
   });
 }
 
@@ -1902,10 +1923,20 @@ function enviarSticker(url){
   if(chatActivo) enviarMensaje(chatActivo, '[imagen:'+url+']');
 }
 
+// Carga el historial COMPLETO de una conversación (hasta 1000 msgs) y lo pinta.
+// Antes el chat solo mostraba lo que cupiera en los últimos 100 mensajes globales.
+function cargarConversacion(tel){
+  fetch('/api/mensajes?contacto='+encodeURIComponent(tel),{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){ mensajesConv=Array.isArray(d)?d:[]; convTel=tel; if(chatActivo===tel)renderMensajes(tel); });
+}
 function renderMensajes(tel){
   var area=document.getElementById('mensajesArea');
   if(!area)return;
-  var msgs=mensajes.filter(function(m){return m.contacto===tel;}).sort(function(a,b){return new Date(a.timestamp)-new Date(b.timestamp);});
+  // Si ya tenemos el historial completo de esta conversación, lo usamos; si no,
+  // caemos a lo que haya en la lista global (mientras carga).
+  var base=(convTel===tel && mensajesConv.length) ? mensajesConv : mensajes.filter(function(m){return m.contacto===tel;});
+  var msgs=base.slice().sort(function(a,b){return new Date(a.timestamp)-new Date(b.timestamp);});
   var html='';
   var lastDate='';
   msgs.forEach(function(m){

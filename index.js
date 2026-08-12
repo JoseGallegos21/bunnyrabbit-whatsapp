@@ -556,10 +556,13 @@ app.get('/api/mensajes', auth, (req, res) => {
   const numero_id = req.user.rol === 'supervisor' ? req.query.numero_id : req.user.numero_id;
   const cond = [], params = [];
   if (numero_id) { cond.push('numero_id = ?'); params.push(numero_id); }
+  // Con ?contacto=<tel> se pide el historial COMPLETO de esa conversación (hasta
+  // 1000 mensajes). Sin él, se devuelve la lista reciente para la barra lateral.
+  if (req.query.contacto) { cond.push('contacto = ?'); params.push(req.query.contacto); }
   // Los leads autogenerados por anuncios se ocultan salvo que se pidan con ?incluir_formulario=1
   if (req.query.incluir_formulario !== '1') cond.push("(origen IS NULL OR origen != 'formulario_ads')");
   const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
-  const limit = numero_id ? 100 : 200;
+  const limit = req.query.contacto ? 1000 : (numero_id ? 100 : 200);
   db.all(`SELECT * FROM mensajes ${where} ORDER BY timestamp DESC LIMIT ${limit}`, params, (err, rows) => res.json(rows || []));
 });
 
@@ -578,8 +581,12 @@ app.get('/api/numeros', auth, (req, res) => {
 
 app.get('/api/metricas', auth, (req, res) => {
   const numero_id = req.user.rol === 'supervisor' ? req.query.numero_id || null : req.user.numero_id;
-  const where = numero_id ? 'WHERE numero_id = ?' : '';
-  const params = numero_id ? [numero_id] : [];
+  const cond = [], params = [];
+  if (numero_id) { cond.push('numero_id = ?'); params.push(numero_id); }
+  // Rango de fechas opcional (contabilidad por periodo). Se compara por día local.
+  if (req.query.fecha_inicio) { cond.push('date(timestamp) >= date(?)'); params.push(req.query.fecha_inicio); }
+  if (req.query.fecha_fin) { cond.push('date(timestamp) <= date(?)'); params.push(req.query.fecha_fin); }
+  const where = cond.length ? 'WHERE ' + cond.join(' AND ') : '';
   db.get(`SELECT COUNT(*) as total, SUM(CASE WHEN direccion='entrante' THEN 1 ELSE 0 END) as entrantes, SUM(CASE WHEN direccion='saliente' THEN 1 ELSE 0 END) as salientes, SUM(CASE WHEN leido=0 AND direccion='entrante' THEN 1 ELSE 0 END) as no_leidos FROM mensajes ${where}`, params, (err, row) => res.json(row || {}));
 });
 

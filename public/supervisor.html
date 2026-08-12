@@ -140,6 +140,9 @@
 
 <div class="content">
 
+  <!-- ALERTAS: técnicas que no pueden acudir (siempre visible) -->
+  <div id="alertasNoPuede" style="display:none;margin-bottom:20px"></div>
+
   <!-- TAB MÉTRICAS -->
   <div class="tab-panel active" id="tab-metricas">
     <div class="metricas-grid" id="metricasGrid">
@@ -630,9 +633,45 @@ async function rechazarSolicitud(id){
   if(r && r.ok){ cargarSolicitudes(); } else alert('Error al rechazar la solicitud.');
 }
 
+// ── Alertas: técnicas que avisaron que NO pueden acudir ────────────
+function _escAl(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+async function cargarAlertasNoPuede(){
+  let arr;
+  try { arr = await api('/api/confirmaciones/alertas'); } catch(e) { return; }
+  const cont = document.getElementById('alertasNoPuede');
+  if (!cont) return;
+  const lista = Array.isArray(arr) ? arr.filter(a => !a.visto_gerente) : [];
+  if (!lista.length) { cont.style.display = 'none'; cont.innerHTML = ''; return; }
+  cont.style.display = 'block';
+  cont.innerHTML =
+    '<div style="background:#3a1e1e;border:1px solid #8b2e2e;border-radius:12px;padding:16px">' +
+      '<div style="font-weight:700;color:#ff8b8b;margin-bottom:6px">⚠️ Técnicas que no pueden acudir (' + lista.length + ')</div>' +
+      lista.map(a => {
+        const fecha = new Date(a.fecha + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
+        const tel = String(a.telefono || '').replace(/\D/g, '');
+        const telFull = tel.length === 10 ? '52' + tel : tel;
+        const wa = tel ? 'https://wa.me/' + telFull + '?text=' + encodeURIComponent('Hola ' + (a.usuario_nombre || '') + ', vi que no podrás acudir el ' + fecha + '. ¿Lo vemos?') : '';
+        return '<div style="display:flex;gap:12px;align-items:center;padding:10px 0;border-top:1px solid #5a2a2a">' +
+          '<div style="flex:1">' +
+            '<div style="font-weight:600">' + _escAl(a.usuario_nombre || 'Técnica') + ' — <span style="color:#ffb4b4;text-transform:capitalize">' + fecha + '</span></div>' +
+            (a.motivo ? '<div style="font-size:13px;color:#e9c0c0;margin-top:2px">“' + _escAl(a.motivo) + '”</div>' : '<div style="font-size:12px;color:#c99">Sin motivo</div>') +
+          '</div>' +
+          (wa ? '<a href="' + wa + '" target="_blank" rel="noopener" style="background:#0b6b3a;color:#fff;text-decoration:none;padding:8px 12px;border-radius:8px;font-size:13px;white-space:nowrap">💬 WhatsApp</a>' : '<span style="font-size:11px;color:#c99">Sin teléfono</span>') +
+          '<button onclick="marcarAlertaVista(' + a.id + ')" style="background:#2a3942;color:#e9edef;border:none;padding:8px 12px;border-radius:8px;font-size:13px;cursor:pointer">Visto</button>' +
+        '</div>';
+      }).join('') +
+    '</div>';
+}
+async function marcarAlertaVista(id){
+  try { await api('/api/confirmaciones/' + id + '/visto', { method: 'POST' }); } catch(e) {}
+  cargarAlertasNoPuede();
+}
+
 // Init
 cargarMetricas();
 cargarSolicitudes(); // para mostrar el aviso de pendientes desde el inicio
+cargarAlertasNoPuede();
+setInterval(cargarAlertasNoPuede, 60000);
 </script>
 <script>
 // Ojito para ver/ocultar contraseñas en todos los campos type=password

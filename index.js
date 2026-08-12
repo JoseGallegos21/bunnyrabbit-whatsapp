@@ -77,6 +77,9 @@ db.serialize(() => {
   // recepcionista. event_id = id del evento de Google (o 'cita:<id>' para citas
   // nativas). monto/metodo_pago quedan listos para la fase de corte de caja.
   db.run(`CREATE TABLE IF NOT EXISTS asistencias (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT UNIQUE, sucursal TEXT, fecha TEXT, cliente TEXT, servicio TEXT, hora TEXT, estado TEXT, monto REAL, metodo_pago TEXT, tecnica_id INTEGER, marcado_por INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  // Confirmacion por dia de la tecnica: si esta enterada y va a acudir, o si no
+  // puede (lo que genera una alerta para el gerente). Una fila por tecnica y dia.
+  db.run(`CREATE TABLE IF NOT EXISTS confirmaciones_dia (id INTEGER PRIMARY KEY AUTOINCREMENT, usuario_id INTEGER, usuario_nombre TEXT, sucursal TEXT, fecha TEXT, estado TEXT, motivo TEXT, visto_gerente INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(usuario_id, fecha))`);
 
   // Tarifas de Meta por pais y categoria (USD por mensaje entregado).
   // Editables: Meta actualiza su tarifario y dejarlas fijas seria garantizar numeros viejos.
@@ -2124,6 +2127,57 @@ app.get('/api/tecnicas', auth, (req, res) => {
 
 
 // ============================================
+// CONFIRMACIONES POR DÍA (técnica confirma / avisa que no puede)
+// ============================================
+
+// La técnica confirma que está enterada y acudirá ese día, o avisa que no puede
+// (esto último genera una alerta para el gerente/supervisor). Upsert por día.
+app.post('/api/confirmaciones', auth, requireRole('tecnica', 'admin'), (req, res) => {
+  const { fecha, estado, motivo } = req.body;
+  if (!fecha || !['confirmada', 'no_puede'].includes(estado)) return res.status(400).json({ error: 'Datos inválidos' });
+  db.run(
+    `INSERT INTO confirmaciones_dia (usuario_id, usuario_nombre, sucursal, fecha, estado, motivo, visto_gerente, updated_at)
+     VALUES (?,?,?,?,?,?,0,CURRENT_TIMESTAMP)
+     ON CONFLICT(usuario_id, fecha) DO UPDATE SET estado=excluded.estado, motivo=excluded.motivo,
+       visto_gerente=0, updated_at=CURRENT_TIMESTAMP`,
+    [req.user.id, req.user.nombre || null, req.user.sucursal || null, fecha, estado, motivo || null],
+    err => err ? res.status(500).json({ error: err.message }) : res.json({ ok: true, estado })
+  );
+});
+
+// La técnica consulta su propio estado de confirmación en un rango de fechas.
+app.get('/api/confirmaciones/mias', auth, requireRole('tecnica', 'admin'), (req, res) => {
+  const { fecha_inicio, fecha_fin } = req.query;
+  const cond = ['usuario_id = ?']; const params = [req.user.id];
+  if (fecha_inicio) { cond.push('fecha >= ?'); params.push(fecha_inicio); }
+  if (fecha_fin) { cond.push('fecha <= ?'); params.push(fecha_fin); }
+  db.all(`SELECT fecha, estado, motivo FROM confirmaciones_dia WHERE ${cond.join(' AND ')}`,
+    params, (e, rows) => e ? res.status(500).json({ error: e.message }) : res.json(rows || []));
+});
+
+// El gerente/supervisor ve las alertas de técnicas que NO pueden acudir (de hoy en
+// adelante), con el teléfono de la técnica para poder comunicarse por WhatsApp.
+app.get('/api/confirmaciones/alertas', auth, requireRole('supervisor', 'admin'), (req, res) => {
+  const hoy = new Date().toISOString().split('T')[0];
+  const cond = ["c.estado = 'no_puede'", 'c.fecha >= ?']; const params = [hoy];
+  if (req.user.rol === 'supervisor') { cond.push('c.sucursal = ?'); params.push(req.user.sucursal); }
+  else if (req.query.sucursal) { cond.push('c.sucursal = ?'); params.push(req.query.sucursal); }
+  db.all(`SELECT c.id, c.usuario_id, c.usuario_nombre, c.sucursal, c.fecha, c.motivo, c.visto_gerente, c.updated_at,
+                 u.telefono, u.email
+          FROM confirmaciones_dia c LEFT JOIN usuarios u ON u.id = c.usuario_id
+          WHERE ${cond.join(' AND ')} ORDER BY c.fecha, c.updated_at DESC`,
+    params, (e, rows) => e ? res.status(500).json({ error: e.message }) : res.json(rows || []));
+});
+
+// El gerente marca una alerta como atendida (deja de contar en el badge).
+app.post('/api/confirmaciones/:id/visto', auth, requireRole('supervisor', 'admin'), (req, res) => {
+  const cond = ['id = ?']; const params = [req.params.id];
+  if (req.user.rol === 'supervisor') { cond.push('sucursal = ?'); params.push(req.user.sucursal); }
+  db.run(`UPDATE confirmaciones_dia SET visto_gerente=1 WHERE ${cond.join(' AND ')}`,
+    params, err => err ? res.status(500).json({ error: err.message }) : res.json({ ok: true }));
+});
+
+// ============================================
 // CRON + NOTIFICACIONES WHATSAPP A TÉCNICAS
 // ============================================
 const cronJobs = require('node-cron');
@@ -2210,42 +2264,77 @@ async function notificarTecnicaCitaNueva(citaId) {
   }
 }
 
-// CRON — Recordatorio día anterior a las 8pm
+// Lee de Google Calendar los eventos de una sucursal para un día (YYYY-MM-DD),
+// interpretando el día en zona de México (-06:00), igual que el endpoint web.
+async function leerEventosCalendarioSucursal(sucursalNombre, fecha) {
+  const config = await new Promise(resolve =>
+    db.get(`SELECT * FROM google_calendar_config WHERE sucursal=? AND activo=1`, [sucursalNombre], (e, r) => resolve(r)));
+  if (!config || !config.calendar_id) return [];
+  const token = (await googleServiceToken()) || config.access_token;
+  if (!token) return [];
+  const timeMin = new Date(fecha + 'T00:00:00-06:00').toISOString();
+  const timeMax = new Date(fecha + 'T23:59:59-06:00').toISOString();
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendar_id)}/events?timeMin=${timeMin}&timeMax=${timeMax}&singleEvents=true&orderBy=startTime`;
+  try {
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const data = await r.json();
+    if (data.error) { console.error('[CRON] gcal', sucursalNombre, data.error.message); return []; }
+    return data.items || [];
+  } catch (e) { console.error('[CRON] gcal', sucursalNombre, e.message); return []; }
+}
+
+// El título de la cita termina con el "tag" de la técnica tras un guion
+// ("Maria Velazquez-Bel"). Mismo criterio de match que el frontend de tecnica.html.
+function _normTag(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, ''); }
+function eventoEsDeTecnica(summary, tecnicaNombre) {
+  const partes = String(summary || '').split('-');
+  if (partes.length < 2) return false;                 // sin tag no se atribuye en el recordatorio
+  const tag = _normTag(partes[partes.length - 1]);
+  const primer = _normTag(String(tecnicaNombre || '').split(/\s+/)[0]);
+  if (!tag || !primer) return false;
+  return primer.startsWith(tag) || tag.startsWith(primer);
+}
+
+// Fecha de mañana en zona de México (YYYY-MM-DD), robusta ante DST/UTC.
+function fechaMananaMx() {
+  const hoyMx = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Mexico_City', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const [Y, M, D] = hoyMx.split('-').map(Number);
+  return new Date(Date.UTC(Y, M - 1, D + 1)).toISOString().split('T')[0];
+}
+
+// CRON — Recordatorio la noche anterior (8pm MX) con las citas de mañana de
+// Google Calendar. A cada técnica se le mandan SOLO las suyas (match por tag).
 cronJobs.schedule('0 20 * * *', async () => {
-  console.log('[CRON] Enviando recordatorios noche...');
-  const manana = new Date();
-  manana.setDate(manana.getDate() + 1);
-  const fechaManana = manana.toISOString().split('T')[0];
+  const fechaManana = fechaMananaMx();
+  console.log('[CRON] Recordatorio 8pm para', fechaManana);
+  const sucursales = await new Promise(resolve =>
+    db.all(`SELECT nombre FROM sucursales WHERE activo=1`, [], (e, rows) => resolve(rows || [])));
 
-  db.all(`SELECT c.*, u.nombre as tecnica_nombre, ct.nombre as contacto_nombre
-          FROM citas c
-          LEFT JOIN usuarios u ON c.tecnica_id = u.id
-          LEFT JOIN contactos ct ON c.contacto_id = ct.id
-          WHERE c.fecha = ? AND c.estado = 'pendiente' AND c.tecnica_id IS NOT NULL
-          ORDER BY c.tecnica_id, c.hora_inicio`, [fechaManana], async (err, citas) => {
-    if (err || !citas.length) return;
+  for (const s of sucursales) {
+    const datos = await obtenerDatosSucursal(s.nombre);
+    if (!datos?.phone_number_id || !datos?.token) continue;
+    const eventos = await leerEventosCalendarioSucursal(s.nombre, fechaManana);
+    if (!eventos.length) continue;
+    const tecnicas = await new Promise(resolve =>
+      db.all(`SELECT id, nombre, telefono, numero_id FROM usuarios WHERE rol='tecnica' AND sucursal=?`, [s.nombre], (e, rows) => resolve(rows || [])));
+    const fechaTexto = new Date(fechaManana + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
 
-    // Agrupar por técnica
-    const porTecnica = {};
-    citas.forEach(c => {
-      if (!porTecnica[c.tecnica_id]) porTecnica[c.tecnica_id] = { nombre: c.tecnica_nombre, sucursal: c.sucursal, citas: [] };
-      porTecnica[c.tecnica_id].citas.push(c);
-    });
-
-    for (const [tecnicaId, data] of Object.entries(porTecnica)) {
-      const tecnica = await new Promise(resolve => db.get(`SELECT telefono, numero_id FROM usuarios WHERE id=?`, [tecnicaId], (err,r) => resolve(r)));
-      const telTecnica = tecnica?.telefono || tecnica?.numero_id;
-      if (!telTecnica) continue;
-      const sucursal = await obtenerDatosSucursal(data.sucursal);
-      if (!sucursal?.phone_number_id || !sucursal?.token) continue;
-
-      const fechaTexto = manana.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
-      const listaCitas = data.citas.map((c, i) => `${i+1}. ${c.hora_inicio?.slice(0,5)} — ${c.contacto_nombre || 'Sin nombre'} (${c.servicio || 'Sin especificar'})`).join('\n');
-      const mensaje = `🌙 *Recordatorio para mañana*\n\nHola ${data.nombre}, mañana *${fechaTexto}* tienes *${data.citas.length} cita${data.citas.length > 1 ? 's' : ''}*:\n\n${listaCitas}\n\n¡Que tengas una excelente jornada! 🌸`;
-
-      await enviarMensajeWhatsApp(sucursal.phone_number_id, sucursal.token, telTecnica, mensaje);
+    for (const t of tecnicas) {
+      const tel = t.telefono || t.numero_id;
+      if (!tel) continue;
+      const suyas = eventos.filter(e => eventoEsDeTecnica(e.summary, t.nombre));
+      if (!suyas.length) continue;
+      const lista = suyas.map((e, i) => {
+        const ini = e.start?.dateTime
+          ? new Date(e.start.dateTime).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Mexico_City' })
+          : 'Todo el día';
+        return `${i + 1}. ${ini} — ${e.summary || 'Cita'}`;
+      }).join('\n');
+      const mensaje = `🌙 *Recordatorio para mañana*\n\nHola ${t.nombre}, mañana *${fechaTexto}* tienes *${suyas.length} cita${suyas.length > 1 ? 's' : ''}*:\n\n${lista}\n\nEntra a la app para confirmar que estás enterada. Si no puedes acudir, avísale a tu gerente desde ahí. ¡Excelente jornada! 🌸`;
+      const r = await enviarMensajeWhatsApp(datos.phone_number_id, datos.token, tel, mensaje);
+      console.log(`[CRON] 8pm ${s.nombre} -> ${t.nombre}: ${r.ok ? 'enviado' : 'fallo ' + JSON.stringify(r.data || r.error)}`);
     }
-  });
+  }
 }, { timezone: 'America/Mexico_City' });
 
 // CRON — Recordatorio mismo día a las 7am

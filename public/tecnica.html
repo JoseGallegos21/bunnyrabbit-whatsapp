@@ -584,7 +584,44 @@ function abrirDiaModal(fechaStr){
         </div>
       `).join('');
   }
+
+  // Bloque de confirmación: solo la técnica, solo para hoy/futuro y si hay citas.
+  const hoyStr = ymd(new Date());
+  if (USER.rol === 'tecnica' && fechaStr >= hoyStr && items.length) {
+    el.innerHTML +=
+      '<div style="border-top:1px solid #1f2c34;margin-top:14px;padding-top:14px">' +
+        '<div style="font-size:13px;color:#8696a0;margin-bottom:10px">¿Estás enterada y vas a acudir este día?</div>' +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+          '<button id="btnConfirmo" onclick="confirmarDia(\'' + fechaStr + '\',\'confirmada\')" style="flex:1;min-width:130px;padding:11px;border:none;border-radius:10px;background:#0b6b3a;color:#fff;font-size:14px;font-weight:600;cursor:pointer;opacity:.6">✓ Sí voy a acudir</button>' +
+          '<button id="btnNoPuedo" onclick="confirmarDia(\'' + fechaStr + '\',\'no_puede\')" style="flex:1;min-width:130px;padding:11px;border:none;border-radius:10px;background:#8b2e2e;color:#fff;font-size:14px;font-weight:600;cursor:pointer;opacity:.6">✗ No puedo acudir</button>' +
+        '</div>' +
+        '<div id="confirmEstado" style="font-size:12px;margin-top:10px"></div>' +
+      '</div>';
+    cargarEstadoConfirmacion(fechaStr);
+  }
+
   document.getElementById('diaModal').classList.add('open');
+}
+async function cargarEstadoConfirmacion(fechaStr){
+  const arr = await api(`/api/confirmaciones/mias?fecha_inicio=${fechaStr}&fecha_fin=${fechaStr}`);
+  const c = Array.isArray(arr) ? arr.find(x => x.fecha === fechaStr) : null;
+  const est = document.getElementById('confirmEstado');
+  const bC = document.getElementById('btnConfirmo');
+  const bN = document.getElementById('btnNoPuedo');
+  if (!est || !bC || !bN) return;
+  const estado = c ? c.estado : '';
+  bC.style.opacity = estado === 'confirmada' ? '1' : '.6';
+  bN.style.opacity = estado === 'no_puede' ? '1' : '.6';
+  if (estado === 'confirmada') est.innerHTML = '<span style="color:#2ecc71">✓ Confirmaste que vas a acudir.</span>';
+  else if (estado === 'no_puede') est.innerHTML = '<span style="color:#e74c3c">Avisaste que no puedes. Tu gerente fue notificado' + (c.motivo ? ': “' + c.motivo + '”' : '') + '.</span>';
+  else est.textContent = '';
+}
+async function confirmarDia(fechaStr, estado){
+  let motivo = null;
+  if (estado === 'no_puede') { motivo = prompt('¿Por qué no podrás acudir? (opcional, lo verá tu gerente)') || ''; }
+  const r = await api('/api/confirmaciones', { method: 'POST', body: JSON.stringify({ fecha: fechaStr, estado, motivo }) });
+  if (r && r.ok) cargarEstadoConfirmacion(fechaStr);
+  else alert('No se pudo guardar: ' + ((r && r.error) || 'error'));
 }
 function cerrarDiaModal(){ document.getElementById('diaModal').classList.remove('open'); }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') cerrarDiaModal(); });

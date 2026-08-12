@@ -925,6 +925,9 @@ app.post('/webhook', verificarFirmaMeta, (req, res) => {
         // y se corta aqui para no mezclarlo con el trafico en vivo (evita que el
         // handler de echoes lo re-guarde como 'celular').
         if (field === 'history' || value.history) { coexLogPrimeraVez('history', value); coexProcesarHistorial(value); continue; }
+        // Nombre de perfil de WhatsApp de quien escribe (Meta lo manda en value.contacts).
+        const perfiles = {};
+        for (const c of (value.contacts || [])) { if (c && c.wa_id) perfiles[c.wa_id] = (c.profile && c.profile.name) || null; }
         // Mensajes entrantes (puede venir mas de uno)
         for (const msg of (value.messages || [])) {
           const telefono = msg.from;
@@ -935,6 +938,8 @@ app.post('/webhook', verificarFirmaMeta, (req, res) => {
           db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, origen, media_id, media_tipo, media_mime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             [numero_id, telefono, textoFinal, 'entrante', origen, media?.media_id || null, media?.media_tipo || null, media?.media_mime || null]);
           db.run(`INSERT INTO contactos (telefono, numero_id, etapa, prioridad, origen) VALUES (?, ?, 'Nuevo', 'Media', ?) ON CONFLICT(telefono) DO NOTHING`, [telefono, numero_id, origen]);
+          // Guardar el nombre de perfil solo si el contacto aun no tiene nombre (no pisa uno manual).
+          if (perfiles[telefono]) db.run("UPDATE contactos SET nombre=? WHERE telefono=? AND (nombre IS NULL OR nombre='')", [perfiles[telefono], telefono]);
           // Si un workflow esta esperando la respuesta de este contacto, enrutar por el boton
           wfRutearRespuesta(telefono, texto).catch(err => console.error('[WF] rutear respuesta:', err.message));
         }

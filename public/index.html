@@ -597,6 +597,14 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
 <script>
 var token='',usuario={},mensajes=[],chatActivo=null,etiquetas=[],filtroEtapa='',iv=null;
 var mensajesConv=[],convTel=null; // historial COMPLETO de la conversación abierta
+var nombresContactos={}; // telefono -> nombre del contacto (para la lista de chats)
+function nombreDe(tel){ var n=nombresContactos[tel]; return n ? String(n).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ('+'+tel); }
+function cargarNombresContactos(){
+  fetch('/api/contactos',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){ if(Array.isArray(d)){ d.forEach(function(c){ if(c.telefono&&c.nombre) nombresContactos[c.telefono]=c.nombre; }); if(typeof renderChats==='function') renderChats(); } })
+  .catch(function(){});
+}
 // ===== PANEL HERRAMIENTAS =====
 
 
@@ -1549,8 +1557,9 @@ function aplicarSesion(){
   if(sub) sub.textContent = usuario.nombre + ' · ' + (usuario.sucursal||'');
   fetch('/api/respuestas',{headers:{Authorization:'Bearer '+token}}).then(function(r){return r.json()}).then(function(d){misRespuestas=d;});
   setTimeout(iniciarAtajoRespuestas, 500);
-  cargarEtiquetas();cargarMensajes();
+  cargarEtiquetas();cargarNombresContactos();cargarMensajes();
   clearInterval(iv); iv=setInterval(cargarMensajes,5000);
+  setInterval(cargarNombresContactos,60000); // refrescar nombres de contactos
 }
 
 // Borra la sesión del navegador (al salir o si el token ya no sirve)
@@ -1672,7 +1681,7 @@ function renderChats(){
     return '<div class="chat-item'+(chatActivo===tel?' active':'')+'" data-tel="'+tel+'">'+
       '<div class="chat-avatar">'+tel.slice(-2)+'</div>'+
       '<div class="chat-info">'+
-        '<div class="chat-name">+'+tel+' <span class="etapa-pill etapa-'+data.etapa+'">'+data.etapa+'</span></div>'+
+        '<div class="chat-name">'+nombreDe(tel)+' <span class="etapa-pill etapa-'+data.etapa+'">'+data.etapa+'</span></div>'+
         '<div class="chat-preview">'+data.ultimo.mensaje+'</div>'+
       '</div>'+
       (data.count>0?'<div class="badge">'+data.count+'</div>':'')+

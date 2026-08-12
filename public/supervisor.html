@@ -175,9 +175,14 @@
         <button class="btn-nav" onclick="navegarSemana(1)">›</button>
       </div>
       <div style="display:flex;gap:12px;align-items:center;">
-        <select class="filter-input" id="filtroPorTecnica" onchange="cargarCitas()">
-          <option value="">Todas las técnicas</option>
-        </select>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <select class="filter-input" id="filtroPorSucursal" onchange="onSucursalChange()">
+            <option value="">Todas las sucursales</option>
+          </select>
+          <select class="filter-input" id="filtroPorTecnica" onchange="cargarCitas()">
+            <option value="">Todas las técnicas</option>
+          </select>
+        </div>
         <button class="btn-hoy" onclick="irAHoy()">Hoy</button>
         <button class="btn-primary" onclick="abrirModalCita()">+ Nueva cita</button>
       </div>
@@ -314,7 +319,11 @@ function switchTab(tab, el) {
   document.getElementById('tab-' + tab).classList.add('active');
   if (tab === 'metricas') cargarMetricas();
   if (tab === 'solicitudes') cargarSolicitudes();
-  if (tab === 'calendario') { cargarTecnicas(); cargarCitas(); }
+  if (tab === 'calendario') {
+    cargarSucursalesFiltro()
+      .then(() => cargarTecnicas(document.getElementById('filtroPorSucursal').value))
+      .then(cargarCitas);
+  }
   if (tab === 'chats') cargarChats();
   if (tab === 'usuarios') cargarUsuarios();
 }
@@ -374,12 +383,37 @@ function getSemanaFechas() {
 function irAHoy() { semanaOffset = 0; cargarCitas(); }
 function navegarSemana(dir) { semanaOffset += dir; cargarCitas(); }
 
-async function cargarTecnicas() {
-  tecnicasData = await api('/api/tecnicas');
+let sucursalesFiltro = [];
+// Llena el selector de sucursales (todas las que existen). Por defecto deja la
+// sucursal del supervisor si la tiene; el admin arranca en "Todas".
+async function cargarSucursalesFiltro() {
+  const data = await api('/api/sucursales');
+  sucursalesFiltro = Array.isArray(data) ? data : [];
+  const sel = document.getElementById('filtroPorSucursal');
+  const actual = sel.value;
+  sel.innerHTML = '<option value="">Todas las sucursales</option>' +
+    sucursalesFiltro.map(s => `<option value="${_escAl(s.nombre)}">${_escAl(s.nombre)}</option>`).join('');
+  if (!actual && USER.sucursal && sucursalesFiltro.some(s => s.nombre === USER.sucursal)) sel.value = USER.sucursal;
+}
+function onSucursalChange() {
+  const suc = document.getElementById('filtroPorSucursal').value;
+  cargarTecnicas(suc).then(cargarCitas);
+}
+// Carga los técnicos del EQUIPO de la sucursal elegida (respeta el equipo por
+// sucursal). Con "Todas las sucursales", el filtro de técnica queda en "Todas".
+async function cargarTecnicas(sucursalNombre) {
   const sel = document.getElementById('filtroPorTecnica');
   const selCita = document.getElementById('citaTecnica');
-  sel.innerHTML = '<option value="">Todas las técnicas</option>' + tecnicasData.map(t => `<option value="${t.id}">${t.nombre}</option>`).join('');
-  if (selCita) selCita.innerHTML = '<option value="">Sin asignar</option>' + tecnicasData.map(t => `<option value="${t.id}">${t.nombre}</option>`).join('');
+  if (!sucursalNombre) {
+    tecnicasData = [];
+    sel.innerHTML = '<option value="">Todas las técnicas</option>';
+    if (selCita) selCita.innerHTML = '<option value="">Sin asignar</option>';
+    return;
+  }
+  const data = await api('/api/tecnicas?sucursal=' + encodeURIComponent(sucursalNombre));
+  tecnicasData = Array.isArray(data) ? data : [];
+  sel.innerHTML = '<option value="">Todas las técnicas</option>' + tecnicasData.map(t => `<option value="${t.id}">${_escAl(t.nombre)}</option>`).join('');
+  if (selCita) selCita.innerHTML = '<option value="">Sin asignar</option>' + tecnicasData.map(t => `<option value="${t.id}">${_escAl(t.nombre)}</option>`).join('');
 }
 
 // El título de la cita en Google Calendar termina con el "tag" de la técnica tras
@@ -403,36 +437,44 @@ async function cargarCitas() {
     dias[0].toLocaleDateString('es-MX', { day:'numeric', month:'short' }) + ' – ' +
     dias[6].toLocaleDateString('es-MX', { day:'numeric', month:'short', year:'numeric' });
 
-  // 1) Citas internas (tabla citas). 2) Google Calendar de la sucursal.
+  const sucSel = document.getElementById('filtroPorSucursal')?.value || '';
+  // 1) Citas internas (tabla citas). 2) Google Calendar de la(s) sucursal(es).
   const data = await api(`/api/citas?fecha_inicio=${fi}&fecha_fin=${ff}`);
   let internas = Array.isArray(data) ? data : [];
+
+  // Qué sucursales consultar: la elegida, o TODAS si está en "Todas las sucursales".
+  let sucs = sucSel ? [sucSel] : sucursalesFiltro.map(s => s.nombre);
+  if (!sucs.length && USER.sucursal) sucs = [USER.sucursal];
+
+  const hhmm = d => String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  const resultados = await Promise.all(sucs.map(suc =>
+    api(`/api/google-calendar/eventos?fecha_inicio=${fi}&fecha_fin=${ff}&sucursal=${encodeURIComponent(suc)}`)
+      .then(g => ({ suc, g })).catch(() => ({ suc, g: null }))
+  ));
   let gcalCitas = [];
-  const suc = USER.sucursal || '';
-  if (suc) {
-    const g = await api(`/api/google-calendar/eventos?fecha_inicio=${fi}&fecha_fin=${ff}&sucursal=${encodeURIComponent(suc)}`);
-    if (g && g.configurado && Array.isArray(g.eventos)) {
-      const hhmm = d => String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
-      gcalCitas = g.eventos.map(e => {
-        const ini = e.start && e.start.dateTime ? new Date(e.start.dateTime) : null;
-        const fin = e.end && e.end.dateTime ? new Date(e.end.dateTime) : null;
-        const f = String((e.start && (e.start.dateTime || e.start.date)) || '').split('T')[0];
-        const tag = tagDeEvento(e.summary);
-        return { id:'g_'+e.id, fecha:f, hora_inicio: ini?hhmm(ini):'', hora_fin: fin?hhmm(fin):'',
-                 contacto_nombre: e.summary || 'Cita', tecnica_nombre: tag?tag.charAt(0).toUpperCase()+tag.slice(1):'',
-                 estado:'gcal', esGcal:true, summary: e.summary || '' };
-      });
-    }
-  }
+  resultados.forEach(({ suc, g }) => {
+    if (!g || !g.configurado || !Array.isArray(g.eventos)) return;
+    g.eventos.forEach(e => {
+      const ini = e.start && e.start.dateTime ? new Date(e.start.dateTime) : null;
+      const fin = e.end && e.end.dateTime ? new Date(e.end.dateTime) : null;
+      const f = String((e.start && (e.start.dateTime || e.start.date)) || '').split('T')[0];
+      const tag = tagDeEvento(e.summary);
+      gcalCitas.push({ id:'g_'+e.id, fecha:f, hora_inicio: ini?hhmm(ini):'', hora_fin: fin?hhmm(fin):'',
+        contacto_nombre: e.summary || 'Cita', tecnica_nombre: tag?tag.charAt(0).toUpperCase()+tag.slice(1):'',
+        estado:'gcal', esGcal:true, summary: e.summary || '', sucursal: suc });
+    });
+  });
+
   citasData = internas.concat(gcalCitas);
   if (tecnicaId) {
     const tname = (tecnicasData.find(t => String(t.id)===String(tecnicaId)) || {}).nombre || '';
     citasData = citasData.filter(c => String(c.tecnica_id)===String(tecnicaId) || (c.esGcal && eventoEsDeTecnica(c.summary, tname)));
   }
 
-  renderCalendario(dias);
+  renderCalendario(dias, !sucSel);
 }
 
-function renderCalendario(dias) {
+function renderCalendario(dias, mostrarSucursal) {
   const hoy = ymdLocal(new Date());
   const horas = ['08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00','20:00'];
   const diasNombres = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
@@ -458,7 +500,7 @@ function renderCalendario(dias) {
         return `<div class="cita-bloque ${c.estado}" onclick="${onc}" title="${(c.contacto_nombre||'').replace(/"/g,'&quot;')}">
           <div class="cita-hora">${(c.hora_inicio||'').slice(0,5)} ${c.hora_fin ? '– '+c.hora_fin.slice(0,5) : ''}</div>
           <div class="cita-nombre">${c.contacto_nombre || 'Sin clienta'}</div>
-          <div class="cita-tecnica">${c.tecnica_nombre || ''}</div>
+          <div class="cita-tecnica">${c.tecnica_nombre || ''}${(mostrarSucursal && c.sucursal) ? ' · '+c.sucursal : ''}</div>
         </div>`;
       }).join('');
       html += `<div class="celda" onclick="abrirModalCita('${fechaStr}','${hora}')">${citasHtml}</div>`;

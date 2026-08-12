@@ -74,6 +74,20 @@
   .mini-cita .mc-nombre { font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .mini-cita.completada { background: #1a2e3d; border-left-color: #3d85c8; }
   .mini-cita.cancelada { opacity: 0.5; }
+  .dia-col { cursor: pointer; transition: border-color .15s, transform .05s; }
+  .dia-col:hover { border-color: #a855f7; }
+  .dia-col:active { transform: scale(0.99); }
+  .filtro-sem { background: #1a2e3d; color: #e9edef; border: 1px solid #2a3942; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+  .dia-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; align-items: center; justify-content: center; padding: 16px; }
+  .dia-modal-overlay.open { display: flex; }
+  .dia-modal { background: #111b21; border: 1px solid #2a3942; border-radius: 14px; width: 560px; max-width: 100%; max-height: 88vh; overflow: auto; padding: 20px; }
+  .dia-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .dia-modal-head h3 { font-size: 17px; text-transform: capitalize; }
+  .dia-modal-close { background: none; border: none; color: #8696a0; font-size: 26px; line-height: 1; cursor: pointer; }
+  .dm-cita { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid #1f2c34; }
+  .dm-cita .dm-hora { font-size: 13px; color: #4285f4; font-weight: 600; white-space: nowrap; min-width: 92px; }
+  .dm-cita .dm-nombre { font-size: 14px; font-weight: 600; }
+  .dm-cita .dm-desc { font-size: 12px; color: #8696a0; margin-top: 3px; }
 
   /* Google Calendar */
   .gcal-section { background: #1f2c34; border-radius: 12px; border: 1px solid #2a3942; padding: 20px; margin-top: 16px; }
@@ -186,13 +200,30 @@
         <span class="semana-titulo" id="semanaTitulo">—</span>
         <button class="btn-nav" onclick="navegarSemana(1)">›</button>
       </div>
-      <button class="btn-hoy" onclick="irAHoy()">Esta semana</button>
+      <div style="display:flex;gap:10px;align-items:center">
+        <select id="filtroTecnicaSemana" class="filtro-sem" onchange="cambiarFiltroSemana()" style="display:none">
+          <option value="mias">Solo mis citas</option>
+          <option value="todas">Todas las citas</option>
+        </select>
+        <button class="btn-hoy" onclick="irAHoy()">Esta semana</button>
+      </div>
     </div>
     <div class="dias-semana" id="diasSemana">
       <div class="loading" style="grid-column:1/-1">Cargando semana...</div>
     </div>
   </div>
 
+</div>
+
+<!-- Modal detalle del día -->
+<div class="dia-modal-overlay" id="diaModal" onclick="if(event.target===this)cerrarDiaModal()">
+  <div class="dia-modal">
+    <div class="dia-modal-head">
+      <h3 id="diaModalTitulo">—</h3>
+      <button class="dia-modal-close" onclick="cerrarDiaModal()">×</button>
+    </div>
+    <div id="diaModalLista"></div>
+  </div>
 </div>
 
 <script>
@@ -241,16 +272,22 @@ function pintarContadores(total, pendientes, vino, noVino){
     '<div class="chip"><span style="color:#2ecc71">' + vino + '</span> vino</div>' +
     '<div class="chip"><span style="color:#e74c3c">' + noVino + '</span> no vino</div>';
 }
-function cambiarFiltroTecnica(){
-  verSoloMias = document.getElementById('filtroTecnica').value === 'mias';
+function aplicarFiltroMias(mias){
+  verSoloMias = mias;
+  ['filtroTecnica','filtroTecnicaSemana'].forEach(id => { const s = document.getElementById(id); if (s) s.value = mias ? 'mias' : 'todas'; });
   if (window._gcalFi) cargarGoogleCalendar(window._gcalFi, window._gcalFf);
   if (typeof cargarSemana === 'function' && document.getElementById('tab-semana').classList.contains('active')) cargarSemana();
 }
+function cambiarFiltroTecnica(){ aplicarFiltroMias(document.getElementById('filtroTecnica').value === 'mias'); }
+function cambiarFiltroSemana(){ aplicarFiltroMias(document.getElementById('filtroTecnicaSemana').value === 'mias'); }
 (function initFiltroTecnica(){
-  const f = document.getElementById('filtroTecnica');
-  if (!f) return;
-  f.style.display = USER.rol === 'tecnica' ? '' : 'none';
-  f.value = verSoloMias ? 'mias' : 'todas';
+  const soloTecnica = USER.rol === 'tecnica';
+  ['filtroTecnica','filtroTecnicaSemana'].forEach(id => {
+    const f = document.getElementById(id);
+    if (!f) return;
+    f.style.display = soloTecnica ? '' : 'none';
+    f.value = verSoloMias ? 'mias' : 'todas';
+  });
 })();
 
 const hoy = new Date();
@@ -457,6 +494,7 @@ async function cargarSemana() {
   // Cargar también Google Calendar para la semana (solo las de la técnica activa)
   const gcal = await api(`/api/google-calendar/eventos?fecha_inicio=${fi}&fecha_fin=${ff}`);
   const eventosGcal = gcal.configurado ? filtrarEventos(gcal.eventos || []) : [];
+  window._semanaGcal = eventosGcal;   // para el modal de detalle del día
 
   const el = document.getElementById('diasSemana');
   el.innerHTML = dias.map((d, i) => {
@@ -484,7 +522,7 @@ async function cargarSemana() {
     }).join('');
 
     return `
-      <div class="dia-col ${esHoy ? 'hoy' : ''}">
+      <div class="dia-col ${esHoy ? 'hoy' : ''}" onclick="abrirDiaModal('${fechaStr}')" title="Ver las citas de este día">
         <div class="dia-col-header">
           <div class="dn">${diasNombres[i]}</div>
           <div class="dd">${d.getDate()}</div>
@@ -498,6 +536,58 @@ async function cargarSemana() {
     `;
   }).join('');
 }
+
+// ── Detalle del día (al tocar una columna de la semana) ────────────
+function abrirDiaModal(fechaStr){
+  const [y, m, dd] = fechaStr.split('-').map(Number);
+  const fecha = new Date(y, m - 1, dd);
+  document.getElementById('diaModalTitulo').textContent =
+    fecha.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  const citas = (citasSemana || []).filter(c => c.fecha === fechaStr);
+  const gcal = (window._semanaGcal || []).filter(e => {
+    const f = e.start?.dateTime?.split('T')[0] || e.start?.date;
+    return f === fechaStr;
+  });
+
+  const items = []
+    .concat(citas.map(c => ({
+      hora: c.hora_inicio ? c.hora_inicio.slice(0,5) : '',
+      orden: c.hora_inicio || '',
+      nombre: c.contacto_nombre || 'Sin clienta',
+      desc: c.servicio || ''
+    })))
+    .concat(gcal.map(e => {
+      const ini = e.start?.dateTime ? new Date(e.start.dateTime) : null;
+      return {
+        hora: ini ? ini.toLocaleTimeString('es-MX', {hour:'2-digit',minute:'2-digit'}) : 'Todo el día',
+        orden: e.start?.dateTime || e.start?.date || '',
+        nombre: e.summary || 'Evento',
+        desc: e.description || ''
+      };
+    }))
+    .sort((a, b) => String(a.orden).localeCompare(String(b.orden)));
+
+  const el = document.getElementById('diaModalLista');
+  if (!items.length) {
+    el.innerHTML = '<div style="color:#8696a0;padding:16px 0;text-align:center">Sin citas para este día 🎉</div>';
+  } else {
+    el.innerHTML =
+      `<div style="font-size:12px;color:#8696a0;margin-bottom:4px">${items.length} cita(s)</div>` +
+      items.map(it => `
+        <div class="dm-cita">
+          <div class="dm-hora">${it.hora}</div>
+          <div style="flex:1">
+            <div class="dm-nombre">${it.nombre}</div>
+            ${it.desc ? `<div class="dm-desc">${it.desc}</div>` : ''}
+          </div>
+        </div>
+      `).join('');
+  }
+  document.getElementById('diaModal').classList.add('open');
+}
+function cerrarDiaModal(){ document.getElementById('diaModal').classList.remove('open'); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') cerrarDiaModal(); });
 
 // Init
 cargarHoy();

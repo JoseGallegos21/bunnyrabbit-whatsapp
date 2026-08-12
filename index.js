@@ -2333,6 +2333,46 @@ app.get('/api/sucursales/:id/usuarios', auth, requireRole('admin', 'supervisor')
   });
 });
 
+// Asignar un usuario que YA existe al equipo de la sucursal: mueve su campo
+// `sucursal` y, si la sucursal tiene numero de WhatsApp, lo apunta a ese numero
+// (la persona pasa a atender ese inbox). No toca su nombre, rol ni contrasena.
+app.put('/api/sucursales/:id/usuarios/:userId', auth, requireRole('admin', 'supervisor'), (req, res) => {
+  db.get('SELECT nombre, phone_number_id FROM sucursales WHERE id=? AND activo=1', [req.params.id], (eS, suc) => {
+    if (eS || !suc) return res.status(404).json({ error: 'Sucursal no encontrada' });
+    db.get('SELECT rol, sucursal FROM usuarios WHERE id=?', [req.params.userId], (eU, destino) => {
+      if (eU || !destino) return res.status(404).json({ error: 'Usuario no encontrado' });
+      // Mismas guardas que editar usuario: un supervisor no puede mover
+      // admins/supervisores ni asignar personas a una sucursal que no es la suya.
+      if (req.user.rol === 'supervisor') {
+        if (destino.rol === 'admin' || destino.rol === 'supervisor') return res.status(403).json({ error: 'No puedes mover admins ni supervisores' });
+        if (suc.nombre !== req.user.sucursal) return res.status(403).json({ error: 'Solo puedes asignar personas a tu sucursal' });
+      }
+      const done = (err) => res.json({ ok: !err, error: err?.message });
+      if (suc.phone_number_id) {
+        db.run('UPDATE usuarios SET sucursal=?, numero_id=? WHERE id=?', [suc.nombre, suc.phone_number_id, req.params.userId], done);
+      } else {
+        db.run('UPDATE usuarios SET sucursal=? WHERE id=?', [suc.nombre, req.params.userId], done);
+      }
+    });
+  });
+});
+
+// Quitar un usuario del equipo de la sucursal: queda sin sucursal, la cuenta NO
+// se elimina (para borrar la cuenta se usa DELETE /api/usuarios/:id).
+app.delete('/api/sucursales/:id/usuarios/:userId', auth, requireRole('admin', 'supervisor'), (req, res) => {
+  db.get('SELECT nombre FROM sucursales WHERE id=?', [req.params.id], (eS, suc) => {
+    if (eS || !suc) return res.status(404).json({ error: 'Sucursal no encontrada' });
+    db.get('SELECT rol, sucursal FROM usuarios WHERE id=?', [req.params.userId], (eU, destino) => {
+      if (eU || !destino) return res.status(404).json({ error: 'Usuario no encontrado' });
+      if (req.user.rol === 'supervisor') {
+        if (destino.rol === 'admin' || destino.rol === 'supervisor') return res.status(403).json({ error: 'No puedes mover admins ni supervisores' });
+        if (destino.sucursal !== req.user.sucursal) return res.status(403).json({ error: 'Solo puedes quitar personas de tu sucursal' });
+      }
+      db.run('UPDATE usuarios SET sucursal=NULL WHERE id=?', [req.params.userId], (err) => res.json({ ok: !err, error: err?.message }));
+    });
+  });
+});
+
 
 // ============================================
 // MOTOR DE WORKFLOWS

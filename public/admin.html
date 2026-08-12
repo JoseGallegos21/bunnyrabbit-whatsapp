@@ -647,6 +647,41 @@ tr:last-child td{border-bottom:none}
   </div>
 </div>
 
+<!-- Modal equipo de sucursal -->
+<div class="modal-overlay" id="modalEquipo">
+  <div class="modal" style="width:560px">
+    <h3 id="equipoTitulo">Equipo</h3>
+    <div id="equipoLista" style="max-height:220px;overflow:auto;margin-bottom:8px"></div>
+    <div id="equipoMsg" style="font-size:13px;min-height:16px;margin:4px 0"></div>
+    <div style="border-top:1px solid #eee;padding-top:14px">
+      <div id="eq_existente_wrap" style="margin-bottom:14px">
+        <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Asignar una persona que ya existe</label>
+        <div style="display:flex;gap:8px">
+          <select id="eq_existente" style="flex:1;padding:8px;border:1px solid #ddd;border-radius:8px"></select>
+          <button class="btn btn-primary" onclick="asignarExistente()">Asignar</button>
+        </div>
+      </div>
+      <p id="eq_existente_vacio" style="display:none;font-size:12px;color:#999;margin-bottom:14px">No hay otras personas para asignar. Crea una nueva abajo.</p>
+      <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">O crear una persona nueva en este equipo</label>
+      <div class="form-row">
+        <div class="form-group"><label>Nombre</label><input type="text" id="eq_nombre" placeholder="Nombre completo"></div>
+        <div class="form-group"><label>Email</label><input type="email" id="eq_email" placeholder="email@empresa.com"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Contraseña</label><input type="password" id="eq_pass" placeholder="Mínimo 6 caracteres"></div>
+        <div class="form-group"><label>Teléfono (opcional)</label><input type="text" id="eq_telefono" placeholder="Ej: 5512345678"></div>
+      </div>
+      <div class="form-group"><label>Rol</label>
+        <select id="eq_rol"><option value="recepcionista">Recepcionista</option><option value="tecnica">Técnica</option><option value="supervisor">Supervisor</option><option value="admin">Admin</option></select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="cerrarModal()" style="background:#f0f2f5">Cerrar</button>
+      <button class="btn btn-primary" onclick="crearYAgregar()">Crear y agregar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal editar plantilla -->
 <div class="modal-overlay" id="modalPlantilla">
   <div class="modal">
@@ -809,20 +844,83 @@ function eliminarSucursal(id){
   .then(function(d){ if(d.ok) cargarSucursales(); });
 }
 
+var equipoSucId=null, equipoSucNombre='';
 function verUsuariosSucursal(id){
   var s=sucursalesData.find(function(x){return x.id===id;});
-  var nombre=s?s.nombre:'Sucursal';
-  fetch('/api/sucursales/'+id+'/usuarios',{headers:{Authorization:'Bearer '+token}})
-  .then(function(r){return r.json()})
-  .then(function(d){
-    if(!Array.isArray(d)||!d.length){
-      alert('No hay usuarios asignados a '+nombre+'. Asigna usuarios editando su sucursal en el tab Usuarios.');
-      return;
-    }
-    var lista = d.map(function(u){ return u.nombre+' ('+u.rol+')'; }).join(', ');
-    alert('Equipo de '+nombre+': '+lista);
+  equipoSucId=id; equipoSucNombre=s?s.nombre:'Sucursal';
+  document.getElementById('equipoTitulo').textContent='Equipo de '+equipoSucNombre;
+  eqMsg('',false);
+  ['eq_nombre','eq_email','eq_pass','eq_telefono'].forEach(function(cid){document.getElementById(cid).value='';});
+  document.getElementById('modalEquipo').classList.add('open');
+  cargarEquipo();
+}
+function cargarEquipo(){
+  var hdr={headers:{Authorization:'Bearer '+token}};
+  Promise.all([
+    fetch('/api/sucursales/'+equipoSucId+'/usuarios',hdr).then(function(r){return r.json();}),
+    fetch('/api/usuarios',hdr).then(function(r){return r.json();})
+  ]).then(function(res){
+    var miembros=Array.isArray(res[0])?res[0]:[];
+    var todos=Array.isArray(res[1])?res[1]:[];
+    renderMiembros(miembros);
+    var disponibles=todos.filter(function(u){return (u.sucursal||'')!==equipoSucNombre;});
+    var sel=document.getElementById('eq_existente');
+    sel.innerHTML='<option value="">— Selecciona una persona —</option>'+
+      disponibles.map(function(u){
+        var etiqueta=(u.nombre||u.email)+' ('+u.rol+(u.sucursal?' · '+u.sucursal:' · sin sucursal')+')';
+        return '<option value="'+u.id+'">'+h(etiqueta)+'</option>';
+      }).join('');
+    document.getElementById('eq_existente_wrap').style.display=disponibles.length?'block':'none';
+    document.getElementById('eq_existente_vacio').style.display=disponibles.length?'none':'block';
   });
 }
+function badgeRol(rol){
+  var c={admin:'#00a884',supervisor:'#3d85c8',recepcionista:'#8696a0',tecnica:'#a855f7'};
+  return '<span style="background:'+(c[rol]||'#8696a0')+';color:#fff;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600">'+h(rol)+'</span>';
+}
+function renderMiembros(lista){
+  var el=document.getElementById('equipoLista');
+  if(!lista.length){el.innerHTML='<p style="color:#999;padding:8px 0">Todavía no hay nadie en este equipo.</p>';return;}
+  el.innerHTML=lista.map(function(u){
+    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f0">'+
+      '<div style="flex:1"><div style="font-weight:600;font-size:14px">'+h(u.nombre||'—')+' '+badgeRol(u.rol)+'</div>'+
+      '<div style="font-size:12px;color:#667781">'+h(u.email||'')+'</div></div>'+
+      '<button class="btn btn-danger btn-sm" onclick="quitarDeEquipo('+u.id+')">Quitar</button>'+
+    '</div>';
+  }).join('');
+}
+function asignarExistente(){
+  var uid=document.getElementById('eq_existente').value;
+  if(!uid){eqMsg('Selecciona una persona.',true);return;}
+  fetch('/api/sucursales/'+equipoSucId+'/usuarios/'+uid,{method:'PUT',headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json();}).then(function(d){
+    if(d.ok){eqMsg('✓ Persona agregada al equipo',false);cargarEquipo();cargarUsuarios();}
+    else eqMsg(d.error||'No se pudo asignar',true);
+  });
+}
+function crearYAgregar(){
+  var data={nombre:eqVal('eq_nombre'),email:eqVal('eq_email'),password:eqVal('eq_pass'),
+    telefono:eqVal('eq_telefono'),rol:document.getElementById('eq_rol').value,sucursal:equipoSucNombre};
+  var s=sucursalesData.find(function(x){return x.id===equipoSucId;});
+  if(s&&s.phone_number_id)data.numero_id=s.phone_number_id;
+  if(!data.nombre||!data.email||!data.password){eqMsg('Nombre, email y contraseña son obligatorios.',true);return;}
+  fetch('/api/usuarios',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify(data)})
+  .then(function(r){return r.json();}).then(function(d){
+    if(d.id){eqMsg('✓ Persona creada y agregada',false);
+      ['eq_nombre','eq_email','eq_pass','eq_telefono'].forEach(function(cid){document.getElementById(cid).value='';});
+      cargarEquipo();cargarUsuarios();}
+    else eqMsg(d.error||'No se pudo crear',true);
+  });
+}
+function quitarDeEquipo(userId){
+  if(!confirm('¿Quitar a esta persona del equipo de '+equipoSucNombre+'? Su cuenta no se elimina, solo queda sin sucursal.'))return;
+  fetch('/api/sucursales/'+equipoSucId+'/usuarios/'+userId,{method:'DELETE',headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json();}).then(function(d){
+    if(d.ok){cargarEquipo();cargarUsuarios();} else eqMsg(d.error||'No se pudo quitar',true);
+  });
+}
+function eqVal(id){return document.getElementById(id).value.trim();}
+function eqMsg(t,err){var m=document.getElementById('equipoMsg');m.textContent=t;m.style.color=err?'#e74c3c':'#1f5c4a';}
 
 function showTab(id,el){
   document.querySelectorAll('.section').forEach(function(s){s.classList.remove('active');});

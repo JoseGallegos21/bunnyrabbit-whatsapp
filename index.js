@@ -2182,6 +2182,34 @@ app.post('/api/confirmaciones/:id/visto', auth, requireRole('supervisor', 'admin
 // ============================================
 const cronJobs = require('node-cron');
 
+// Nombre (en Meta) de la plantilla de utilidad del recordatorio nocturno. Se crea
+// desde Admin → Plantillas con el nombre "Recordatorio citas manana" (Meta lo
+// normaliza a este slug). Mientras no esté aprobada, el cron cae a texto libre.
+const PLANTILLA_RECORDATORIO = 'recordatorio_citas_manana';
+
+// Envía una plantilla SIN variables (texto fijo). A diferencia del texto libre,
+// una plantilla aprobada llega fuera de la ventana de 24h de Meta.
+async function enviarPlantillaWhatsApp(phoneNumberId, token, telefono, nombrePlantilla, idioma) {
+  try {
+    const tel = String(telefono).replace(/\D/g, '');
+    const to = tel.length === 10 ? '52' + tel : tel;
+    const response = await fetch(`https://graph.facebook.com/v19.0/${phoneNumberId}/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to,
+        type: 'template',
+        template: { name: nombrePlantilla, language: { code: idioma || 'es' } }
+      })
+    });
+    const data = await response.json();
+    return { ok: !data.error, data };
+  } catch(e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 async function enviarMensajeWhatsApp(phoneNumberId, token, telefono, mensaje) {
   try {
     const telefonoLimpio = telefono.replace(/\D/g, '');
@@ -2331,8 +2359,12 @@ cronJobs.schedule('0 20 * * *', async () => {
         return `${i + 1}. ${ini} — ${e.summary || 'Cita'}`;
       }).join('\n');
       const mensaje = `🌙 *Recordatorio para mañana*\n\nHola ${t.nombre}, mañana *${fechaTexto}* tienes *${suyas.length} cita${suyas.length > 1 ? 's' : ''}*:\n\n${lista}\n\nEntra a la app para confirmar que estás enterada. Si no puedes acudir, avísale a tu gerente desde ahí. ¡Excelente jornada! 🌸`;
-      const r = await enviarMensajeWhatsApp(datos.phone_number_id, datos.token, tel, mensaje);
-      console.log(`[CRON] 8pm ${s.nombre} -> ${t.nombre}: ${r.ok ? 'enviado' : 'fallo ' + JSON.stringify(r.data || r.error)}`);
+      // 1) Plantilla de utilidad (llega fuera de la ventana de 24h). 2) Si no está
+      //    aprobada aún o falla, respaldo con texto libre (solo llega dentro de 24h).
+      let via = 'plantilla';
+      let r = await enviarPlantillaWhatsApp(datos.phone_number_id, datos.token, tel, PLANTILLA_RECORDATORIO, 'es');
+      if (!r.ok) { via = 'texto'; r = await enviarMensajeWhatsApp(datos.phone_number_id, datos.token, tel, mensaje); }
+      console.log(`[CRON] 8pm ${s.nombre} -> ${t.nombre} (${via}): ${r.ok ? 'enviado' : 'fallo ' + JSON.stringify(r.data || r.error)}`);
     }
   }
 }, { timezone: 'America/Mexico_City' });

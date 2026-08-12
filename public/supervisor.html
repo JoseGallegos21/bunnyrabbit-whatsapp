@@ -604,17 +604,24 @@ async function cargarUsuarios() {
   usuariosData = Array.isArray(data) ? data : [];
   const tbody = document.getElementById('tablaUsuarios');
   const rolesBadge = { admin:'#005c4b', supervisor:'#1a2e3d', recepcionista:'#2a3942', tecnica:'#2e1f3d' };
-  tbody.innerHTML = usuariosData.map(u => `
-    <tr>
-      <td>${u.nombre || '—'}</td>
-      <td>${u.email || '—'}</td>
-      <td><span class="badge" style="background:${rolesBadge[u.rol]||'#2a3942'};color:#e9edef">${u.rol}</span></td>
-      <td>${u.sucursal || '—'}</td>
-      <td>
-        <button class="btn-edit" onclick="editarUsuario(${u.id})">Editar</button>
-      </td>
-    </tr>
-  `).join('');
+  // Agrupar el equipo por SUCURSAL: encabezado de sucursal + su gente debajo.
+  const grupos = {};
+  usuariosData.forEach(u => { const k = u.sucursal || 'Sin sucursal'; (grupos[k] = grupos[k] || []).push(u); });
+  const sucursales = Object.keys(grupos).sort();
+  let html = '';
+  sucursales.forEach(suc => {
+    const lista = grupos[suc];
+    html += `<tr><td colspan="5" style="background:#111b21;font-weight:700;color:#00a884;padding:10px 12px">🏢 ${_escAl(suc)} <span style="color:#8696a0;font-weight:400;font-size:12px">· ${lista.length} persona(s)</span></td></tr>`;
+    html += lista.map(u => `
+      <tr>
+        <td>${_escAl(u.nombre || '—')}</td>
+        <td>${_escAl(u.email || '—')}</td>
+        <td><span class="badge" style="background:${rolesBadge[u.rol]||'#2a3942'};color:#e9edef">${u.rol}</span></td>
+        <td>${_escAl(u.sucursal || '—')}</td>
+        <td><button class="btn-edit" onclick="editarUsuario(${u.id})">Editar</button></td>
+      </tr>`).join('');
+  });
+  tbody.innerHTML = html || '<tr><td colspan="5" class="empty-state">Sin usuarios</td></tr>';
 }
 
 function abrirModalUsuario() {

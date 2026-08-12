@@ -1445,6 +1445,9 @@ function eliminarPlantilla(id){
   if(!confirm('Eliminar esta plantilla?'))return;
   fetch('/api/plantillas/'+id,{method:'DELETE',headers:{Authorization:'Bearer '+token}}).then(function(){cargarPlantillas();});
 }
+// Los botones de la tabla llaman a estos wrappers, que leen los data-* del boton.
+function eliminarPlantillaData(btn){ eliminarPlantilla(btn.dataset.pid); }
+function editarPlantillaData(btn){ editarPlantilla(btn.dataset.pid, btn.dataset.pn, btn.dataset.pc, btn.dataset.pco); }
 
 function cargarNumerosEnSelectores(){
   fetch('/api/numeros',{headers:{Authorization:'Bearer '+token}})

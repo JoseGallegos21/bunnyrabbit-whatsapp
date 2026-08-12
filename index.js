@@ -2512,6 +2512,22 @@ cronJobs.schedule('0 7 * * *', async () => {
   });
 }, { timezone: 'America/Mexico_City' });
 
+// CRON — Re-sync diario de contactos de coexistencia (4:30am MX). Le pide al
+// telefono su libreta para ir llenando los nombres de los contactos. Meta limita
+// la frecuencia de este sync; una vez al dia va holgado. Con retraso entre numeros
+// para no toparse con el rate limit cuando haya varios.
+cronJobs.schedule('30 4 * * *', () => {
+  const V = process.env.META_GRAPH_VERSION || 'v21.0';
+  db.all("SELECT phone_number_id, token FROM numeros WHERE token IS NOT NULL AND token != ''", [], async (err, nums) => {
+    if (err || !nums || !nums.length) return;
+    console.log('[CRON] re-sync diario de contactos:', nums.length, 'numero(s)');
+    for (const n of nums) {
+      await dispararSyncCoexistencia(n.phone_number_id, n.token, V);
+      await new Promise(r => setTimeout(r, 5000)); // espaciar para el rate limit
+    }
+  });
+}, { timezone: 'America/Mexico_City' });
+
 // ============================================
 // ENDPOINTS DE SUCURSALES
 // ============================================

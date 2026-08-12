@@ -1952,17 +1952,42 @@ function renderMensajes(tel){
     var t=fecha.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
     var cls=m.direccion==='saliente'?'saliente':'entrante';
     var palomas=cls==='saliente'?'<svg width="14" height="10" viewBox="0 0 14 10" fill="none" style="vertical-align:middle"><path d="M1 5l3 3 5-7" stroke="#8696a0" stroke-width="1.5" stroke-linecap="round"/><path d="M5 5l3 3 5-7" stroke="#8696a0" stroke-width="1.5" stroke-linecap="round"/></svg>':'';
+    var esc=function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');};
     var contenido=m.mensaje||'';
-    if(contenido.startsWith('[imagen:')){
+    if(m.media_tipo && m.id){
+      // Media entrante: se descarga bajo demanda con /api/media/:id (proxy a Meta).
+      var etiquetas={image:'📷 Foto',video:'🎥 Video',audio:'🎙️ Audio',document:'📄 Documento',sticker:'🌟 Sticker'};
+      var cap=(contenido && contenido!==etiquetas[m.media_tipo] && contenido!=='[media]')?'<div style="margin-top:4px">'+esc(contenido)+'</div>':'';
+      contenido='<div class="media-wrap" data-mid="'+m.id+'" data-mtipo="'+m.media_tipo+'"><div style="font-size:12px;color:#8696a0;padding:6px 0">⏳ cargando '+(etiquetas[m.media_tipo]||'archivo')+'…</div></div>'+cap;
+    } else if(contenido.startsWith('[imagen:')){
       var url=contenido.replace('[imagen:','').replace(']','');
       contenido='<img src="'+url+'" style="max-width:200px;border-radius:6px;display:block;margin-bottom:4px">';
     } else {
-      contenido=contenido.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      contenido=esc(contenido);
     }
     html+='<div class="msg '+cls+'">'+contenido+'<div class="msg-time">'+t+' '+palomas+'</div></div>';
   });
   area.innerHTML=html||'<div style="text-align:center;color:#8696a0;font-size:13px;margin-top:40px">Sin mensajes aún</div>';
   area.scrollTop=area.scrollHeight;
+  cargarMediaVisibles();
+}
+// Descarga los adjuntos visibles (imagen/video/audio/documento) vía el proxy y
+// los inserta como blob para no exponer el token en la URL.
+function cargarMediaVisibles(){
+  document.querySelectorAll('.media-wrap[data-mid]:not([data-cargado])').forEach(function(w){
+    var id=w.getAttribute('data-mid'), tipo=w.getAttribute('data-mtipo');
+    w.setAttribute('data-cargado','1');
+    fetch('/api/media/'+id,{headers:{Authorization:'Bearer '+token}})
+    .then(function(r){ if(!r.ok) throw new Error('no'); return r.blob(); })
+    .then(function(b){
+      var u=URL.createObjectURL(b);
+      if(tipo==='image'||tipo==='sticker') w.innerHTML='<img src="'+u+'" style="max-width:240px;max-height:300px;border-radius:8px;display:block;cursor:pointer" onclick="window.open(this.src)">';
+      else if(tipo==='video') w.innerHTML='<video src="'+u+'" controls style="max-width:240px;border-radius:8px;display:block"></video>';
+      else if(tipo==='audio') w.innerHTML='<audio src="'+u+'" controls style="max-width:220px"></audio>';
+      else w.innerHTML='<a href="'+u+'" download style="color:#53bdeb;text-decoration:none">📄 Descargar documento</a>';
+    })
+    .catch(function(){ w.innerHTML='<div style="font-size:12px;color:#8696a0;padding:4px 0">📎 Archivo no disponible</div>'; });
+  });
 }
 
 function enviar(){

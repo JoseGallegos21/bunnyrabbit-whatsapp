@@ -154,7 +154,10 @@ db.serialize(() => {
     ['tipo', 'TEXT'],            // texto | plantilla
     ['categoria', 'TEXT'],       // MARKETING | UTILITY | AUTHENTICATION
     ['facturable', 'INTEGER DEFAULT 0'],
-    ['costo_usd', 'REAL DEFAULT 0']
+    ['costo_usd', 'REAL DEFAULT 0'],
+    ['media_id', 'TEXT'],        // id del archivo en Meta (para descargarlo bajo demanda)
+    ['media_tipo', 'TEXT'],      // image | video | audio | document | sticker
+    ['media_mime', 'TEXT']       // tipo MIME reportado por Meta
   ]);
   ensureColumns('difusiones', [
     ['plantilla_id', 'INTEGER'],
@@ -566,6 +569,32 @@ app.get('/api/mensajes', auth, (req, res) => {
   db.all(`SELECT * FROM mensajes ${where} ORDER BY timestamp DESC LIMIT ${limit}`, params, (err, rows) => res.json(rows || []));
 });
 
+// Descarga bajo demanda el archivo multimedia de un mensaje. Pide a Meta la URL
+// temporal con el token del número y hace de proxy (el navegador nunca ve el
+// token). Solo funciona mientras el archivo siga en los servidores de Meta;
+// para media viejo cuyo id ya expiró, responde 404 y el chat lo muestra como no
+// disponible.
+app.get('/api/media/:id', auth, (req, res) => {
+  db.get('SELECT numero_id, media_id, media_mime FROM mensajes WHERE id=?', [req.params.id], (e, row) => {
+    if (e || !row || !row.media_id) return res.sendStatus(404);
+    if ((req.user.rol === 'recepcionista' || req.user.rol === 'tecnica') && row.numero_id !== req.user.numero_id) return res.sendStatus(403);
+    db.get('SELECT token FROM numeros WHERE phone_number_id=?', [row.numero_id], async (e2, num) => {
+      const tk = num && num.token;
+      if (!tk) return res.sendStatus(502);
+      try {
+        const metaResp = await fetch('https://graph.facebook.com/v19.0/' + row.media_id, { headers: { Authorization: 'Bearer ' + tk } });
+        const mj = await metaResp.json();
+        if (!mj || !mj.url) return res.sendStatus(404);
+        const bin = await fetch(mj.url, { headers: { Authorization: 'Bearer ' + tk } });
+        if (!bin.ok) return res.sendStatus(502);
+        res.set('Content-Type', mj.mime_type || row.media_mime || 'application/octet-stream');
+        res.set('Cache-Control', 'private, max-age=86400');
+        res.send(Buffer.from(await bin.arrayBuffer()));
+      } catch (err) { console.error('[MEDIA]', err.message); res.sendStatus(502); }
+    });
+  });
+});
+
 // Historial de mensajes de un contacto (lo usa el panel de supervisor al abrir un chat)
 app.get('/api/mensajes/:telefono', auth, (req, res) => {
   const numero_id = req.user.rol === 'supervisor' ? req.query.numero_id : req.user.numero_id;
@@ -740,6 +769,27 @@ function textoDeMensaje(msg) {
   return { texto: msg.text?.body || '[media]', esBoton: false };
 }
 
+// Extrae el archivo multimedia de un mensaje entrante (imagen, video, audio,
+// documento, sticker). Devuelve el id de Meta y el tipo para poder descargarlo
+// bajo demanda; null si el mensaje no trae media.
+function mediaDeMensaje(msg) {
+  if (!msg) return null;
+  const tipos = ['image', 'video', 'audio', 'voice', 'document', 'sticker'];
+  const t = msg.type;
+  if (tipos.indexOf(t) === -1) return null;
+  const obj = msg[t];
+  if (!obj || !obj.id) return null;
+  return {
+    media_id: obj.id,
+    media_tipo: t === 'voice' ? 'audio' : t,
+    media_mime: obj.mime_type || null,
+    caption: obj.caption || obj.filename || null
+  };
+}
+function etiquetaMedia(tipo) {
+  return ({ image: '📷 Foto', video: '🎥 Video', audio: '🎙️ Audio', document: '📄 Documento', sticker: '🌟 Sticker' })[tipo] || '[media]';
+}
+
 // ==================== COEXISTENCIA: webhooks de sincronizacion ====================
 // Cuando un numero se conecta en modo coexistencia, Meta manda 3 tipos de eventos
 // ademas de los normales. Los procesamos de forma tolerante (siempre 200, nunca
@@ -798,10 +848,12 @@ async function coexProcesarHistorial(value) {
     const guarda = (telefono, m, deMi) => {
       if (!telefono) return;
       const { texto } = textoDeMensaje(m);
+      const media = mediaDeMensaje(m);
+      const textoFinal = media ? (media.caption || etiquetaMedia(media.media_tipo)) : texto;
       let ts = null;
       if (m.timestamp) { const d = new Date(Number(m.timestamp) * 1000); if (!isNaN(d)) ts = d.toISOString().slice(0, 19).replace('T', ' '); }
-      db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, timestamp, origen) VALUES (?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP),?)',
-        [numero_id, telefono, texto, deMi ? 'saliente' : 'entrante', ts, 'historial']);
+      db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, timestamp, origen, media_id, media_tipo, media_mime) VALUES (?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP),?,?,?,?)',
+        [numero_id, telefono, textoFinal, deMi ? 'saliente' : 'entrante', ts, 'historial', media?.media_id || null, media?.media_tipo || null, media?.media_mime || null]);
       db.run(`INSERT INTO contactos (telefono, numero_id, etapa, prioridad, origen) VALUES (?, ?, 'Nuevo', 'Media', 'historial') ON CONFLICT(telefono) DO NOTHING`, [telefono, numero_id]);
       guardados++;
     };
@@ -848,8 +900,11 @@ app.post('/webhook', verificarFirmaMeta, (req, res) => {
         for (const msg of (value.messages || [])) {
           const telefono = msg.from;
           const { texto } = textoDeMensaje(msg);
+          const media = mediaDeMensaje(msg);
+          const textoFinal = media ? (media.caption || etiquetaMedia(media.media_tipo)) : texto;
           const origen = origenDelMensaje(msg, texto);
-          db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, origen) VALUES (?, ?, ?, ?, ?)', [numero_id, telefono, texto, 'entrante', origen]);
+          db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, origen, media_id, media_tipo, media_mime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [numero_id, telefono, textoFinal, 'entrante', origen, media?.media_id || null, media?.media_tipo || null, media?.media_mime || null]);
           db.run(`INSERT INTO contactos (telefono, numero_id, etapa, prioridad, origen) VALUES (?, ?, 'Nuevo', 'Media', ?) ON CONFLICT(telefono) DO NOTHING`, [telefono, numero_id, origen]);
           // Si un workflow esta esperando la respuesta de este contacto, enrutar por el boton
           wfRutearRespuesta(telefono, texto).catch(err => console.error('[WF] rutear respuesta:', err.message));

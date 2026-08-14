@@ -598,6 +598,7 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
 var token='',usuario={},mensajes=[],chatActivo=null,etiquetas=[],filtroEtapa='',iv=null;
 var mensajesConv=[],convTel=null; // historial COMPLETO de la conversación abierta
 var nombresContactos={}; // telefono -> nombre del contacto (para la lista de chats)
+var filtroBusqueda=''; // texto del buscador de chats (persiste entre re-renders)
 function nombreDe(tel){ var n=nombresContactos[tel]; return n ? String(n).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ('+'+tel); }
 // Iniciales del contacto (del nombre si lo hay; si no, los últimos 2 dígitos).
 function inicialesDe(tel, nombreExplicito){
@@ -868,11 +869,12 @@ function mostrarFormPlantilla(){
 var todosContactos = [];
 
 function cargarContactos(){
-  fetch('/api/contactos',{headers:{Authorization:'Bearer '+token}})
+  // incluir_formulario=1: también los contactos que llegaron por anuncio.
+  fetch('/api/contactos?incluir_formulario=1',{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
   .then(function(d){
-    todosContactos = d;
-    renderContactos(d);
+    todosContactos = Array.isArray(d)?d:[];
+    renderContactos(todosContactos);
   });
 }
 
@@ -885,7 +887,10 @@ function renderContactos(lista){
   tbody.innerHTML = lista.length ? lista.map(function(c){
     return '<tr style="border-bottom:1px solid #f0f0f0;hover:background:#f9f9f9">'+
       '<td style="padding:10px 8px;font-family:monospace">'+c.telefono+'</td>'+
-      '<td style="padding:10px 8px">'+( c.nombre||'<em style="color:#999">Sin nombre</em>')+'</td>'+
+      '<td style="padding:10px 8px"><div style="display:flex;align-items:center;gap:8px">'+
+        '<div style="width:30px;height:30px;border-radius:50%;background:'+colorAvatar(c.telefono)+';color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0">'+inicialesDe(c.telefono,c.nombre)+'</div>'+
+        '<span>'+( c.nombre||'<em style="color:#999">Sin nombre</em>')+'</span>'+
+      '</div></td>'+
       '<td style="padding:10px 8px"><span style="background:'+(etapaColor[c.etapa]||'#999')+'20;color:'+(etapaColor[c.etapa]||'#999')+';padding:3px 8px;border-radius:12px;font-size:12px">'+c.etapa+'</span></td>'+
       '<td style="padding:10px 8px;color:#666;font-size:12px">'+(c.prioridad||'Media')+'</td>'+
       '<td style="padding:10px 8px">'+
@@ -1629,14 +1634,8 @@ document.getElementById('btnCerrarPerfil').addEventListener('click',function(){
 });
 
 document.getElementById('buscar').addEventListener('input',function(){
-  var q=this.value.trim().toLowerCase();
-  document.querySelectorAll('.chat-item').forEach(function(el){
-    var tel=el.dataset.tel||'';
-    var nombre=(nombresContactos[tel]||'').toLowerCase();
-    var visible=el.querySelector('.chat-name').textContent.toLowerCase();
-    var hay=!q || tel.indexOf(q)>-1 || nombre.indexOf(q)>-1 || visible.indexOf(q)>-1;
-    el.style.display=hay?'':'none';
-  });
+  filtroBusqueda=this.value.trim().toLowerCase();
+  renderChats();
 });
 
 function cargarEtiquetas(){
@@ -1708,6 +1707,12 @@ function renderChats(){
   });
   var lista=Object.entries(contactos).sort(function(a,b){return new Date(b[1].ultimo.timestamp)-new Date(a[1].ultimo.timestamp);});
   if(filtroEtapa)lista=lista.filter(function(x){return x[1].etapa===filtroEtapa;});
+  if(filtroBusqueda){
+    lista=lista.filter(function(x){
+      var tel=x[0];
+      return tel.toLowerCase().indexOf(filtroBusqueda)>-1 || (nombresContactos[tel]||'').toLowerCase().indexOf(filtroBusqueda)>-1;
+    });
+  }
   var html=lista.map(function(x){
     var tel=x[0],data=x[1];
     return '<div class="chat-item'+(chatActivo===tel?' active':'')+'" data-tel="'+tel+'">'+
@@ -1722,7 +1727,10 @@ function renderChats(){
       (data.count>0?'<div class="badge">'+data.count+'</div>':'')+
     '</div>';
   }).join('');
-  document.getElementById('chatList').innerHTML=html||'<p style="padding:16px;color:#999;text-align:center">Sin conversaciones</p>';
+  var vacio = filtroBusqueda
+    ? '<p style="padding:24px 16px;color:#8696a0;text-align:center">🔎 No se encontró ningún contacto que coincida con “'+filtroBusqueda.replace(/</g,'&lt;')+'”.</p>'
+    : '<p style="padding:16px;color:#999;text-align:center">Sin conversaciones</p>';
+  document.getElementById('chatList').innerHTML=html||vacio;
   document.querySelectorAll('.chat-item').forEach(function(el){
     el.addEventListener('click',function(){abrirChat(this.dataset.tel);});
   });

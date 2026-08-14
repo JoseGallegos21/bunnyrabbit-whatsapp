@@ -91,13 +91,14 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
 .etiqueta-tag.selected{outline:2px solid #00a884}
 .btn-guardar{background:#00a884;color:white;border:none;padding:10px;border-radius:8px;cursor:pointer;font-size:14px;width:100%}
 .no-chat{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:#8696a0;background:#0b141a}
-.main-tabs{display:flex;flex-wrap:wrap;background:#202c33;border-bottom:1px solid #2a3942;padding:0 6px}
 /* Ocultar barras de scroll (siguen siendo arrastrables/scrolleables) */
 ::-webkit-scrollbar{width:0;height:0;background:transparent}
 *{scrollbar-width:none;-ms-overflow-style:none}
-.main-tab{padding:9px 12px;font-size:11px;cursor:pointer;border-bottom:2px solid transparent;color:#8696a0;font-weight:500;white-space:nowrap;display:flex;align-items:center;gap:4px}
-.main-tab.active{border-bottom:2px solid #00a884;color:#00a884}
-.main-tab i{font-size:13px}
+.main-tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;background:#111b21;border-bottom:1px solid #2a3942;padding:8px}
+.mtab{display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 2px;border-radius:10px;cursor:pointer;color:#8696a0;font-size:10.5px;font-weight:500;text-align:center;line-height:1.1}
+.mtab i{font-size:18px}
+.mtab:hover{background:#182229;color:#e9edef}
+.mtab.active{background:#132e26;color:#06cf9c}
 .attach-menu{position:absolute;bottom:52px;left:0;background:#233138;border-radius:12px;padding:8px;display:none;flex-direction:column;gap:2px;z-index:1000;min-width:200px;border:1px solid #2a3942;box-shadow:0 4px 20px rgba(0,0,0,0.4)}
 .attach-menu.open{display:flex}
 .attach-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;cursor:pointer;color:#e9edef;font-size:13px}
@@ -163,29 +164,35 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
   <div class="layout">
     <div class="sidebar">
       <div class="sidebar-header" style="flex-direction:column;padding:0">
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;width:100%;box-sizing:border-box">
-        <div style="display:flex;align-items:center;gap:8px">
-          <div style="width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center">
-            <i class="ti ti-message-circle" style="color:white;font-size:15px" aria-hidden="true"></i>
+        <div id="perfilHeader" onclick="toggleMiPerfil()" style="display:flex;align-items:center;gap:10px;padding:10px 14px;width:100%;box-sizing:border-box;cursor:pointer">
+          <div id="miAvatar" style="width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px;color:#fff;flex-shrink:0;background:#5a6b7a">··</div>
+          <div style="flex:1;min-width:0">
+            <div id="miNombre" style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</div>
+            <div id="userSubtitle" style="font-size:11px;color:rgba(255,255,255,0.7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</div>
           </div>
-          <div>
-            <div style="font-size:14px;font-weight:500">WhatsApp Sistema</div>
-            <div id="userSubtitle" style="font-size:10px;opacity:0.7"></div>
+          <i id="perfilChevron" class="ti ti-chevron-down" style="color:rgba(255,255,255,0.7);font-size:18px;transition:transform .2s" aria-hidden="true"></i>
+        </div>
+        <div id="miPerfilPanel" style="max-height:0;overflow:hidden;transition:max-height .28s ease;background:#0b141a;width:100%">
+          <div style="padding:16px">
+            <div style="display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;margin-bottom:14px">
+              <div id="miAvatarBig" style="width:74px;height:74px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:26px;color:#fff;background:#5a6b7a">··</div>
+              <div>
+                <div id="miNombreBig" style="font-size:16px;font-weight:600;color:#e9edef">—</div>
+                <span id="miRol" style="display:inline-block;background:#132e26;color:#4ee6b3;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;padding:3px 12px;border-radius:999px;margin-top:6px">—</span>
+              </div>
+            </div>
+            <div id="miPerfilDatos" style="font-size:13px"></div>
+            <a id="btnLogout" style="display:block;text-align:center;margin-top:14px;background:transparent;border:1px solid #4a2b2b;color:#f2a4a0;padding:9px;border-radius:10px;font-size:13px;cursor:pointer;text-decoration:none;font-weight:600">Cerrar sesión</a>
           </div>
         </div>
-        <a id="btnLogout" style="background:rgba(255,255,255,0.15);border:none;color:white;padding:4px 10px;border-radius:20px;font-size:12px;cursor:pointer;text-decoration:none">Salir</a>
       </div>
-    </div>
-      <div class="main-tabs" style="padding:8px 10px">
-        <select id="mainNav" onchange="switchMainTab(this.value)" style="width:100%;background:#2a3942;color:#e9edef;border:1px solid #2a3942;border-radius:8px;padding:10px;font-size:14px;font-weight:500;cursor:pointer">
-          <option value="chat">💬 Chat</option>
-          <option value="plantillas">📄 Plantillas</option>
-          <option value="remarketing">📡 Remarketing</option>
-          <option value="contactos">👥 Contactos</option>
-          <option value="etiquetas">🏷️ Etiquetas</option>
-        </select>
+      <div class="main-tabs">
+        <div class="mtab active" data-k="chat" onclick="switchMainTab('chat',this)"><i class="ti ti-message-circle" aria-hidden="true"></i><span>Chat</span></div>
+        <div class="mtab" data-k="plantillas" onclick="switchMainTab('plantillas',this)"><i class="ti ti-file-text" aria-hidden="true"></i><span>Plantillas</span></div>
+        <div class="mtab" data-k="remarketing" onclick="switchMainTab('remarketing',this)"><i class="ti ti-speakerphone" aria-hidden="true"></i><span>Remarketing</span></div>
+        <div class="mtab" data-k="contactos" onclick="switchMainTab('contactos',this)"><i class="ti ti-users" aria-hidden="true"></i><span>Contactos</span></div>
+        <div class="mtab" data-k="etiquetas" onclick="switchMainTab('etiquetas',this)"><i class="ti ti-tag" aria-hidden="true"></i><span>Etiquetas</span></div>
       </div>
-      <div id="userInfo" style="padding:7px 12px;font-size:12px;color:#8696a0;background:#111b21;border-bottom:1px solid #2a3942;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
       <div class="filters" id="filtros"></div>
       <div class="search-box"><input type="text" id="buscar" placeholder="Buscar..."></div>
       <div class="chat-list" id="chatList"></div>
@@ -1142,7 +1149,7 @@ function seleccionarRR(el){
 
 function switchMainTab(tab, btn){
   document.querySelectorAll('.main-section').forEach(function(s){ s.classList.remove('active'); });
-  var nav=document.getElementById('mainNav'); if(nav && nav.value!==tab) nav.value=tab; // sincronizar el desplegable
+  document.querySelectorAll('.mtab').forEach(function(t){ t.classList.toggle('active', t.dataset.k===tab); });
   var sec=document.getElementById('msec-'+tab);
   if(!sec) return;
   sec.classList.add('active');
@@ -1574,6 +1581,29 @@ function seguirProgresoDifusion(id, total){
 
 
 // Abre la app con la sesión ya cargada en `token`/`usuario` (usado al iniciar sesión y al recargar)
+function rolLabel(r){ return ({admin:'Admin',supervisor:'Supervisor',recepcionista:'Recepcionista',tecnica:'Técnica'})[r]||r||''; }
+function toggleMiPerfil(){
+  var p=document.getElementById('miPerfilPanel');
+  var abierto = p.style.maxHeight && p.style.maxHeight!=='0px';
+  p.style.maxHeight = abierto ? '0px' : '480px';
+  var ch=document.getElementById('perfilChevron'); if(ch) ch.style.transform = abierto ? '' : 'rotate(180deg)';
+}
+function cargarMiPerfil(){
+  document.getElementById('miNombreBig').textContent = usuario.nombre || '—';
+  document.getElementById('miRol').textContent = rolLabel(usuario.rol);
+  fetch('/api/mi-perfil',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(p){
+    var _e=function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');};
+    function fila(icon,lb,vl){ return '<div style="display:flex;align-items:center;gap:10px;padding:9px 2px;border-top:1px solid #1e2a30"><i class="ti '+icon+'" style="color:#8696a0;font-size:17px;width:20px;flex-shrink:0" aria-hidden="true"></i><span style="color:#8696a0;width:76px;flex-shrink:0;font-size:12.5px">'+lb+'</span><span style="color:#e9edef;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+_e(vl)+'</span></div>'; }
+    var h='';
+    h+=fila('ti-building-store','Sucursal', p.sucursal||'sin sucursal');
+    if(p.email) h+=fila('ti-mail','Correo', p.email);
+    if(p.telefono) h+=fila('ti-phone','Teléfono', p.telefono);
+    if(p.numero_id) h+=fila('ti-brand-whatsapp','Número', p.numero_id);
+    document.getElementById('miPerfilDatos').innerHTML=h;
+  }).catch(function(){});
+}
 function aplicarSesion(){
   // Redirigir según rol
   if(usuario.rol === 'supervisor'){ window.location.href = '/supervisor.html'; return; }
@@ -1581,10 +1611,16 @@ function aplicarSesion(){
   // recepcionista y admin se quedan en el chat principal
   document.getElementById('loginBox').style.display='none';
   document.getElementById('app').style.display='block';
-  var _esc=function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');};
-  document.getElementById('userInfo').innerHTML='<span style="color:#e9edef;font-weight:600">'+_esc(usuario.nombre)+'</span> · '+_esc(usuario.sucursal||'sin sucursal');
+  // Header de perfil (avatar con iniciales + nombre + rol/sucursal)
+  var nombre = usuario.nombre || 'Usuario';
+  var partes = nombre.trim().split(/\s+/).filter(Boolean);
+  var inic = (partes.length>=2 ? partes[0].charAt(0)+partes[1].charAt(0) : nombre.slice(0,2)).toUpperCase();
+  var col = colorAvatar(String(usuario.id||nombre));
+  document.getElementById('miNombre').textContent = nombre;
   var sub = document.getElementById('userSubtitle');
-  if(sub) sub.textContent = usuario.nombre + ' · ' + (usuario.sucursal||'');
+  if(sub) sub.textContent = rolLabel(usuario.rol) + ' · ' + (usuario.sucursal||'sin sucursal');
+  ['miAvatar','miAvatarBig'].forEach(function(id){ var el=document.getElementById(id); if(el){ el.textContent=inic; el.style.background=col; } });
+  cargarMiPerfil();
   fetch('/api/respuestas',{headers:{Authorization:'Bearer '+token}}).then(function(r){return r.json()}).then(function(d){misRespuestas=d;});
   setTimeout(iniciarAtajoRespuestas, 500);
   cargarEtiquetas();cargarNombresContactos();cargarMensajes();

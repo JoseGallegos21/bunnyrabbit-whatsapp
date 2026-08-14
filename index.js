@@ -641,6 +641,12 @@ app.get('/api/numeros', auth, (req, res) => {
   db.all('SELECT id, nombre, sucursal, phone_number_id FROM numeros', [], (err, rows) => res.json(rows || []));
 });
 
+// Perfil del usuario en sesión (para el panel de perfil del propio usuario).
+app.get('/api/mi-perfil', auth, (req, res) => {
+  db.get('SELECT id, nombre, email, rol, sucursal, numero_id, telefono FROM usuarios WHERE id=?',
+    [req.user.id], (e, row) => row ? res.json(row) : res.status(404).json({ error: 'No encontrado' }));
+});
+
 app.get('/api/metricas', auth, (req, res) => {
   const numero_id = req.user.rol === 'supervisor' ? req.query.numero_id || null : req.user.numero_id;
   const cond = [], params = [];

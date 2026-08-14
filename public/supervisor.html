@@ -109,6 +109,27 @@
   .form-group input:focus, .form-group select:focus { border-color: #00a884; }
   .form-group select option { background: #1f2c34; }
   .modal-actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px; }
+  /* Ocultar barras de scroll (siguen arrastrables) */
+  ::-webkit-scrollbar{width:0;height:0;background:transparent}
+  *{scrollbar-width:none;-ms-overflow-style:none}
+  /* Responsive: teléfono */
+  @media (max-width:768px){
+    .topbar{flex-wrap:wrap;gap:8px;padding:12px 16px}
+    .tabs{padding:0 8px;overflow-x:auto;white-space:nowrap}
+    .tab{padding:12px 14px;font-size:13px;flex-shrink:0}
+    .content{padding:14px}
+    .metricas-grid{grid-template-columns:1fr 1fr;gap:10px}
+    .metrica-card{padding:14px}
+    .metrica-card .valor{font-size:24px}
+    .tabla-container{overflow-x:auto}
+    .tabla-container table{min-width:560px}
+    .calendario-header{flex-wrap:wrap;gap:10px;align-items:flex-start}
+    #tab-calendario{overflow-x:auto}
+    .semana-grid{min-width:680px}
+    .chats-grid{grid-template-columns:1fr;height:auto}
+    .chats-lista{max-height:42vh}
+    .modal{padding:20px}
+  }
   .btn-cancel { background: transparent; border: 1px solid #2a3942; color: #8696a0; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; }
 
   .loading { text-align: center; padding: 40px; color: #8696a0; }

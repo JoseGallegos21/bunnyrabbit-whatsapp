@@ -599,6 +599,22 @@ var token='',usuario={},mensajes=[],chatActivo=null,etiquetas=[],filtroEtapa='',
 var mensajesConv=[],convTel=null; // historial COMPLETO de la conversación abierta
 var nombresContactos={}; // telefono -> nombre del contacto (para la lista de chats)
 function nombreDe(tel){ var n=nombresContactos[tel]; return n ? String(n).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ('+'+tel); }
+// Iniciales del contacto (del nombre si lo hay; si no, los últimos 2 dígitos).
+function inicialesDe(tel, nombreExplicito){
+  var n=nombreExplicito || nombresContactos[tel];
+  if(n){
+    var p=String(n).trim().split(/\s+/).filter(Boolean);
+    if(p.length>=2) return (p[0].charAt(0)+p[1].charAt(0)).toUpperCase();
+    if(p.length===1) return p[0].slice(0,2).toUpperCase();
+  }
+  return String(tel).slice(-2);
+}
+// Color consistente por contacto (mismo teléfono -> mismo color).
+function colorAvatar(tel){
+  var h=0, s=String(tel);
+  for(var i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0;
+  return 'hsl('+(h%360)+',42%,42%)';
+}
 function cargarNombresContactos(){
   // incluir_formulario=1: también los contactos que llegaron por anuncio, para que
   // su nombre de perfil aparezca en la lista (sus mensajes sí se ven en el chat).
@@ -1695,7 +1711,7 @@ function renderChats(){
   var html=lista.map(function(x){
     var tel=x[0],data=x[1];
     return '<div class="chat-item'+(chatActivo===tel?' active':'')+'" data-tel="'+tel+'">'+
-      '<div class="chat-avatar">'+tel.slice(-2)+'</div>'+
+      '<div class="chat-avatar" style="background:'+colorAvatar(tel)+'">'+inicialesDe(tel)+'</div>'+
       '<div class="chat-info">'+
         '<div class="chat-name" style="display:flex;align-items:center;gap:6px">'+
           '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+nombreDe(tel)+' <span class="etapa-pill etapa-'+data.etapa+'">'+data.etapa+'</span></span>'+
@@ -1730,7 +1746,7 @@ function abrirChat(tel){
     header.className='chat-header';
     header.innerHTML=
       '<button class="btn-atras" onclick="volverAListaChats()" title="Volver">&#8592;</button>'+
-      '<div class="chat-header-avatar">'+tel.slice(-2)+'</div>'+
+      '<div class="chat-header-avatar" style="background:'+colorAvatar(tel)+'">'+inicialesDe(tel,p.nombre)+'</div>'+
       '<div class="chat-header-info"><h3>'+(p.nombre||'+'+tel)+'</h3><p>+'+tel+
         (p.anuncio_url?' · <a href="'+encodeURI(p.anuncio_url)+'" target="_blank" rel="noopener" style="color:#53bdeb;text-decoration:none" title="'+(p.anuncio_titulo||'Anuncio').replace(/"/g,"&quot;")+'">📢 Vino de un anuncio</a>':'')+
       '</p></div>'+
@@ -2055,13 +2071,13 @@ function abrirPerfil(tel){
   .then(function(r){return r.json()})
   .then(function(p){
     var sel=(p.etiquetas||[]).map(function(e){return e.id;});
-    var iniciales=tel.slice(-2);
+    var iniciales=inicialesDe(tel,p.nombre);
     var bloqueado=p.bloqueado||false;
     var silenciado=p.silenciado||false;
     document.getElementById('perfilBody').innerHTML=
       // Avatar y datos
       '<div style="display:flex;flex-direction:column;align-items:center;padding:20px 0;border-bottom:1px solid #2a3942">'+
-        '<div class="perfil-avatar" style="width:72px;height:72px;font-size:26px;margin-bottom:8px">'+iniciales+'</div>'+
+        '<div class="perfil-avatar" style="width:72px;height:72px;font-size:26px;margin-bottom:8px;background:'+colorAvatar(tel)+'">'+iniciales+'</div>'+
         '<div style="color:#e9edef;font-size:16px;font-weight:500">'+(p.nombre||'Sin nombre')+'</div>'+
         '<div style="color:#8696a0;font-size:13px;margin-top:2px">+'+tel+'</div>'+
         (p.anuncio_url?'<a href="'+encodeURI(p.anuncio_url)+'" target="_blank" rel="noopener" style="margin-top:10px;background:#0b2e4a;border:1px solid #1d5c8f;color:#8fd0ff;text-decoration:none;padding:6px 12px;border-radius:8px;font-size:12px;max-width:90%;text-align:center">📢 Vino de un anuncio'+(p.anuncio_titulo?': “'+String(p.anuncio_titulo).replace(/</g,"&lt;").slice(0,60)+'”':'')+'</a>':'')+

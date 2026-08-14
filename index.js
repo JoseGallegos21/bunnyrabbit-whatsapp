@@ -144,7 +144,7 @@ db.serialize(() => {
       });
     });
   };
-  ensureColumns('usuarios', [['telefono', 'TEXT']]);
+  ensureColumns('usuarios', [['telefono', 'TEXT'], ['foto_url', 'TEXT']]);
   ensureColumns('plantillas', [
     ['idioma', "TEXT DEFAULT 'es'"],
     ['botones', 'TEXT']   // JSON con los textos de los botones de respuesta rapida
@@ -643,8 +643,16 @@ app.get('/api/numeros', auth, (req, res) => {
 
 // Perfil del usuario en sesión (para el panel de perfil del propio usuario).
 app.get('/api/mi-perfil', auth, (req, res) => {
-  db.get('SELECT id, nombre, email, rol, sucursal, numero_id, telefono FROM usuarios WHERE id=?',
+  db.get('SELECT id, nombre, email, rol, sucursal, numero_id, telefono, foto_url FROM usuarios WHERE id=?',
     [req.user.id], (e, row) => row ? res.json(row) : res.status(404).json({ error: 'No encontrado' }));
+});
+
+// El usuario sube/actualiza su propia foto de perfil.
+app.post('/api/mi-perfil/foto', auth, upload.single('foto'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No se subió ninguna imagen' });
+  const url = 'https://bunnyrabbit.lat/uploads/' + req.file.filename;
+  db.run('UPDATE usuarios SET foto_url=? WHERE id=?', [url, req.user.id],
+    err => err ? res.status(500).json({ error: err.message }) : res.json({ ok: true, url }));
 });
 
 app.get('/api/metricas', auth, (req, res) => {

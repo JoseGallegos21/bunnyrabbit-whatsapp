@@ -175,7 +175,9 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
         <div id="miPerfilPanel" style="max-height:0;overflow:hidden;transition:max-height .28s ease;background:#0b141a;width:100%">
           <div style="padding:16px">
             <div style="display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;margin-bottom:14px">
-              <div id="miAvatarBig" style="width:74px;height:74px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:26px;color:#fff;background:#5a6b7a">··</div>
+              <div id="miAvatarBig" style="width:74px;height:74px;border-radius:50%;overflow:hidden;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:26px;color:#fff;background:#5a6b7a">··</div>
+              <input type="file" id="fotoPerfilInput" accept="image/*" style="display:none" onchange="subirFotoPerfil(this)">
+              <button onclick="document.getElementById('fotoPerfilInput').click()" style="background:none;border:none;color:#06cf9c;font-size:12.5px;cursor:pointer;display:flex;align-items:center;gap:5px;padding:2px 4px"><i class="ti ti-camera" aria-hidden="true"></i> Cambiar foto</button>
               <div>
                 <div id="miNombreBig" style="font-size:16px;font-weight:600;color:#e9edef">—</div>
                 <span id="miRol" style="display:inline-block;background:#132e26;color:#4ee6b3;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;padding:3px 12px;border-radius:999px;margin-top:6px">—</span>
@@ -1581,7 +1583,25 @@ function seguirProgresoDifusion(id, total){
 
 
 // Abre la app con la sesión ya cargada en `token`/`usuario` (usado al iniciar sesión y al recargar)
+var miInic='', miCol='#5a6b7a';
 function rolLabel(r){ return ({admin:'Admin',supervisor:'Supervisor',recepcionista:'Recepcionista',tecnica:'Técnica'})[r]||r||''; }
+function pintarAvatarPerfil(fotoUrl, inic, col){
+  ['miAvatar','miAvatarBig'].forEach(function(id){
+    var el=document.getElementById(id); if(!el) return;
+    if(fotoUrl){ el.innerHTML='<img src="'+fotoUrl+'" style="width:100%;height:100%;object-fit:cover" alt="">'; el.style.background='transparent'; }
+    else { el.textContent=inic||''; el.style.background=col||'#5a6b7a'; }
+  });
+}
+function subirFotoPerfil(input){
+  var f=input.files&&input.files[0]; if(!f) return;
+  var fd=new FormData(); fd.append('foto', f);
+  fetch('/api/mi-perfil/foto',{method:'POST',headers:{Authorization:'Bearer '+token},body:fd})
+  .then(function(r){return r.json()}).then(function(d){
+    if(d.ok && d.url){ pintarAvatarPerfil(d.url, miInic, miCol); }
+    else alert('No se pudo subir: '+((d&&d.error)||'error'));
+  }).catch(function(){ alert('Error al subir la foto'); });
+  input.value='';
+}
 function toggleMiPerfil(){
   var p=document.getElementById('miPerfilPanel');
   var abierto = p.style.maxHeight && p.style.maxHeight!=='0px';
@@ -1594,6 +1614,7 @@ function cargarMiPerfil(){
   fetch('/api/mi-perfil',{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
   .then(function(p){
+    if(p.foto_url) pintarAvatarPerfil(p.foto_url, miInic, miCol);
     var _e=function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');};
     function fila(icon,lb,vl){ return '<div style="display:flex;align-items:center;gap:10px;padding:9px 2px;border-top:1px solid #1e2a30"><i class="ti '+icon+'" style="color:#8696a0;font-size:17px;width:20px;flex-shrink:0" aria-hidden="true"></i><span style="color:#8696a0;width:76px;flex-shrink:0;font-size:12.5px">'+lb+'</span><span style="color:#e9edef;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+_e(vl)+'</span></div>'; }
     var h='';
@@ -1619,7 +1640,8 @@ function aplicarSesion(){
   document.getElementById('miNombre').textContent = nombre;
   var sub = document.getElementById('userSubtitle');
   if(sub) sub.textContent = rolLabel(usuario.rol) + ' · ' + (usuario.sucursal||'sin sucursal');
-  ['miAvatar','miAvatarBig'].forEach(function(id){ var el=document.getElementById(id); if(el){ el.textContent=inic; el.style.background=col; } });
+  miInic=inic; miCol=col;
+  pintarAvatarPerfil(null, inic, col);
   cargarMiPerfil();
   fetch('/api/respuestas',{headers:{Authorization:'Bearer '+token}}).then(function(r){return r.json()}).then(function(d){misRespuestas=d;});
   setTimeout(iniciarAtajoRespuestas, 500);

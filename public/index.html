@@ -1697,9 +1697,9 @@ function renderChats(){
     return '<div class="chat-item'+(chatActivo===tel?' active':'')+'" data-tel="'+tel+'">'+
       '<div class="chat-avatar">'+tel.slice(-2)+'</div>'+
       '<div class="chat-info">'+
-        '<div class="chat-name" style="display:flex;align-items:center;justify-content:space-between;gap:6px">'+
-          '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+nombreDe(tel)+' <span class="etapa-pill etapa-'+data.etapa+'">'+data.etapa+'</span></span>'+
-          '<span style="font-size:11px;color:#8696a0;font-weight:400;flex-shrink:0">'+horaLista(data.ultimo.timestamp)+'</span>'+
+        '<div class="chat-name" style="display:flex;align-items:center;gap:6px">'+
+          '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+nombreDe(tel)+' <span class="etapa-pill etapa-'+data.etapa+'">'+data.etapa+'</span></span>'+
+          '<span style="font-size:11px;color:#8696a0;font-weight:400;flex-shrink:0;white-space:nowrap">'+horaLista(data.ultimo.timestamp)+'</span>'+
         '</div>'+
         '<div class="chat-preview">'+data.ultimo.mensaje+'</div>'+
       '</div>'+

@@ -574,6 +574,34 @@ app.get('/api/mensajes', auth, (req, res) => {
   db.all(`SELECT * FROM mensajes ${where} ORDER BY timestamp DESC LIMIT ${limit}`, params, (err, rows) => res.json(rows || []));
 });
 
+// Lista de CONVERSACIONES para la barra lateral: una fila por contacto con su
+// último mensaje, no leídos, nombre y etapa. Ordenadas por reciente. Así se ven
+// todas las conversaciones, no solo las que caben en los últimos 100 mensajes.
+app.get('/api/conversaciones', auth, (req, res) => {
+  const numero_id = req.user.rol === 'supervisor' ? req.query.numero_id : req.user.numero_id;
+  const cond = [], params = [];
+  if (numero_id) { cond.push('numero_id = ?'); params.push(numero_id); }
+  cond.push("(origen IS NULL OR origen != 'formulario_ads')");
+  const where = 'WHERE ' + cond.join(' AND ');
+  const lim = Math.min(parseInt(req.query.limit, 10) || 400, 1000);
+  db.all(`
+    SELECT sub.contacto, sub.mensaje, sub.timestamp, sub.direccion, sub.media_tipo, sub.msg_id, sub.no_leidos,
+           c.nombre, c.etapa
+    FROM (
+      SELECT contacto, mensaje, timestamp, direccion, media_tipo, id AS msg_id,
+             ROW_NUMBER() OVER (PARTITION BY contacto ORDER BY timestamp DESC) rn,
+             SUM(CASE WHEN leido=0 AND direccion='entrante' THEN 1 ELSE 0 END) OVER (PARTITION BY contacto) no_leidos
+      FROM mensajes ${where}
+    ) sub
+    LEFT JOIN contactos c ON c.telefono = sub.contacto
+    WHERE sub.rn = 1
+    ORDER BY sub.timestamp DESC
+    LIMIT ${lim}`, params, (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows || []);
+  });
+});
+
 // Descarga bajo demanda el archivo multimedia de un mensaje. Pide a Meta la URL
 // temporal con el token del número y hace de proxy (el navegador nunca ve el
 // token). Solo funciona mientras el archivo siga en los servidores de Meta;

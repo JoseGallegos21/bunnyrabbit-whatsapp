@@ -599,6 +599,16 @@ var token='',usuario={},mensajes=[],chatActivo=null,etiquetas=[],filtroEtapa='',
 var mensajesConv=[],convTel=null; // historial COMPLETO de la conversación abierta
 var nombresContactos={}; // telefono -> nombre del contacto (para la lista de chats)
 var filtroBusqueda=''; // texto del buscador de chats (persiste entre re-renders)
+var conversaciones=[]; // lista de conversaciones (una por contacto) para la barra lateral
+function cargarConversaciones(){
+  fetch('/api/conversaciones',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    conversaciones=Array.isArray(d)?d:[];
+    conversaciones.forEach(function(c){ if(c.nombre) nombresContactos[c.contacto]=c.nombre; });
+    renderChats();
+  }).catch(function(){});
+}
 function nombreDe(tel){ var n=nombresContactos[tel]; return n ? String(n).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ('+'+tel); }
 // Iniciales del contacto (del nombre si lo hay; si no, los últimos 2 dígitos).
 function inicialesDe(tel, nombreExplicito){
@@ -1662,7 +1672,8 @@ function renderFiltros(){
 function cargarMensajes(){
   fetch('/api/mensajes',{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
-  .then(function(d){mensajes=d;renderChats();cargarMetricas();if(chatActivo)cargarConversacion(chatActivo);});
+  .then(function(d){mensajes=d;cargarMetricas();if(chatActivo)cargarConversacion(chatActivo);});
+  cargarConversaciones();
 }
 
 function cargarMetricas(){
@@ -1699,32 +1710,27 @@ function horaLista(ts){
   return d.toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit',year:'2-digit'});
 }
 function renderChats(){
-  var contactos={};
-  mensajes.forEach(function(m){
-    if(!contactos[m.contacto])contactos[m.contacto]={ultimo:m,count:0,etapa:'Nuevo',prioridad:'Media'};
-    if(!m.leido&&m.direccion==='entrante')contactos[m.contacto].count++;
-    if(new Date(m.timestamp)>new Date(contactos[m.contacto].ultimo.timestamp))contactos[m.contacto].ultimo=m;
-  });
-  var lista=Object.entries(contactos).sort(function(a,b){return new Date(b[1].ultimo.timestamp)-new Date(a[1].ultimo.timestamp);});
-  if(filtroEtapa)lista=lista.filter(function(x){return x[1].etapa===filtroEtapa;});
+  var lista=(conversaciones||[]).slice();
+  if(filtroEtapa)lista=lista.filter(function(c){return (c.etapa||'Nuevo')===filtroEtapa;});
   if(filtroBusqueda){
-    lista=lista.filter(function(x){
-      var tel=x[0];
-      return tel.toLowerCase().indexOf(filtroBusqueda)>-1 || (nombresContactos[tel]||'').toLowerCase().indexOf(filtroBusqueda)>-1;
+    lista=lista.filter(function(c){
+      var tel=c.contacto;
+      return tel.toLowerCase().indexOf(filtroBusqueda)>-1 || (nombresContactos[tel]||c.nombre||'').toLowerCase().indexOf(filtroBusqueda)>-1;
     });
   }
-  var html=lista.map(function(x){
-    var tel=x[0],data=x[1];
+  var html=lista.map(function(c){
+    var tel=c.contacto, etapa=c.etapa||'Nuevo';
+    var preview=String(c.mensaje||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');
     return '<div class="chat-item'+(chatActivo===tel?' active':'')+'" data-tel="'+tel+'">'+
-      '<div class="chat-avatar" style="background:'+colorAvatar(tel)+'">'+inicialesDe(tel)+'</div>'+
+      '<div class="chat-avatar" style="background:'+colorAvatar(tel)+'">'+inicialesDe(tel,c.nombre)+'</div>'+
       '<div class="chat-info">'+
         '<div class="chat-name" style="display:flex;align-items:center;gap:6px">'+
-          '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+nombreDe(tel)+' <span class="etapa-pill etapa-'+data.etapa+'">'+data.etapa+'</span></span>'+
-          '<span style="font-size:11px;color:#8696a0;font-weight:400;flex-shrink:0;white-space:nowrap">'+horaLista(data.ultimo.timestamp)+'</span>'+
+          '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+nombreDe(tel)+' <span class="etapa-pill etapa-'+etapa+'">'+etapa+'</span></span>'+
+          '<span style="font-size:11px;color:#8696a0;font-weight:400;flex-shrink:0;white-space:nowrap">'+horaLista(c.timestamp)+'</span>'+
         '</div>'+
-        '<div class="chat-preview">'+data.ultimo.mensaje+'</div>'+
+        '<div class="chat-preview">'+preview+'</div>'+
       '</div>'+
-      (data.count>0?'<div class="badge">'+data.count+'</div>':'')+
+      (c.no_leidos>0?'<div class="badge">'+c.no_leidos+'</div>':'')+
     '</div>';
   }).join('');
   var vacio = filtroBusqueda

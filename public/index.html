@@ -600,7 +600,9 @@ var mensajesConv=[],convTel=null; // historial COMPLETO de la conversación abie
 var nombresContactos={}; // telefono -> nombre del contacto (para la lista de chats)
 function nombreDe(tel){ var n=nombresContactos[tel]; return n ? String(n).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ('+'+tel); }
 function cargarNombresContactos(){
-  fetch('/api/contactos',{headers:{Authorization:'Bearer '+token}})
+  // incluir_formulario=1: también los contactos que llegaron por anuncio, para que
+  // su nombre de perfil aparezca en la lista (sus mensajes sí se ven en el chat).
+  fetch('/api/contactos?incluir_formulario=1',{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
   .then(function(d){ if(Array.isArray(d)){ d.forEach(function(c){ if(c.telefono&&c.nombre) nombresContactos[c.telefono]=c.nombre; }); if(typeof renderChats==='function') renderChats(); } })
   .catch(function(){});
@@ -1611,9 +1613,13 @@ document.getElementById('btnCerrarPerfil').addEventListener('click',function(){
 });
 
 document.getElementById('buscar').addEventListener('input',function(){
-  var q=this.value;
+  var q=this.value.trim().toLowerCase();
   document.querySelectorAll('.chat-item').forEach(function(el){
-    el.style.display=el.querySelector('.chat-name').textContent.includes(q)?'':'none';
+    var tel=el.dataset.tel||'';
+    var nombre=(nombresContactos[tel]||'').toLowerCase();
+    var visible=el.querySelector('.chat-name').textContent.toLowerCase();
+    var hay=!q || tel.indexOf(q)>-1 || nombre.indexOf(q)>-1 || visible.indexOf(q)>-1;
+    el.style.display=hay?'':'none';
   });
 });
 
@@ -1667,6 +1673,16 @@ function limpiarRangoMetricas(){
   cargarMetricas();
 }
 
+// Hora del último mensaje para la lista: hoy -> HH:MM, ayer -> "Ayer", más viejo -> fecha.
+function horaLista(ts){
+  if(!ts) return '';
+  var d=new Date(ts); if(isNaN(d)) return '';
+  var hoy=new Date();
+  if(d.toDateString()===hoy.toDateString()) return d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+  var ayer=new Date(hoy.getTime()-86400000);
+  if(d.toDateString()===ayer.toDateString()) return 'Ayer';
+  return d.toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit',year:'2-digit'});
+}
 function renderChats(){
   var contactos={};
   mensajes.forEach(function(m){
@@ -1681,7 +1697,10 @@ function renderChats(){
     return '<div class="chat-item'+(chatActivo===tel?' active':'')+'" data-tel="'+tel+'">'+
       '<div class="chat-avatar">'+tel.slice(-2)+'</div>'+
       '<div class="chat-info">'+
-        '<div class="chat-name">'+nombreDe(tel)+' <span class="etapa-pill etapa-'+data.etapa+'">'+data.etapa+'</span></div>'+
+        '<div class="chat-name" style="display:flex;align-items:center;justify-content:space-between;gap:6px">'+
+          '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+nombreDe(tel)+' <span class="etapa-pill etapa-'+data.etapa+'">'+data.etapa+'</span></span>'+
+          '<span style="font-size:11px;color:#8696a0;font-weight:400;flex-shrink:0">'+horaLista(data.ultimo.timestamp)+'</span>'+
+        '</div>'+
         '<div class="chat-preview">'+data.ultimo.mensaje+'</div>'+
       '</div>'+
       (data.count>0?'<div class="badge">'+data.count+'</div>':'')+

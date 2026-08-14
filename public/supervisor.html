@@ -666,6 +666,25 @@ async function abrirChat(id, nombre) {
   if (mc) mc.scrollTop = mc.scrollHeight;
   cargarMediaVisibles();
 }
+// Visor de imagen dentro de la app (lightbox): clic en el fondo o Escape cierra.
+function abrirLightbox(src){
+  var ov=document.getElementById('lightbox');
+  if(!ov){
+    ov=document.createElement('div');
+    ov.id='lightbox';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:9999;display:none;align-items:center;justify-content:center;cursor:zoom-out';
+    ov.onclick=function(){ ov.style.display='none'; };
+    var img=document.createElement('img');
+    img.id='lightboxImg';
+    img.style.cssText='max-width:92vw;max-height:92vh;border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,.6)';
+    img.onclick=function(e){ e.stopPropagation(); };
+    ov.appendChild(img);
+    document.body.appendChild(ov);
+    document.addEventListener('keydown',function(e){ if(e.key==='Escape' && ov.style.display!=='none') ov.style.display='none'; });
+  }
+  document.getElementById('lightboxImg').src=src;
+  ov.style.display='flex';
+}
 // Descarga los adjuntos visibles vía el proxy /api/media/:id y los pinta como blob.
 function cargarMediaVisibles(){
   document.querySelectorAll('.media-wrap[data-mid]:not([data-cargado])').forEach(function(w){
@@ -675,7 +694,7 @@ function cargarMediaVisibles(){
     .then(function(r){ if(!r.ok) throw new Error('no'); return r.blob(); })
     .then(function(b){
       var u=URL.createObjectURL(b);
-      if(tipo==='image'||tipo==='sticker') w.innerHTML='<img src="'+u+'" style="max-width:240px;max-height:300px;border-radius:8px;display:block;cursor:pointer" onclick="window.open(this.src)">';
+      if(tipo==='image'||tipo==='sticker') w.innerHTML='<img src="'+u+'" style="max-width:240px;max-height:300px;border-radius:8px;display:block;cursor:zoom-in" onclick="abrirLightbox(this.src)">';
       else if(tipo==='video') w.innerHTML='<video src="'+u+'" controls style="max-width:240px;border-radius:8px;display:block"></video>';
       else if(tipo==='audio') w.innerHTML='<audio src="'+u+'" controls style="max-width:220px"></audio>';
       else w.innerHTML='<a href="'+u+'" download style="color:#53bdeb;text-decoration:none">📄 Descargar documento</a>';

@@ -166,7 +166,12 @@ db.serialize(() => {
     ['costo_usd', 'REAL DEFAULT 0'],
     ['errores', 'TEXT']          // JSON con los errores agrupados, para que sean visibles
   ]);
-  ensureColumns('contactos', [['origen', 'TEXT']]);
+  ensureColumns('contactos', [
+    ['origen', 'TEXT'],
+    ['anuncio_url', 'TEXT'],      // link del anuncio de origen (referral.source_url)
+    ['anuncio_titulo', 'TEXT'],   // titular/texto del anuncio (referral.headline/body)
+    ['anuncio_tipo', 'TEXT']      // ad | post
+  ]);
   // ruta = posicion del contacto en el arbol del workflow (soporta ramas anidadas)
   ensureColumns('workflow_inscripciones', [
     ['ruta', 'TEXT'],
@@ -849,13 +854,15 @@ async function coexProcesarEchoes(value) {
       const telefono = m.to || m.recipient_id || m.from;
       if (!telefono) continue;
       const { texto } = textoDeMensaje(m);
+      const mediaEco = mediaDeMensaje(m);
+      const textoEco = mediaEco ? (mediaEco.caption || etiquetaMedia(mediaEco.media_tipo)) : texto;
       // Usar la fecha REAL del mensaje (m.timestamp en segundos). Antes se omitía y
       // tomaba CURRENT_TIMESTAMP -> ecos de mensajes viejos contaban como de hoy e
       // inflaban las métricas del día.
       let tsEco = null;
       if (m.timestamp) { const d = new Date(Number(m.timestamp) * 1000); if (!isNaN(d)) tsEco = d.toISOString().slice(0, 19).replace('T', ' '); }
-      db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, timestamp, origen) VALUES (?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP),?)',
-        [numero_id, telefono, texto, 'saliente', tsEco, 'celular']);
+      db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, timestamp, origen, media_id, media_tipo, media_mime) VALUES (?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP),?,?,?,?)',
+        [numero_id, telefono, textoEco, 'saliente', tsEco, 'celular', mediaEco?.media_id || null, mediaEco?.media_tipo || null, mediaEco?.media_mime || null]);
       db.run("INSERT INTO contactos (telefono, numero_id, etapa, prioridad, origen) VALUES (?,?,'Nuevo','Media','celular') ON CONFLICT(telefono) DO NOTHING", [telefono, numero_id]);
     }
   } catch (e) { console.error('[COEX] echoes:', e.message); }
@@ -952,6 +959,14 @@ app.post('/webhook', verificarFirmaMeta, (req, res) => {
           db.run(`INSERT INTO contactos (telefono, numero_id, etapa, prioridad, origen) VALUES (?, ?, 'Nuevo', 'Media', ?) ON CONFLICT(telefono) DO NOTHING`, [telefono, numero_id, origen]);
           // Guardar el nombre de perfil solo si el contacto aun no tiene nombre (no pisa uno manual).
           if (perfiles[telefono]) db.run("UPDATE contactos SET nombre=? WHERE telefono=? AND (nombre IS NULL OR nombre='')", [perfiles[telefono], telefono]);
+          // Anuncio de origen: si el chat nace de un anuncio (Click-to-WhatsApp), Meta
+          // manda `referral` con el link y el titular. Lo guardamos como primer contacto
+          // publicitario (no lo pisamos si ya tenia uno).
+          const ref = msg.referral;
+          if (ref && (ref.source_url || ref.source_id)) {
+            db.run("UPDATE contactos SET anuncio_url=?, anuncio_titulo=?, anuncio_tipo=? WHERE telefono=? AND (anuncio_url IS NULL OR anuncio_url='')",
+              [ref.source_url || null, ref.headline || ref.body || null, ref.source_type || null, telefono]);
+          }
           // Si un workflow esta esperando la respuesta de este contacto, enrutar por el boton
           wfRutearRespuesta(telefono, texto).catch(err => console.error('[WF] rutear respuesta:', err.message));
         }

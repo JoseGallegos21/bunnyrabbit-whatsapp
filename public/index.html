@@ -995,7 +995,7 @@ function selColor(el){
   document.getElementById('et_color').value = colorSeleccionado;
 }
 
-function cargarEtiquetas(){
+function cargarEtiquetasPanel(){
   fetch('/api/etiquetas',{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
   .then(function(d){
@@ -1026,7 +1026,7 @@ function crearEtiqueta(){
     if(d.ok){
       msg.textContent='✓ Etiqueta creada'; msg.style.color='#2e7d32';
       document.getElementById('et_nombre').value='';
-      cargarEtiquetas();
+      cargarEtiquetasPanel();
       setTimeout(function(){ msg.textContent=''; },2000);
     } else { msg.textContent=d.error||'Error'; msg.style.color='red'; }
   });
@@ -1035,7 +1035,7 @@ function crearEtiqueta(){
 function eliminarEtiqueta(btn){
   if(!confirm('¿Eliminar esta etiqueta?')) return;
   fetch('/api/etiquetas/'+btn.dataset.id,{method:'DELETE',headers:{Authorization:'Bearer '+token}})
-  .then(function(){cargarEtiquetas();});
+  .then(function(){cargarEtiquetasPanel();});
 }
 
 
@@ -1163,7 +1163,7 @@ function switchMainTab(tab, btn){
   if(tab==='difusion'){ cargarHistorialDifPanel(); cargarPlantillasDifusion(); }
   if(tab==='remarketing') remkInit();
   if(tab==='contactos') cargarContactos();
-  if(tab==='etiquetas') cargarEtiquetas();
+  if(tab==='etiquetas') cargarEtiquetasPanel();
   // Escritorio: ocultar el panel de chat vacio cuando hay otra seccion activa, para
   // que la seccion ocupe todo el ancho (evita la columna oscura al lado).
   var layDesk=document.querySelector('.layout');
@@ -1813,6 +1813,8 @@ function volverAListaChats(){
 }
 
 function abrirChat(tel){
+  // Si estabas en otra pestaña (Plantillas/Etiquetas/etc.), volver al Chat para verlo
+  switchMainTab('chat');
   chatActivo=tel;renderChats();
   fetch('/api/leer/'+tel,{method:'PUT',headers:{Authorization:'Bearer '+token}}).then(function(){});fetch('/api/contactos/'+tel,{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})

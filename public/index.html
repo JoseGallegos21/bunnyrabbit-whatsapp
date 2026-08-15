@@ -209,6 +209,7 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
       <div class="main-section active" id="msec-chat" style="flex-direction:column;overflow:hidden;flex:1;min-height:0">
         <div style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden">
           <div id="chatHeader"></div>
+          <div id="adPreview" style="display:none;flex-shrink:0"></div>
           <div id="mensajesArea" class="messages" style="display:none"></div>
           <div class="no-chat" id="noChat"><p>Selecciona una conversacion</p></div>
           <div id="inputAreaStatic" style="display:none;flex-shrink:0;background:#202c33;padding:8px 12px;border-top:1px solid #2a3942"></div>
@@ -1832,6 +1833,22 @@ function abrirChat(tel){
       '</p></div>'+
       '<button class="btn-perfil" id="btnAgendarCita" style="margin-right:8px"><i class="bx bx-calendar-plus"></i> Agendar</button>'+
       '<button class="btn-perfil" id="btnAbrirPerfil">Perfil</button>';
+    // Vista previa del anuncio (Click-to-WhatsApp): imagen + titulo + cuerpo + link
+    var adPrev=document.getElementById('adPreview');
+    if(adPrev){
+      if(p.anuncio_url||p.anuncio_imagen){
+        var adImg=p.anuncio_imagen
+          ? '<img src="'+encodeURI(p.anuncio_imagen)+'" style="width:52px;height:52px;border-radius:8px;object-fit:cover;flex-shrink:0" onerror="this.style.display=&#39;none&#39;">'
+          : '<div style="width:52px;height:52px;border-radius:8px;background:#0b2e4a;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:22px">📢</div>';
+        var adTit=(p.anuncio_titulo||'Anuncio').replace(/</g,'&lt;');
+        var adCue=(p.anuncio_cuerpo&&p.anuncio_cuerpo!==p.anuncio_titulo)?'<div style="color:#8696a0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+String(p.anuncio_cuerpo).replace(/</g,'&lt;')+'</div>':'';
+        var adLink=p.anuncio_url?'<a href="'+encodeURI(p.anuncio_url)+'" target="_blank" rel="noopener" style="color:#53bdeb;font-size:12px;text-decoration:none;white-space:nowrap;flex-shrink:0">Ver anuncio ↗</a>':'<span style="color:#667781;font-size:11px;white-space:nowrap">sin link</span>';
+        adPrev.innerHTML='<div style="display:flex;gap:10px;align-items:center;background:#111b21;border:1px solid #2a3942;border-left:3px solid #53bdeb;border-radius:8px;padding:8px 10px;margin:8px 12px 0">'+adImg+
+          '<div style="min-width:0;flex:1"><div style="font-size:10px;color:#53bdeb;font-weight:700;letter-spacing:.04em;margin-bottom:2px">📢 VINO DE UN ANUNCIO</div>'+
+          '<div style="font-size:13px;color:#e9edef;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+adTit+'</div>'+adCue+'</div>'+adLink+'</div>';
+        adPrev.style.display='block';
+      } else { adPrev.style.display='none'; adPrev.innerHTML=''; }
+    }
     var mensajesDiv=document.getElementById('mensajesArea');
     mensajesDiv.style.display='flex';
     var inputStatic=document.getElementById('inputAreaStatic');

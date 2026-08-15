@@ -170,7 +170,9 @@ db.serialize(() => {
     ['origen', 'TEXT'],
     ['anuncio_url', 'TEXT'],      // link del anuncio de origen (referral.source_url)
     ['anuncio_titulo', 'TEXT'],   // titular/texto del anuncio (referral.headline/body)
-    ['anuncio_tipo', 'TEXT']      // ad | post
+    ['anuncio_tipo', 'TEXT'],     // ad | post
+    ['anuncio_imagen', 'TEXT'],   // imagen/thumbnail del anuncio (referral.image_url/thumbnail_url)
+    ['anuncio_cuerpo', 'TEXT']    // cuerpo/descripcion del anuncio (referral.body)
   ]);
   // ruta = posicion del contacto en el arbol del workflow (soporta ramas anidadas)
   ensureColumns('workflow_inscripciones', [
@@ -1005,9 +1007,11 @@ app.post('/webhook', verificarFirmaMeta, (req, res) => {
           // manda `referral` con el link y el titular. Lo guardamos como primer contacto
           // publicitario (no lo pisamos si ya tenia uno).
           const ref = msg.referral;
+          if (ref) console.log('[ADS] referral:', JSON.stringify(ref).slice(0, 700)); // TEMP: confirmar campos reales (imagen)
           if (ref && (ref.source_url || ref.source_id)) {
-            db.run("UPDATE contactos SET anuncio_url=?, anuncio_titulo=?, anuncio_tipo=? WHERE telefono=? AND (anuncio_url IS NULL OR anuncio_url='')",
-              [ref.source_url || null, ref.headline || ref.body || null, ref.source_type || null, telefono]);
+            const adImg = ref.image_url || ref.thumbnail_url || ref.media_url || null;
+            db.run("UPDATE contactos SET anuncio_url=?, anuncio_titulo=?, anuncio_cuerpo=?, anuncio_imagen=?, anuncio_tipo=? WHERE telefono=? AND (anuncio_url IS NULL OR anuncio_url='')",
+              [ref.source_url || null, ref.headline || ref.body || null, ref.body || null, adImg, ref.source_type || null, telefono]);
           }
           // Si un workflow esta esperando la respuesta de este contacto, enrutar por el boton
           wfRutearRespuesta(telefono, texto).catch(err => console.error('[WF] rutear respuesta:', err.message));

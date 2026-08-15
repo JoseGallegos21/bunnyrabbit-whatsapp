@@ -355,7 +355,7 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
                 <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Filtrar por etapa</label>
                 <select id="dif_etapa" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px">
                   <option value="">Todos los contactos</option>
-                  <option>Nuevo</option><option>Seguimiento</option><option>Propuesta</option><option>Cerrado</option>
+                  <option>Nuevo</option><option>Seguimiento</option><option>Propuesta</option><option>Cerrado</option><option>Perdido</option>
                 </select>
               </div>
             </div>
@@ -402,7 +402,7 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
             <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Contactos</label>
             <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
               <input type="text" id="remk_buscar" placeholder="Buscar por nombre o teléfono..." oninput="remkRender()" style="flex:1;min-width:120px;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">
-              <select id="remk_etapa" onchange="remkRender()" style="padding:7px;border:1px solid #ddd;border-radius:6px;font-size:13px"><option value="">Todas las etapas</option><option>Nuevo</option><option>Seguimiento</option><option>Propuesta</option><option>Cerrado</option></select>
+              <select id="remk_etapa" onchange="remkRender()" style="padding:7px;border:1px solid #ddd;border-radius:6px;font-size:13px"><option value="">Todas las etapas</option><option>Nuevo</option><option>Seguimiento</option><option>Propuesta</option><option>Cerrado</option><option>Perdido</option></select>
             </div>
             <div id="remk_tags_wrap" style="margin-bottom:8px;display:none">
               <div style="font-size:11px;color:#888;margin-bottom:4px">Filtrar por etiqueta — clic para alternar: <span style="color:#2e7d32">✓ solo con esta</span> · <span style="color:#c62828">✗ excluir</span></div>
@@ -451,7 +451,7 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
                 <input type="text" id="buscarContacto" placeholder="Buscar..." style="padding:7px 12px;border:1px solid #ddd;border-radius:20px;font-size:13px;width:180px" oninput="filtrarContactos()">
                 <select id="filtroEtapaContactos" onchange="filtrarContactos()" style="padding:7px;border:1px solid #ddd;border-radius:6px;font-size:13px">
                   <option value="">Todas las etapas</option>
-                  <option>Nuevo</option><option>Seguimiento</option><option>Propuesta</option><option>Cerrado</option>
+                  <option>Nuevo</option><option>Seguimiento</option><option>Propuesta</option><option>Cerrado</option><option>Perdido</option>
                 </select>
               </div>
             </div>
@@ -482,7 +482,7 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
               <div style="margin-bottom:10px">
                 <label style="font-size:12px;color:#666">Etapa</label>
                 <select id="ec_etapa" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px;font-size:13px;margin-top:4px">
-                  <option>Nuevo</option><option>Seguimiento</option><option>Propuesta</option><option>Cerrado</option>
+                  <option>Nuevo</option><option>Seguimiento</option><option>Propuesta</option><option>Cerrado</option><option>Perdido</option>
                 </select>
               </div>
               <div style="margin-bottom:10px">
@@ -904,7 +904,7 @@ function renderContactos(lista){
   var count = document.getElementById('contactosCount');
   if(!tbody) return;
   if(count) count.textContent = lista.length + ' contactos';
-  var etapaColor = {Nuevo:'#3498db',Seguimiento:'#f39c12',Propuesta:'#9b59b6',Cerrado:'#2e7d32'};
+  var etapaColor = {Nuevo:'#3498db',Seguimiento:'#f39c12',Propuesta:'#9b59b6',Cerrado:'#2e7d32',Perdido:'#e57373'};
   tbody.innerHTML = lista.length ? lista.map(function(c){
     return '<tr style="border-bottom:1px solid #f0f0f0;hover:background:#f9f9f9">'+
       '<td style="padding:10px 8px;font-family:monospace">'+c.telefono+'</td>'+
@@ -1719,7 +1719,7 @@ function cargarEtiquetas(){
 }
 
 function renderFiltros(){
-  var etapas=['Todos','Nuevo','Seguimiento','Propuesta','Cerrado'];
+  var etapas=['Todos','Nuevo','Seguimiento','Propuesta','Cerrado','Perdido'];
   document.getElementById('filtros').innerHTML=etapas.map(function(e){
     return '<button class="filter-btn'+(filtroEtapa===''&&e==='Todos'?' active':filtroEtapa===e?' active':'')+'" data-etapa="'+(e==='Todos'?'':e)+'">'+e+'</button>';
   }).join('');

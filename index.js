@@ -172,7 +172,8 @@ db.serialize(() => {
     ['anuncio_titulo', 'TEXT'],   // titular/texto del anuncio (referral.headline/body)
     ['anuncio_tipo', 'TEXT'],     // ad | post
     ['anuncio_imagen', 'TEXT'],   // imagen/thumbnail del anuncio (referral.image_url/thumbnail_url)
-    ['anuncio_cuerpo', 'TEXT']    // cuerpo/descripcion del anuncio (referral.body)
+    ['anuncio_cuerpo', 'TEXT'],   // cuerpo/descripcion del anuncio (referral.body)
+    ['etapa_desde', 'DATETIME']   // cuando entro a la etapa actual (para enfriar leads sin avance)
   ]);
   // ruta = posicion del contacto en el arbol del workflow (soporta ramas anidadas)
   ensureColumns('workflow_inscripciones', [
@@ -362,8 +363,8 @@ app.get('/api/contactos', auth, (req, res) => {
 app.put('/api/contactos/:id', auth, requireRole('admin', 'supervisor', 'recepcionista'), async (req, res) => {
   const { nombre, etapa, prioridad, notas } = req.body;
   db.get('SELECT etapa, telefono, numero_id, nombre as nombre_actual FROM contactos WHERE id=?', [req.params.id], (err, contactoAnterior) => {
-    db.run('UPDATE contactos SET nombre=?, etapa=?, prioridad=?, notas=? WHERE id=?',
-      [nombre, etapa||'Nuevo', prioridad||'Media', notas||'', req.params.id],
+    db.run('UPDATE contactos SET nombre=?, etapa=?, prioridad=?, notas=?, etapa_desde=CASE WHEN etapa!=? THEN CURRENT_TIMESTAMP ELSE etapa_desde END WHERE id=?',
+      [nombre, etapa||'Nuevo', prioridad||'Media', notas||'', etapa||'Nuevo', req.params.id],
       async (err2) => {
         if (!err2 && contactoAnterior && etapa && etapa !== contactoAnterior.etapa) {
           // Disparador de workflows: cambio de etapa
@@ -576,6 +577,23 @@ const loginIntentos = new Map(); // ip -> { fallos, hasta }
 function ipDe(req) { return (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'desconocida'; }
 // Limpieza periodica para que el Map no crezca sin fin
 setInterval(() => { const ahora = Date.now(); for (const [ip, v] of loginIntentos) if (v.hasta < ahora) loginIntentos.delete(ip); }, 60 * 60 * 1000);
+
+// Enfriar leads: contactos que se quedaron en 'Nuevo' (nunca avanzaron) por 2 dias y
+// sin mensaje entrante reciente pasan a 'Perdido' (segmento para remarketing). No toca
+// a los que ya avanzaron (Seguimiento/Propuesta/Cerrado). Corre cada 3h + una al arrancar.
+function enfriarLeadsPerdidos() {
+  db.run(`UPDATE contactos SET etapa='Perdido', etapa_desde=CURRENT_TIMESTAMP
+    WHERE etapa='Nuevo'
+      AND (origen IS NULL OR origen='formulario_ads')
+      AND COALESCE(etapa_desde, created_at) <= datetime('now','-2 days')
+      AND telefono NOT IN (SELECT DISTINCT contacto FROM mensajes WHERE direccion='entrante' AND timestamp >= datetime('now','-2 days'))`,
+    function (err) {
+      if (err) console.error('[PERDIDO]', err.message);
+      else if (this.changes) console.log('[PERDIDO] ' + this.changes + ' leads enfriados a Perdido');
+    });
+}
+setInterval(enfriarLeadsPerdidos, 3 * 60 * 60 * 1000);
+setTimeout(enfriarLeadsPerdidos, 30 * 1000);
 
 app.post('/api/login', (req, res) => {
   const ip = ipDe(req);
@@ -1038,7 +1056,9 @@ app.post('/webhook', verificarFirmaMeta, (req, res) => {
           const origen = origenDelMensaje(msg, texto);
           db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion, origen, media_id, media_tipo, media_mime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             [numero_id, telefono, textoFinal, 'entrante', origen, media?.media_id || null, media?.media_tipo || null, media?.media_mime || null]);
-          db.run(`INSERT INTO contactos (telefono, numero_id, etapa, prioridad, origen) VALUES (?, ?, 'Nuevo', 'Media', ?) ON CONFLICT(telefono) DO NOTHING`, [telefono, numero_id, origen]);
+          db.run(`INSERT INTO contactos (telefono, numero_id, etapa, prioridad, origen, etapa_desde) VALUES (?, ?, 'Nuevo', 'Media', ?, CURRENT_TIMESTAMP) ON CONFLICT(telefono) DO NOTHING`, [telefono, numero_id, origen]);
+          // Reactivar: si un contacto "Perdido" vuelve a escribir, regresa a Nuevo
+          db.run("UPDATE contactos SET etapa='Nuevo', etapa_desde=CURRENT_TIMESTAMP WHERE telefono=? AND etapa='Perdido'", [telefono]);
           // Guardar el nombre de perfil solo si el contacto aun no tiene nombre (no pisa uno manual).
           if (perfiles[telefono]) db.run("UPDATE contactos SET nombre=? WHERE telefono=? AND (nombre IS NULL OR nombre='')", [perfiles[telefono], telefono]);
           // Anuncio de origen: si el chat nace de un anuncio (Click-to-WhatsApp), Meta

@@ -1828,7 +1828,7 @@ function abrirChat(tel){
       '<button class="btn-atras" onclick="volverAListaChats()" title="Volver">&#8592;</button>'+
       '<div class="chat-header-avatar" style="background:'+colorAvatar(tel)+'">'+inicialesDe(tel,p.nombre)+'</div>'+
       '<div class="chat-header-info"><h3>'+(p.nombre||'+'+tel)+'</h3><p>+'+tel+
-        (p.anuncio_url?' · <a href="'+encodeURI(p.anuncio_url)+'" target="_blank" rel="noopener" style="color:#53bdeb;text-decoration:none" title="'+(p.anuncio_titulo||'Anuncio').replace(/"/g,"&quot;")+'">📢 Vino de un anuncio</a>':'')+
+        (p.anuncio_url?' · <a href="'+encodeURI(p.anuncio_url)+'" target="_blank" rel="noopener" style="color:#53bdeb;text-decoration:none" title="'+(p.anuncio_titulo||'Anuncio').replace(/"/g,"&quot;")+'">📢 Vino de un anuncio</a>':(p.origen==='formulario_ads'?' · <span style="color:#8696a0" title="Lead de anuncio; el link no se guardo (escribio antes de activar el registro)">📢 Vino de un anuncio</span>':''))+
       '</p></div>'+
       '<button class="btn-perfil" id="btnAgendarCita" style="margin-right:8px"><i class="bx bx-calendar-plus"></i> Agendar</button>'+
       '<button class="btn-perfil" id="btnAbrirPerfil">Perfil</button>';
@@ -2160,7 +2160,7 @@ function abrirPerfil(tel){
         '<div class="perfil-avatar" style="width:72px;height:72px;font-size:26px;margin-bottom:8px;background:'+colorAvatar(tel)+'">'+iniciales+'</div>'+
         '<div style="color:#e9edef;font-size:16px;font-weight:500">'+(p.nombre||'Sin nombre')+'</div>'+
         '<div style="color:#8696a0;font-size:13px;margin-top:2px">+'+tel+'</div>'+
-        (p.anuncio_url?'<a href="'+encodeURI(p.anuncio_url)+'" target="_blank" rel="noopener" style="margin-top:10px;background:#0b2e4a;border:1px solid #1d5c8f;color:#8fd0ff;text-decoration:none;padding:6px 12px;border-radius:8px;font-size:12px;max-width:90%;text-align:center">📢 Vino de un anuncio'+(p.anuncio_titulo?': “'+String(p.anuncio_titulo).replace(/</g,"&lt;").slice(0,60)+'”':'')+'</a>':'')+
+        (p.anuncio_url?'<a href="'+encodeURI(p.anuncio_url)+'" target="_blank" rel="noopener" style="margin-top:10px;background:#0b2e4a;border:1px solid #1d5c8f;color:#8fd0ff;text-decoration:none;padding:6px 12px;border-radius:8px;font-size:12px;max-width:90%;text-align:center">📢 Vino de un anuncio'+(p.anuncio_titulo?': “'+String(p.anuncio_titulo).replace(/</g,"&lt;").slice(0,60)+'”':'')+'</a>':(p.origen==='formulario_ads'?'<div style="margin-top:10px;background:#26333d;border:1px solid #3a4a54;color:#8696a0;padding:6px 12px;border-radius:8px;font-size:12px;max-width:90%;text-align:center">📢 Vino de un anuncio (link no disponible)</div>':''))+
       '</div>'+
       // Acciones rapidas
       '<div style="display:flex;justify-content:space-around;padding:16px;border-bottom:1px solid #2a3942">'+

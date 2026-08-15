@@ -474,6 +474,9 @@ tr:last-child td{border-bottom:none}
             <select id="wf_sucursal" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;background:#fff">
               <option value="">Todas las sucursales</option>
             </select>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#666;margin-top:8px;cursor:pointer">
+              <input type="checkbox" id="wf_todas_coex"> 📢 Crear una copia por cada sucursal en coexistencia (solo al crear)
+            </label>
           </div>
         </div>
 
@@ -1419,7 +1422,7 @@ document.getElementById('btnCrearPlantilla').addEventListener('click',function()
   .then(function(r){return r.json()})
   .then(function(d){
     var msg=document.getElementById('msgPlantilla');
-    if(d.ok){msg.textContent='Plantilla guardada y enviada a Meta ✓';msg.style.color='#2e7d32';cargarPlantillas();
+    if(d.ok){msg.textContent=d.todas?('Enviada a '+d.total+' sucursal(es): '+d.enviadas+' ok'+(d.fallidas?', '+d.fallidas+' con error':'')+' ✓'):'Plantilla guardada y enviada a Meta ✓';msg.style.color='#2e7d32';cargarPlantillas();
       document.getElementById('p_nombre').value='';document.getElementById('p_contenido').value='';
       document.getElementById('p_footer').value='';
       document.getElementById('botones_container').innerHTML='';
@@ -1458,7 +1461,7 @@ function cargarNumerosEnSelectores(){
   .then(function(r){return r.json()})
   .then(function(d){
     var opts='<option value="">Todos los números</option>';
-    var optsP='<option value="">-- Seleccionar número --</option>';
+    var optsP='<option value="">-- Seleccionar número --</option><option value="TODAS">📢 Todas las sucursales (coexistencia)</option>';
     d.forEach(function(n){
       opts+='<option value="'+n.phone_number_id+'">'+n.nombre+' ('+n.sucursal+')</option>';
       optsP+='<option value="'+n.phone_number_id+'">'+n.nombre+' ('+n.sucursal+')</option>';
@@ -2689,6 +2692,8 @@ function wfGuardar(){
     sucursal:document.getElementById('wf_sucursal').value||null,
     activo:document.getElementById('wf_activo').checked?1:0
   };
+  var chkTodas=document.getElementById('wf_todas_coex');
+  if(!wfActual && chkTodas && chkTodas.checked) datos.todas_coexistencia=true;
   if(!datos.nombre){ msg.textContent='Ponle un nombre'; msg.style.color='#c62828'; return; }
   if(!datos.pasos.length){ msg.textContent='Añade al menos un paso'; msg.style.color='#c62828'; return; }
   var envios=datos.pasos.filter(function(p){return p.tipo==='enviar_plantilla'}).length;
@@ -2700,7 +2705,7 @@ function wfGuardar(){
   .then(function(r){return r.json()})
   .then(function(d){
     if(d.ok){
-      msg.textContent='✓ Guardada'+(d.aviso?' — '+d.aviso:''); msg.style.color='#2e7d32';
+      msg.textContent=(d.todas?('✓ Creados '+d.creados+' (uno por sucursal en coexistencia)'):'✓ Guardada')+(d.aviso?' — '+d.aviso:''); msg.style.color='#2e7d32';
       wfCargar();
       if(!wfActual) setTimeout(wfCerrarEditor,1500);
     } else { msg.textContent=d.error||'Error'; msg.style.color='#c62828'; }

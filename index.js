@@ -1230,38 +1230,41 @@ app.get('/api/plantillas', auth, (req, res) => {
   }
 });
 
+// Crea una plantilla local y la envia a Meta (edge message_templates de la WABA del
+// numero). Devuelve {estado, id, sucursal, error?}. Si el numero no tiene WABA/token
+// (ej. plantilla Global), queda como 'pendiente' sin enviarse.
+async function crearPlantillaEnNumero(nombre, categoria, contenido, numId) {
+  const plantillaId = await new Promise((resolve, reject) => db.run(
+    'INSERT INTO plantillas (nombre, categoria, contenido, phone_number_id, estado_meta) VALUES (?,?,?,?,?)',
+    [nombre, categoria || 'General', contenido, numId, 'pendiente'], function (e) { e ? reject(e) : resolve(this.lastID); }));
+  const numRow = await new Promise(r => db.get('SELECT * FROM numeros WHERE phone_number_id=?', [numId], (e, row) => r(row)));
+  if (!numRow || !numRow.token || !numRow.waba_id) return { estado: 'sin_waba', id: plantillaId, sucursal: (numRow && numRow.sucursal) || numId };
+  try {
+    const metaRes = await require('axios').post(
+      `https://graph.facebook.com/v18.0/${numRow.waba_id}/message_templates`,
+      { name: nombre.toLowerCase().replace(/\s+/g, '_'), category: categoria === 'Marketing' ? 'MARKETING' : 'UTILITY', language: 'es', components: [{ type: 'BODY', text: contenido }] },
+      { headers: { Authorization: 'Bearer ' + numRow.token } });
+    await new Promise(r => db.run('UPDATE plantillas SET meta_template_id=?, estado_meta=? WHERE id=?', [metaRes.data?.id || null, 'enviada', plantillaId], () => r()));
+    return { estado: 'enviada', id: plantillaId, sucursal: numRow.sucursal || numId };
+  } catch (e) {
+    await new Promise(r => db.run('UPDATE plantillas SET estado_meta=? WHERE id=?', ['error_envio', plantillaId], () => r()));
+    return { estado: 'error_envio', id: plantillaId, sucursal: numRow.sucursal || numId, error: e.response?.data?.error?.message || e.message };
+  }
+}
+
 app.post('/api/plantillas', auth, requireRole('admin', 'supervisor', 'recepcionista'), async (req, res) => {
   const { nombre, categoria, contenido, phone_number_id } = req.body;
-  const numId = phone_number_id || req.user.numero_id;
-  db.run('INSERT INTO plantillas (nombre, categoria, contenido, phone_number_id, estado_meta) VALUES (?, ?, ?, ?, ?)',
-    [nombre, categoria || 'General', contenido, numId, 'pendiente'], async function(err) {
-      if (err) return res.json({ ok: false, error: err.message });
-      const plantillaId = this.lastID;
-      // Enviar a Meta para aprobacion
-      try {
-        const numRow = await new Promise((resolve, reject) => {
-          db.get('SELECT * FROM numeros WHERE phone_number_id=?', [numId], (e, row) => e ? reject(e) : resolve(row));
-        });
-        // Meta exige el WABA ID (no el phone_number_id) para el edge message_templates
-        if (numRow && numRow.token && numRow.waba_id) {
-          const metaRes = await require('axios').post(
-            `https://graph.facebook.com/v18.0/${numRow.waba_id}/message_templates`,
-            {
-              name: nombre.toLowerCase().replace(/\s+/g, '_'),
-              category: categoria === 'Marketing' ? 'MARKETING' : 'UTILITY',
-              language: 'es',
-              components: [{ type: 'BODY', text: contenido }]
-            },
-            { headers: { Authorization: 'Bearer ' + numRow.token } }
-          );
-          const metaId = metaRes.data?.id || null;
-          db.run('UPDATE plantillas SET meta_template_id=?, estado_meta=? WHERE id=?', [metaId, 'enviada', plantillaId]);
-        }
-      } catch(e) {
-        db.run('UPDATE plantillas SET estado_meta=? WHERE id=?', ['error_envio', plantillaId]);
-      }
-      res.json({ ok: true, id: plantillaId });
-  });
+  if (!nombre || !contenido) return res.json({ ok: false, error: 'Nombre y contenido son obligatorios' });
+  // "TODAS" = replicar a cada sucursal en coexistencia (una plantilla por WABA)
+  if (phone_number_id === 'TODAS') {
+    const nums = await new Promise(r => db.all("SELECT phone_number_id, sucursal FROM numeros WHERE es_coexistencia=1 AND waba_id IS NOT NULL AND waba_id!='' AND token IS NOT NULL AND token!=''", [], (e, rr) => r(rr || [])));
+    if (!nums.length) return res.json({ ok: false, error: 'No hay sucursales en coexistencia con WABA y token.' });
+    const resultados = [];
+    for (const n of nums) resultados.push(await crearPlantillaEnNumero(nombre, categoria, contenido, n.phone_number_id));
+    return res.json({ ok: true, todas: true, total: nums.length, enviadas: resultados.filter(r => r.estado === 'enviada').length, fallidas: resultados.filter(r => r.estado === 'error_envio').length, resultados });
+  }
+  const r = await crearPlantillaEnNumero(nombre, categoria, contenido, phone_number_id || req.user.numero_id);
+  res.json({ ok: true, id: r.id, estado: r.estado });
 });
 
 app.put('/api/plantillas/:id', auth, requireRole('admin', 'supervisor', 'recepcionista'), (req, res) => {
@@ -1280,6 +1283,34 @@ const META_STATUS_MAP = {
   PAUSED: 'pausada', DISABLED: 'deshabilitada', IN_APPEAL: 'en_apelacion',
   PENDING_DELETION: 'pendiente_baja', DELETED: 'eliminada', LIMIT_EXCEEDED: 'limite_excedido'
 };
+
+// Auto-sincroniza el estado de las plantillas con Meta (pendiente -> aprobada, etc.)
+// sin depender del boton. Corre cada 30 min + una vez al arrancar.
+async function autoSyncPlantillasMeta() {
+  try {
+    const wabas = await new Promise(r => db.all(`SELECT phone_number_id, waba_id, token FROM numeros WHERE waba_id IS NOT NULL AND waba_id!='' AND token IS NOT NULL AND token!=''`, [], (e, rows) => r(rows || [])));
+    let cambios = 0;
+    for (const n of wabas) {
+      try {
+        const resp = await axios.get(`https://graph.facebook.com/v18.0/${n.waba_id}/message_templates?fields=id,name,status,category,language,components&limit=200`, { headers: { Authorization: 'Bearer ' + n.token } });
+        for (const t of (resp.data.data || [])) {
+          const estado = META_STATUS_MAP[t.status] || String(t.status || '').toLowerCase() || 'pendiente';
+          const body = (t.components || []).find(c => c.type === 'BODY');
+          const contenido = (body && body.text) ? body.text : '';
+          const compBtns = (t.components || []).find(c => c.type === 'BUTTONS');
+          const botonesJson = JSON.stringify(compBtns && Array.isArray(compBtns.buttons) ? compBtns.buttons.filter(x => x.type === 'QUICK_REPLY').map(x => x.text) : []);
+          let fila = await new Promise(r => db.get('SELECT id FROM plantillas WHERE meta_template_id=?', [t.id], (e, row) => r(row)));
+          if (!fila) fila = await new Promise(r => db.get('SELECT id FROM plantillas WHERE nombre=? AND phone_number_id=? AND (meta_template_id IS NULL OR meta_template_id="")', [t.name, n.phone_number_id], (e, row) => r(row)));
+          if (fila) { await new Promise(r => db.run(`UPDATE plantillas SET meta_template_id=?, estado_meta=?, contenido=CASE WHEN contenido IS NULL OR contenido='' THEN ? ELSE contenido END, idioma=?, botones=?, phone_number_id=COALESCE(phone_number_id,?) WHERE id=?`, [t.id, estado, contenido, t.language || 'es', botonesJson, n.phone_number_id, fila.id], () => r())); cambios++; }
+          else { await new Promise(r => db.run('INSERT INTO plantillas (nombre, categoria, contenido, phone_number_id, estado_meta, meta_template_id, idioma, botones) VALUES (?,?,?,?,?,?,?,?)', [t.name, t.category || 'General', contenido, n.phone_number_id, estado, t.id, t.language || 'es', botonesJson], () => r())); cambios++; }
+        }
+      } catch (e) { /* seguir con la siguiente WABA */ }
+    }
+    if (cambios) console.log('[PLANTILLAS] auto-sync: ' + cambios + ' actualizadas/importadas');
+  } catch (e) { console.error('[PLANTILLAS] auto-sync:', e.message); }
+}
+setInterval(autoSyncPlantillasMeta, 30 * 60 * 1000);
+setTimeout(autoSyncPlantillasMeta, 60 * 1000);
 
 app.post('/api/plantillas/sync', auth, async (req, res) => {
   try {
@@ -3193,11 +3224,19 @@ app.get('/api/workflows', auth, requireRole('admin', 'supervisor'), async (req, 
 });
 
 app.post('/api/workflows', auth, requireRole('admin', 'supervisor'), async (req, res) => {
-  const { nombre, trigger_tipo, trigger_config, pasos, sucursal } = req.body;
+  const { nombre, trigger_tipo, trigger_config, pasos, sucursal, todas_coexistencia } = req.body;
   if (!nombre || !trigger_tipo) return res.status(400).json({ error: 'Nombre y disparador son obligatorios' });
+  const cfg = JSON.stringify(trigger_config || {}), pj = JSON.stringify(pasos || []);
   try {
+    // "todas_coexistencia" = crear una copia del workflow por cada sucursal en coexistencia
+    if (todas_coexistencia) {
+      const sucs = await new Promise(r => db.all("SELECT DISTINCT sucursal FROM numeros WHERE es_coexistencia=1 AND sucursal IS NOT NULL AND sucursal!=''", [], (e, rr) => r(rr || [])));
+      if (!sucs.length) return res.status(400).json({ error: 'No hay sucursales en coexistencia' });
+      for (const s of sucs) await wfRun('INSERT INTO workflows (nombre, trigger_tipo, trigger_config, pasos, sucursal, activo) VALUES (?,?,?,?,?,0)', [nombre, trigger_tipo, cfg, pj, s.sucursal]);
+      return res.json({ ok: true, todas: true, creados: sucs.length, sucursales: sucs.map(s => s.sucursal), aviso: 'Creados desactivados, uno por sucursal en coexistencia.' });
+    }
     const r = await wfRun('INSERT INTO workflows (nombre, trigger_tipo, trigger_config, pasos, sucursal, activo) VALUES (?,?,?,?,?,0)',
-      [nombre, trigger_tipo, JSON.stringify(trigger_config || {}), JSON.stringify(pasos || []), sucursal || null]);
+      [nombre, trigger_tipo, cfg, pj, sucursal || null]);
     // Nace desactivado a proposito
     res.json({ ok: true, id: r.lastID, activo: 0, aviso: 'Creado desactivado. Actívalo cuando lo hayas revisado.' });
   } catch (e) { res.status(500).json({ error: e.message }); }

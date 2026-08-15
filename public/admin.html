@@ -237,8 +237,8 @@ tr:last-child td{border-bottom:none}
 
           <!-- SUCURSALES EN COEXISTENCIA (cobertura) -->
           <div class="form-group" style="margin-bottom:12px">
-            <label>Enviar a sucursales en coexistencia <span style="color:#999;font-weight:400;font-size:12px">· marca las que quieras · ✓ = ya la tiene</span></label>
-            <div id="p_cobertura" style="border:1px solid #eee;border-radius:8px;padding:8px;max-height:170px;overflow-y:auto;font-size:13px;color:#888">Escribe el nombre de la plantilla para ver las sucursales…</div>
+            <label>📢 Enviar a sucursales <span style="color:#999;font-weight:400;font-size:12px">· en coexistencia · escribe el nombre para ver cuáles ya la tienen</span></label>
+            <div id="p_cobertura" style="border:1px solid #e0e0e0;border-radius:10px;max-height:230px;overflow-y:auto;font-size:13px;background:#fff"><div style="color:#999;padding:10px">Escribe el nombre de la plantilla para elegir sucursales…</div></div>
           </div>
 
           <!-- ENCABEZADO -->
@@ -481,8 +481,8 @@ tr:last-child td{border-bottom:none}
               <option value="">Todas las sucursales</option>
             </select>
             <div style="margin-top:8px">
-              <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">📢 Crear en sucursales de coexistencia (solo al crear) · ✓ = ya lo tiene</label>
-              <div id="wf_cobertura" style="border:1px solid #eee;border-radius:8px;padding:6px;max-height:150px;overflow-y:auto;font-size:13px;color:#888">Ponle nombre al workflow para ver las sucursales…</div>
+              <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">📢 Crear en sucursales de coexistencia <span style="color:#999">· solo al crear · ✓ = ya lo tiene</span></label>
+              <div id="wf_cobertura" style="border:1px solid #e0e0e0;border-radius:10px;max-height:200px;overflow-y:auto;font-size:13px;background:#fff"><div style="color:#999;padding:10px">Ponle nombre al workflow para ver las sucursales…</div></div>
             </div>
           </div>
         </div>
@@ -1394,23 +1394,35 @@ function eliminarUsuario(id,nombre){
 
 var _cobTimer=null;
 function cargarCoberturaPlantillaDebounced(){ clearTimeout(_cobTimer); _cobTimer=setTimeout(cargarCoberturaPlantilla,400); }
+function pCobCount(){ var c=document.querySelectorAll('#p_cobertura .p-cob:checked:not(:disabled)').length; var el=document.getElementById('p_cob_count'); if(el) el.textContent=c; }
+function pCobSel(v){ document.querySelectorAll('#p_cobertura .p-cob:not(:disabled)').forEach(function(c){ c.checked=!!v; }); pCobCount(); }
 function cargarCoberturaPlantilla(){
   var cont=document.getElementById('p_cobertura'); if(!cont) return;
   var nombre=(document.getElementById('p_nombre').value||'').toLowerCase().replace(/\s+/g,'_');
-  if(!nombre){ cont.innerHTML='Escribe el nombre de la plantilla para ver las sucursales…'; return; }
+  if(!nombre){ cont.innerHTML='<div style="color:#999;padding:10px">Escribe el nombre de la plantilla para elegir sucursales…</div>'; return; }
+  cont.innerHTML='<div style="color:#999;padding:10px">Cargando sucursales…</div>';
   fetch('/api/plantillas/cobertura?nombre='+encodeURIComponent(nombre),{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
   .then(function(rows){
-    if(!rows||!rows.length){ cont.innerHTML='<span style="color:#c0392b">No hay sucursales en coexistencia conectadas.</span>'; return; }
-    cont.innerHTML=rows.map(function(n){
+    if(!rows||!rows.length){ cont.innerHTML='<div style="color:#c0392b;padding:10px">No hay sucursales en coexistencia conectadas.</div>'; return; }
+    var faltan=rows.filter(function(n){return !n.tiene;}).length;
+    var head='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border-bottom:1px solid #eee;background:#fafafa;position:sticky;top:0;font-size:12px">'+
+      '<span style="color:#666"><b id="p_cob_count">0</b> seleccionadas · '+faltan+' por enviar</span>'+
+      (faltan?'<span><a href="#" onclick="pCobSel(1);return false" style="color:#075e54;text-decoration:none;font-weight:600">Todas</a> &nbsp;·&nbsp; <a href="#" onclick="pCobSel(0);return false" style="color:#888;text-decoration:none">Ninguna</a></span>':'')+
+    '</div>';
+    var body=rows.map(function(n){
       var ya=n.tiene;
-      return '<label style="display:flex;align-items:center;gap:8px;padding:5px 4px">'+
-        '<input type="checkbox" class="p-cob" value="'+n.phone_number_id+'" '+(ya?'checked disabled':'checked')+'>'+
-        '<span style="color:#333">'+(n.sucursal||n.phone_number_id)+'</span>'+
-        (ya?'<span style="margin-left:auto;color:#2e7d32;font-size:12px">✓ ya la tiene</span>':'<span style="margin-left:auto;color:#f39c12;font-size:12px">— falta</span>')+
+      return '<label style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid #f2f2f2;cursor:'+(ya?'default':'pointer')+';'+(ya?'background:#fafffb':'')+'">'+
+        '<input type="checkbox" class="p-cob" value="'+n.phone_number_id+'" onchange="pCobCount()" '+(ya?'checked disabled':'checked')+' style="width:16px;height:16px;flex-shrink:0">'+
+        '<span style="width:28px;height:28px;border-radius:8px;background:#eef2f5;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">🏢</span>'+
+        '<span style="flex:1;min-width:0;font-weight:500;color:#333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(n.sucursal||n.phone_number_id)+'</span>'+
+        (ya
+          ? '<span style="background:#e8f5e9;color:#2e7d32;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap">✓ Ya la tiene</span>'
+          : '<span style="background:#fff3e0;color:#e67e22;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap">Falta</span>')+
       '</label>';
     }).join('');
-  }).catch(function(){ cont.innerHTML='<span style="color:#c0392b">Error al cargar sucursales.</span>'; });
+    cont.innerHTML=head+body; pCobCount();
+  }).catch(function(){ cont.innerHTML='<div style="color:#c0392b;padding:10px">Error al cargar sucursales.</div>'; });
 }
 
 function cargarPlantillas(){
@@ -1491,7 +1503,7 @@ function cargarNumerosEnSelectores(){
   .then(function(r){return r.json()})
   .then(function(d){
     var opts='<option value="">Todos los números</option>';
-    var optsP='<option value="">-- Seleccionar número --</option><option value="TODAS">📢 Todas las sucursales (coexistencia)</option>';
+    var optsP='<option value="">-- Un número específico (o usa la lista de abajo) --</option>';
     d.forEach(function(n){
       opts+='<option value="'+n.phone_number_id+'">'+n.nombre+' ('+n.sucursal+')</option>';
       optsP+='<option value="'+n.phone_number_id+'">'+n.nombre+' ('+n.sucursal+')</option>';
@@ -2716,24 +2728,36 @@ function wfZoomReset(){
 
 var _wfCobTimer=null;
 function cargarCoberturaWorkflowDebounced(){ clearTimeout(_wfCobTimer); _wfCobTimer=setTimeout(cargarCoberturaWorkflow,400); }
+function wfCobCount(){ var c=document.querySelectorAll('#wf_cobertura .wf-cob:checked:not(:disabled)').length; var el=document.getElementById('wf_cob_count'); if(el) el.textContent=c; }
+function wfCobSel(v){ document.querySelectorAll('#wf_cobertura .wf-cob:not(:disabled)').forEach(function(c){ c.checked=!!v; }); wfCobCount(); }
 function cargarCoberturaWorkflow(){
   var cont=document.getElementById('wf_cobertura'); if(!cont) return;
-  if(typeof wfActual!=='undefined' && wfActual){ cont.innerHTML='<span style="color:#999">La replicación solo aplica al crear uno nuevo.</span>'; return; }
+  if(typeof wfActual!=='undefined' && wfActual){ cont.innerHTML='<div style="color:#999;padding:10px">La replicación solo aplica al crear uno nuevo.</div>'; return; }
   var nombre=(document.getElementById('wf_nombre').value||'').trim();
-  if(!nombre){ cont.innerHTML='Ponle nombre al workflow para ver las sucursales…'; return; }
+  if(!nombre){ cont.innerHTML='<div style="color:#999;padding:10px">Ponle nombre al workflow para ver las sucursales…</div>'; return; }
+  cont.innerHTML='<div style="color:#999;padding:10px">Cargando sucursales…</div>';
   fetch('/api/workflows/cobertura?nombre='+encodeURIComponent(nombre),{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
   .then(function(rows){
-    if(!rows||!rows.length){ cont.innerHTML='<span style="color:#c0392b">No hay sucursales en coexistencia conectadas.</span>'; return; }
-    cont.innerHTML=rows.map(function(n){
+    if(!rows||!rows.length){ cont.innerHTML='<div style="color:#c0392b;padding:10px">No hay sucursales en coexistencia conectadas.</div>'; return; }
+    var faltan=rows.filter(function(n){return !n.tiene;}).length;
+    var head='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border-bottom:1px solid #eee;background:#fafafa;position:sticky;top:0;font-size:12px">'+
+      '<span style="color:#666"><b id="wf_cob_count">0</b> seleccionadas · '+faltan+' por crear</span>'+
+      (faltan?'<span><a href="#" onclick="wfCobSel(1);return false" style="color:#075e54;text-decoration:none;font-weight:600">Todas</a> &nbsp;·&nbsp; <a href="#" onclick="wfCobSel(0);return false" style="color:#888;text-decoration:none">Ninguna</a></span>':'')+
+    '</div>';
+    var body=rows.map(function(n){
       var ya=n.tiene;
-      return '<label style="display:flex;align-items:center;gap:8px;padding:5px 4px">'+
-        '<input type="checkbox" class="wf-cob" value="'+h(n.sucursal)+'" '+(ya?'checked disabled':'checked')+'>'+
-        '<span style="color:#333">'+h(n.sucursal)+'</span>'+
-        (ya?'<span style="margin-left:auto;color:#2e7d32;font-size:12px">✓ ya lo tiene</span>':'<span style="margin-left:auto;color:#f39c12;font-size:12px">— falta</span>')+
+      return '<label style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid #f2f2f2;cursor:'+(ya?'default':'pointer')+';'+(ya?'background:#fafffb':'')+'">'+
+        '<input type="checkbox" class="wf-cob" value="'+h(n.sucursal)+'" onchange="wfCobCount()" '+(ya?'checked disabled':'checked')+' style="width:16px;height:16px;flex-shrink:0">'+
+        '<span style="width:28px;height:28px;border-radius:8px;background:#eef2f5;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">🏢</span>'+
+        '<span style="flex:1;min-width:0;font-weight:500;color:#333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+h(n.sucursal)+'</span>'+
+        (ya
+          ? '<span style="background:#e8f5e9;color:#2e7d32;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap">✓ Ya lo tiene</span>'
+          : '<span style="background:#fff3e0;color:#e67e22;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap">Falta</span>')+
       '</label>';
     }).join('');
-  }).catch(function(){ cont.innerHTML='<span style="color:#c0392b">Error al cargar sucursales.</span>'; });
+    cont.innerHTML=head+body; wfCobCount();
+  }).catch(function(){ cont.innerHTML='<div style="color:#c0392b;padding:10px">Error al cargar sucursales.</div>'; });
 }
 
 function wfGuardar(){

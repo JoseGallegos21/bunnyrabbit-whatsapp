@@ -115,6 +115,10 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
 
 .layout{display:flex;height:100vh;overflow:hidden}
 .main{flex:1;display:flex;overflow:hidden;min-height:0}
+/* Escritorio: al abrir otra seccion (Plantillas/Remarketing/Contactos/Etiquetas),
+   ocultar el panel del chat (vacio) para que la seccion ocupe TODO el ancho en vez
+   de dejar una columna oscura a un lado. En movil la seccion ya va a pantalla completa. */
+.layout.seccion-abierta>.main{display:none}
 .main-section.active{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
 .chat-area{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;background:#0b141a}
 .messages{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:4px;min-height:0}
@@ -1160,6 +1164,10 @@ function switchMainTab(tab, btn){
   if(tab==='remarketing') remkInit();
   if(tab==='contactos') cargarContactos();
   if(tab==='etiquetas') cargarEtiquetas();
+  // Escritorio: ocultar el panel de chat vacio cuando hay otra seccion activa, para
+  // que la seccion ocupe todo el ancho (evita la columna oscura al lado).
+  var layDesk=document.querySelector('.layout');
+  if(layDesk) layDesk.classList.toggle('seccion-abierta', tab!=='chat');
   // En móvil: las secciones viven dentro de .main (oculto por defecto). Para Chat
   // se muestra la lista (sidebar); para las demás se muestra la sección a pantalla
   // completa con un botón "atrás" para volver al menú.

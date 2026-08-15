@@ -2321,6 +2321,42 @@ app.get('/api/asistencias', auth, (req, res) => {
     params, (e, rows) => e ? res.status(500).json({ error: e.message }) : res.json(rows || []));
 });
 
+// Normaliza un nombre para cruzar la cita de Google (que trae "Nombre-Bel SUCURSAL",
+// emojis, etc.) contra los nombres de los contactos: toma la parte antes del "-", quita
+// acentos, emojis y simbolos, y colapsa espacios.
+function normNombre(s) {
+  return String(s || '').normalize('NFC')
+    .split('-')[0]
+    .replace(/[áàäâã]/gi, 'a').replace(/[éèëê]/gi, 'e').replace(/[íìïî]/gi, 'i')
+    .replace(/[óòöôõ]/gi, 'o').replace(/[úùüû]/gi, 'u').replace(/ñ/gi, 'n')
+    .replace(/[^A-Za-z\s]/g, ' ')
+    .toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+// Al marcar "Vino" (asistio) desde el rol TECNICA: cruza el nombre de la cita con los
+// contactos; si hay UNA sola coincidencia dispara Purchase a Meta y mueve la etapa a
+// Cerrado (para que la recepcionista lo vea). Con 0 o varias coincidencias no dispara.
+async function procesarVinoCapi(asis, rol) {
+  try {
+    if (rol !== 'tecnica' || !asis.cliente) return;
+    const clave = normNombre(asis.cliente);
+    if (clave.length < 3) return;
+    const contactos = await new Promise(r => db.all(
+      "SELECT id, telefono, nombre, numero_id, sucursal FROM contactos WHERE nombre IS NOT NULL AND nombre != ''",
+      [], (e, rr) => r(rr || [])));
+    let matches = contactos.filter(c => normNombre(c.nombre) === clave);
+    if (matches.length > 1 && asis.sucursal) {
+      const porSuc = matches.filter(c => c.sucursal === asis.sucursal);
+      if (porSuc.length) matches = porSuc;
+    }
+    if (matches.length !== 1) { console.log('[VINO] "' + asis.cliente + '" -> ' + matches.length + ' coincidencias; no se dispara Purchase'); return; }
+    const c = matches[0];
+    db.run("UPDATE contactos SET etapa='Cerrado', etapa_desde=CURRENT_TIMESTAMP WHERE id=?", [c.id]);
+    await sendCapiEvent('Purchase', { nombre: c.nombre, telefono: c.telefono, etapa: 'Cerrado', numero_id: c.numero_id });
+    console.log('[VINO] Purchase + Cerrado para ' + (c.nombre || c.telefono));
+  } catch (e) { console.error('[VINO]', e.message || e); }
+}
+
 app.post('/api/asistencias', auth, requireRole('tecnica', 'recepcionista', 'admin', 'supervisor'), (req, res) => {
   const { event_id, fecha, cliente, servicio, hora, estado } = req.body;
   if (!event_id) return res.status(400).json({ error: 'event_id requerido' });
@@ -2339,7 +2375,12 @@ app.post('/api/asistencias', auth, requireRole('tecnica', 'recepcionista', 'admi
      ON CONFLICT(event_id) DO UPDATE SET estado=excluded.estado, fecha=excluded.fecha, cliente=excluded.cliente,
        servicio=excluded.servicio, hora=excluded.hora, marcado_por=excluded.marcado_por, updated_at=CURRENT_TIMESTAMP`,
     [event_id, sucursal, fecha || null, cliente || null, servicio || null, hora || null, estado, tecnicaId, req.user.id],
-    err => err ? res.status(500).json({ error: err.message }) : res.json({ ok: true, estado })
+    err => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ ok: true, estado });
+      // "Vino" marcado por la tecnica -> cruzar por nombre, disparar Purchase y mover a Cerrado
+      if (estado === 'asistio') procesarVinoCapi({ cliente, sucursal }, req.user.rol).catch(e => console.error('[VINO]', e.message));
+    }
   );
 });
 

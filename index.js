@@ -1233,16 +1233,34 @@ app.get('/api/plantillas', auth, (req, res) => {
 // Crea una plantilla local y la envia a Meta (edge message_templates de la WABA del
 // numero). Devuelve {estado, id, sucursal, error?}. Si el numero no tiene WABA/token
 // (ej. plantilla Global), queda como 'pendiente' sin enviarse.
-async function crearPlantillaEnNumero(nombre, categoria, contenido, numId) {
+// Arma el arreglo `components` que Meta espera: encabezado (texto), cuerpo (con
+// ejemplos si hay variables {{n}}), pie y botones de respuesta rapida.
+function construirComponentesMeta(contenido, ex) {
+  ex = ex || {};
+  const comps = [];
+  if (ex.header_type === 'TEXT' && ex.header_text) comps.push({ type: 'HEADER', format: 'TEXT', text: String(ex.header_text).slice(0, 60) });
+  const body = { type: 'BODY', text: contenido };
+  const vars = contenido.match(/\{\{(\d+)\}\}/g) || [];
+  if (vars.length && Array.isArray(ex.muestras) && ex.muestras.length) body.example = { body_text: [ex.muestras.map(m => m || 'ejemplo')] };
+  comps.push(body);
+  if (ex.footer) comps.push({ type: 'FOOTER', text: String(ex.footer).slice(0, 60) });
+  const btns = (ex.botones || []).filter(b => b && b.text).map(b => ({ type: 'QUICK_REPLY', text: String(b.text).slice(0, 25) })).slice(0, 3);
+  if (btns.length) comps.push({ type: 'BUTTONS', buttons: btns });
+  return comps;
+}
+
+async function crearPlantillaEnNumero(nombre, categoria, contenido, numId, extras) {
+  extras = extras || {};
+  const botonesJson = JSON.stringify((extras.botones || []).map(b => b && b.text).filter(Boolean));
   const plantillaId = await new Promise((resolve, reject) => db.run(
-    'INSERT INTO plantillas (nombre, categoria, contenido, phone_number_id, estado_meta) VALUES (?,?,?,?,?)',
-    [nombre, categoria || 'General', contenido, numId, 'pendiente'], function (e) { e ? reject(e) : resolve(this.lastID); }));
+    'INSERT INTO plantillas (nombre, categoria, contenido, phone_number_id, estado_meta, botones) VALUES (?,?,?,?,?,?)',
+    [nombre, categoria || 'General', contenido, numId, 'pendiente', botonesJson], function (e) { e ? reject(e) : resolve(this.lastID); }));
   const numRow = await new Promise(r => db.get('SELECT * FROM numeros WHERE phone_number_id=?', [numId], (e, row) => r(row)));
   if (!numRow || !numRow.token || !numRow.waba_id) return { estado: 'sin_waba', id: plantillaId, sucursal: (numRow && numRow.sucursal) || numId };
   try {
     const metaRes = await require('axios').post(
       `https://graph.facebook.com/v18.0/${numRow.waba_id}/message_templates`,
-      { name: nombre.toLowerCase().replace(/\s+/g, '_'), category: categoria === 'Marketing' ? 'MARKETING' : 'UTILITY', language: 'es', components: [{ type: 'BODY', text: contenido }] },
+      { name: nombre.toLowerCase().replace(/\s+/g, '_'), category: categoria === 'Marketing' ? 'MARKETING' : 'UTILITY', language: 'es', components: construirComponentesMeta(contenido, extras) },
       { headers: { Authorization: 'Bearer ' + numRow.token } });
     await new Promise(r => db.run('UPDATE plantillas SET meta_template_id=?, estado_meta=? WHERE id=?', [metaRes.data?.id || null, 'enviada', plantillaId], () => r()));
     return { estado: 'enviada', id: plantillaId, sucursal: numRow.sucursal || numId };
@@ -1253,17 +1271,18 @@ async function crearPlantillaEnNumero(nombre, categoria, contenido, numId) {
 }
 
 app.post('/api/plantillas', auth, requireRole('admin', 'supervisor', 'recepcionista'), async (req, res) => {
-  const { nombre, categoria, contenido, phone_number_id } = req.body;
+  const { nombre, categoria, contenido, phone_number_id, header_type, header_text, footer, botones, muestras } = req.body;
   if (!nombre || !contenido) return res.json({ ok: false, error: 'Nombre y contenido son obligatorios' });
+  const extras = { header_type, header_text, footer, botones, muestras };
   // "TODAS" = replicar a cada sucursal en coexistencia (una plantilla por WABA)
   if (phone_number_id === 'TODAS') {
     const nums = await new Promise(r => db.all("SELECT phone_number_id, sucursal FROM numeros WHERE es_coexistencia=1 AND waba_id IS NOT NULL AND waba_id!='' AND token IS NOT NULL AND token!=''", [], (e, rr) => r(rr || [])));
     if (!nums.length) return res.json({ ok: false, error: 'No hay sucursales en coexistencia con WABA y token.' });
     const resultados = [];
-    for (const n of nums) resultados.push(await crearPlantillaEnNumero(nombre, categoria, contenido, n.phone_number_id));
+    for (const n of nums) resultados.push(await crearPlantillaEnNumero(nombre, categoria, contenido, n.phone_number_id, extras));
     return res.json({ ok: true, todas: true, total: nums.length, enviadas: resultados.filter(r => r.estado === 'enviada').length, fallidas: resultados.filter(r => r.estado === 'error_envio').length, resultados });
   }
-  const r = await crearPlantillaEnNumero(nombre, categoria, contenido, phone_number_id || req.user.numero_id);
+  const r = await crearPlantillaEnNumero(nombre, categoria, contenido, phone_number_id || req.user.numero_id, extras);
   res.json({ ok: true, id: r.id, estado: r.estado });
 });
 

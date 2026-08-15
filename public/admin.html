@@ -612,18 +612,8 @@ tr:last-child td{border-bottom:none}
                 </select>
               </div>
             </div>
-            <table style="width:100%;border-collapse:collapse;font-size:13px">
-              <thead><tr style="background:#f9f9f9;border-bottom:2px solid #eee">
-                <th style="padding:8px;text-align:left">Fecha</th>
-                <th style="padding:8px;text-align:left">Contacto</th>
-                <th style="padding:8px;text-align:left">Telefono</th>
-                <th style="padding:8px;text-align:left">Evento</th>
-                <th style="padding:8px;text-align:left">Etapa</th>
-                <th style="padding:8px;text-align:left">Event ID</th>
-                <th style="padding:8px;text-align:center">Estado</th>
-              </tr></thead>
-              <tbody id="fb-logs-body"></tbody>
-            </table>
+            <div style="font-size:12px;color:#888;margin-bottom:8px">Toca un evento para ver el detalle completo</div>
+            <div id="fb-logs-body" style="display:flex;flex-direction:column;gap:8px"></div>
             <button onclick="fbLoadLogs()" style="margin-top:12px;padding:7px 14px;background:white;border:1px solid #ddd;border-radius:6px;cursor:pointer;font-size:13px">Actualizar</button>
           </div>
     </div>
@@ -2104,10 +2094,10 @@ function coexLanzar(){
 
 function fbFiltrarTabla() {
   var filtro = document.getElementById('fb-filtro-evento').value.toLowerCase();
-  var filas = document.querySelectorAll('#fb-logs-body tr');
-  filas.forEach(function(fila) {
-    if (!filtro) { fila.style.display = ''; return; }
-    fila.style.display = fila.textContent.toLowerCase().indexOf(filtro) > -1 ? '' : 'none';
+  var cards = document.querySelectorAll('#fb-logs-body .fb-log-card');
+  cards.forEach(function(c) {
+    if (!filtro) { c.style.display = ''; return; }
+    c.style.display = (c.dataset.txt||'').indexOf(filtro) > -1 ? '' : 'none';
   });
 }
 
@@ -2138,39 +2128,56 @@ function fbLoadLogs(filtroNumero) {
   fetch(url, { headers: { Authorization: 'Bearer '+token } })
     .then(function(r){ return r.json(); })
     .then(function(rows) {
+      if (!rows.length) { document.getElementById('fb-logs-body').innerHTML = '<div style="padding:20px;text-align:center;color:#999">Sin eventos aun</div>'; return; }
+      var det = function(lbl,val){ return '<div style="display:flex;gap:8px;padding:3px 0"><span style="color:#999;min-width:90px;font-size:12px">'+lbl+'</span><span style="font-size:13px;color:#333;word-break:break-word">'+val+'</span></div>'; };
       var html = rows.map(function(l) {
         var isOk = l.status_code === 200;
-        var badge = isOk
-          ? '<span style="background:#f0fff4;color:#16a34a;padding:2px 8px;border-radius:999px;font-size:11px">&#10003; OK</span>'
-          : '<span style="background:#fff0f0;color:#dc2626;padding:2px 8px;border-radius:999px;font-size:11px">&#10007; Error</span>';
-        var evColor = l.evento_tipo==='Lead' ? '#1877F2' : l.evento_tipo==='Purchase' ? '#16a34a' : '#888';
-        var evBg = l.evento_tipo==='Lead' ? '#e7f0fd' : l.evento_tipo==='Purchase' ? '#f0fff4' : '#f5f5f5';
-        var evBadge = '<span style="background:'+evBg+';color:'+evColor+';padding:2px 8px;border-radius:999px;font-size:11px">'+( l.evento_tipo||'-')+'</span>';
+        var dot = isOk ? '#16a34a' : '#dc2626';
+        var estadoTxt = isOk ? '&#10003; Recibido por Meta' : ('&#10007; Error ('+(l.status_code||'?')+')');
+        var evColor = l.evento_tipo==='Lead' ? '#1877F2' : l.evento_tipo==='Purchase' ? '#16a34a' : (l.evento_tipo==='Contact' ? '#c026d3' : '#888');
+        var evBg = l.evento_tipo==='Lead' ? '#e7f0fd' : l.evento_tipo==='Purchase' ? '#f0fff4' : (l.evento_tipo==='Contact' ? '#fbeafe' : '#f0f0f0');
+        var evBadge = '<span style="background:'+evBg+';color:'+evColor+';padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap">'+(l.evento_tipo||'-')+'</span>';
         var fecha = l.created_at ? l.created_at.substring(0,16).replace('T',' ') : '-';
-        var sucursal = l.sucursal || l.num_nombre || (l.numero_id ? l.numero_id.substring(0,8)+'...' : 'Global');
-        var respuesta = '';
-        if (!isOk && l.respuesta) {
-          respuesta = '<div style="margin-top:4px;font-size:11px;color:#dc2626;background:#fff0f0;padding:4px 8px;border-radius:4px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+l.respuesta.replace(/"/g,'&quot;')+'">'+l.respuesta.substring(0,80)+'</div>';
+        var fechaLarga = l.created_at ? l.created_at.replace('T',' ').substring(0,19) : '-';
+        var sucursal = l.sucursal || l.num_nombre || (l.numero_id || 'Global');
+        var metaDetalle = '';
+        if (l.respuesta) {
+          if (isOk) {
+            try { var p = JSON.parse(l.respuesta); metaDetalle = 'Meta recibio <strong>'+(p.events_received!=null?p.events_received:'-')+'</strong> evento(s)'+(p.fbtrace_id?' &middot; trace '+p.fbtrace_id:''); }
+            catch(e){ metaDetalle = String(l.respuesta).substring(0,200); }
+          } else {
+            var errMsg = l.respuesta;
+            try { var pe = JSON.parse(l.respuesta); errMsg = (pe.error && pe.error.message) || l.respuesta; } catch(e){}
+            metaDetalle = '<span style="color:#dc2626">'+String(errMsg).substring(0,300).replace(/</g,'&lt;')+'</span>';
+          }
         }
-        if (isOk && l.respuesta) {
-          try {
-            var parsed = JSON.parse(l.respuesta);
-            var eventsReceived = parsed.events_received || '-';
-            respuesta = '<div style="margin-top:4px;font-size:11px;color:#16a34a">Meta recibio: '+eventsReceived+' evento(s)</div>';
-          } catch(e) {}
-        }
-        return '<tr style="border-bottom:1px solid #f0f0f0">' +
-          '<td style="padding:8px;font-size:12px;color:#666;white-space:nowrap">'+fecha+'</td>' +
-          '<td style="padding:8px;font-size:13px"><div style="font-weight:500">'+( l.contacto_nombre||'-')+'</div><div style="font-size:11px;color:#888">'+( l.contacto_telefono||'-')+'</div></td>' +
-          '<td style="padding:8px;font-size:12px;color:#1877F2">'+sucursal+'</td>' +
-          '<td style="padding:8px">'+evBadge+'</td>' +
-          '<td style="padding:8px;font-size:12px">'+( l.etapa||'-')+'</td>' +
-          '<td style="padding:8px;font-size:11px;color:#888;font-family:monospace">'+( l.event_id||'-')+'</td>' +
-          '<td style="padding:8px">'+badge+respuesta+'</td>' +
-          '</tr>';
-      }).join('') || '<tr><td colspan="7" style="padding:20px;text-align:center;color:#999">Sin eventos aun</td></tr>';
+        var txt = ((l.contacto_nombre||'')+' '+(l.contacto_telefono||'')+' '+(l.evento_tipo||'')+' '+(isOk?'ok':'error')).toLowerCase().replace(/"/g,'');
+        return '<div class="fb-log-card" data-txt="'+txt+'" style="border:1px solid #e8e8e8;border-radius:10px;overflow:hidden">'
+          + '<div onclick="fbToggleLog(this)" style="display:flex;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;background:#fff">'
+          +   '<span style="width:9px;height:9px;border-radius:50%;background:'+dot+';flex-shrink:0"></span>'
+          +   '<span style="font-size:12px;color:#888;white-space:nowrap;min-width:108px">'+fecha+'</span>'
+          +   '<span style="flex:1;min-width:0;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(l.contacto_nombre||l.contacto_telefono||'-')+'</span>'
+          +   evBadge
+          +   '<span class="fb-chev" style="color:#bbb;transition:transform .2s;font-size:11px">&#9654;</span>'
+          + '</div>'
+          + '<div class="fb-log-det" style="display:none;padding:10px 14px 14px 34px;background:#fafafa;border-top:1px solid #f0f0f0">'
+          +   det('Fecha', fechaLarga) + det('Contacto', (l.contacto_nombre||'-')) + det('Telefono', (l.contacto_telefono||'-'))
+          +   det('Sucursal', sucursal) + det('Evento', (l.evento_tipo||'-')) + det('Etapa', (l.etapa||'-'))
+          +   det('Event ID', '<span style="font-family:monospace;font-size:12px">'+(l.event_id||'-')+'</span>')
+          +   det('Estado', '<span style="color:'+dot+';font-weight:600">'+estadoTxt+'</span>')
+          +   (metaDetalle ? det('Respuesta', metaDetalle) : '')
+          + '</div>'
+          + '</div>';
+      }).join('');
       document.getElementById('fb-logs-body').innerHTML = html;
     });
+}
+function fbToggleLog(hd) {
+  var det = hd.parentNode.querySelector('.fb-log-det');
+  var chev = hd.querySelector('.fb-chev');
+  var abrir = det.style.display === 'none';
+  det.style.display = abrir ? 'block' : 'none';
+  if (chev) chev.style.transform = abrir ? 'rotate(90deg)' : 'rotate(0deg)';
 }
 function abrirBibliotecaLogo(){
   document.getElementById('modalBibliotecaLogo').style.display='flex';

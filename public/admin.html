@@ -224,7 +224,7 @@ tr:last-child td{border-bottom:none}
               <select id="p_numero_id" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px"><option value="">-- Seleccionar número --</option></select>
             </div>
             <div class="form-group"><label>Nombre de plantilla</label>
-              <input type="text" id="p_nombre" placeholder="ej: saludo_inicial" style="text-transform:lowercase">
+              <input type="text" id="p_nombre" placeholder="ej: saludo_inicial" style="text-transform:lowercase" oninput="cargarCoberturaPlantillaDebounced()">
             </div>
             <div class="form-group"><label>Categoría</label>
               <select id="p_cat">
@@ -233,6 +233,12 @@ tr:last-child td{border-bottom:none}
                 <option value="AUTHENTICATION">Autenticación</option>
               </select>
             </div>
+          </div>
+
+          <!-- SUCURSALES EN COEXISTENCIA (cobertura) -->
+          <div class="form-group" style="margin-bottom:12px">
+            <label>Enviar a sucursales en coexistencia <span style="color:#999;font-weight:400;font-size:12px">· marca las que quieras · ✓ = ya la tiene</span></label>
+            <div id="p_cobertura" style="border:1px solid #eee;border-radius:8px;padding:8px;max-height:170px;overflow-y:auto;font-size:13px;color:#888">Escribe el nombre de la plantilla para ver las sucursales…</div>
           </div>
 
           <!-- ENCABEZADO -->
@@ -467,16 +473,17 @@ tr:last-child td{border-bottom:none}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
           <div>
             <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Nombre</label>
-            <input id="wf_nombre" type="text" placeholder="Ej: Retoque a los 21 días" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;box-sizing:border-box">
+            <input id="wf_nombre" type="text" placeholder="Ej: Retoque a los 21 días" oninput="cargarCoberturaWorkflowDebounced()" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;box-sizing:border-box">
           </div>
           <div>
             <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">Sucursal (opcional)</label>
             <select id="wf_sucursal" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;background:#fff">
               <option value="">Todas las sucursales</option>
             </select>
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#666;margin-top:8px;cursor:pointer">
-              <input type="checkbox" id="wf_todas_coex"> 📢 Crear una copia por cada sucursal en coexistencia (solo al crear)
-            </label>
+            <div style="margin-top:8px">
+              <label style="font-size:12px;color:#666;display:block;margin-bottom:4px">📢 Crear en sucursales de coexistencia (solo al crear) · ✓ = ya lo tiene</label>
+              <div id="wf_cobertura" style="border:1px solid #eee;border-radius:8px;padding:6px;max-height:150px;overflow-y:auto;font-size:13px;color:#888">Ponle nombre al workflow para ver las sucursales…</div>
+            </div>
           </div>
         </div>
 
@@ -1385,6 +1392,27 @@ function eliminarUsuario(id,nombre){
       return btns;
     }
 
+var _cobTimer=null;
+function cargarCoberturaPlantillaDebounced(){ clearTimeout(_cobTimer); _cobTimer=setTimeout(cargarCoberturaPlantilla,400); }
+function cargarCoberturaPlantilla(){
+  var cont=document.getElementById('p_cobertura'); if(!cont) return;
+  var nombre=(document.getElementById('p_nombre').value||'').toLowerCase().replace(/\s+/g,'_');
+  if(!nombre){ cont.innerHTML='Escribe el nombre de la plantilla para ver las sucursales…'; return; }
+  fetch('/api/plantillas/cobertura?nombre='+encodeURIComponent(nombre),{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(rows){
+    if(!rows||!rows.length){ cont.innerHTML='<span style="color:#c0392b">No hay sucursales en coexistencia conectadas.</span>'; return; }
+    cont.innerHTML=rows.map(function(n){
+      var ya=n.tiene;
+      return '<label style="display:flex;align-items:center;gap:8px;padding:5px 4px">'+
+        '<input type="checkbox" class="p-cob" value="'+n.phone_number_id+'" '+(ya?'checked disabled':'checked')+'>'+
+        '<span style="color:#333">'+(n.sucursal||n.phone_number_id)+'</span>'+
+        (ya?'<span style="margin-left:auto;color:#2e7d32;font-size:12px">✓ ya la tiene</span>':'<span style="margin-left:auto;color:#f39c12;font-size:12px">— falta</span>')+
+      '</label>';
+    }).join('');
+  }).catch(function(){ cont.innerHTML='<span style="color:#c0392b">Error al cargar sucursales.</span>'; });
+}
+
 function cargarPlantillas(){
   fetch('/api/plantillas',{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
@@ -1418,11 +1446,13 @@ document.getElementById('btnCrearPlantilla').addEventListener('click',function()
     botones:getBotonesData(),
     muestras:getMuestrasData()
   };
+  var cobs=Array.prototype.slice.call(document.querySelectorAll('#p_cobertura .p-cob:checked:not(:disabled)')).map(function(c){return c.value;});
+  if(cobs.length){ data.numeros=cobs; }
   fetch('/api/plantillas',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(data)})
   .then(function(r){return r.json()})
   .then(function(d){
     var msg=document.getElementById('msgPlantilla');
-    if(d.ok){msg.textContent=d.todas?('Enviada a '+d.total+' sucursal(es): '+d.enviadas+' ok'+(d.fallidas?', '+d.fallidas+' con error':'')+' ✓'):'Plantilla guardada y enviada a Meta ✓';msg.style.color='#2e7d32';cargarPlantillas();
+    if(d.ok){msg.textContent=d.todas?('Enviada a '+d.total+' sucursal(es): '+d.enviadas+' ok'+(d.fallidas?', '+d.fallidas+' con error':'')+' ✓'):'Plantilla guardada y enviada a Meta ✓';msg.style.color='#2e7d32';cargarPlantillas();cargarCoberturaPlantilla();
       document.getElementById('p_nombre').value='';document.getElementById('p_contenido').value='';
       document.getElementById('p_footer').value='';
       document.getElementById('botones_container').innerHTML='';
@@ -2333,6 +2363,7 @@ function wfNuevo(){
   document.getElementById('wf_msg').textContent='';
   document.getElementById('wf_detalle').style.display='none';
   wfRenderTriggerConfig(); wfRenderPasos(); wfZoomReset();
+  cargarCoberturaWorkflow();
   document.getElementById('wf_editor').style.display='block';
   document.getElementById('wf_editor').scrollIntoView({behavior:'smooth'});
 }
@@ -2349,6 +2380,7 @@ function wfEditar(id){
   document.getElementById('wf_msg').textContent='';
   document.getElementById('wf_detalle').style.display='none';
   wfRenderTriggerConfig(w.trigger_config||{}); wfRenderPasos(); wfZoomReset();
+  cargarCoberturaWorkflow();
   document.getElementById('wf_editor').style.display='block';
   document.getElementById('wf_editor').scrollIntoView({behavior:'smooth'});
 }
@@ -2682,6 +2714,28 @@ function wfZoomReset(){
   }, {passive:false});
 })();
 
+var _wfCobTimer=null;
+function cargarCoberturaWorkflowDebounced(){ clearTimeout(_wfCobTimer); _wfCobTimer=setTimeout(cargarCoberturaWorkflow,400); }
+function cargarCoberturaWorkflow(){
+  var cont=document.getElementById('wf_cobertura'); if(!cont) return;
+  if(typeof wfActual!=='undefined' && wfActual){ cont.innerHTML='<span style="color:#999">La replicación solo aplica al crear uno nuevo.</span>'; return; }
+  var nombre=(document.getElementById('wf_nombre').value||'').trim();
+  if(!nombre){ cont.innerHTML='Ponle nombre al workflow para ver las sucursales…'; return; }
+  fetch('/api/workflows/cobertura?nombre='+encodeURIComponent(nombre),{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(rows){
+    if(!rows||!rows.length){ cont.innerHTML='<span style="color:#c0392b">No hay sucursales en coexistencia conectadas.</span>'; return; }
+    cont.innerHTML=rows.map(function(n){
+      var ya=n.tiene;
+      return '<label style="display:flex;align-items:center;gap:8px;padding:5px 4px">'+
+        '<input type="checkbox" class="wf-cob" value="'+h(n.sucursal)+'" '+(ya?'checked disabled':'checked')+'>'+
+        '<span style="color:#333">'+h(n.sucursal)+'</span>'+
+        (ya?'<span style="margin-left:auto;color:#2e7d32;font-size:12px">✓ ya lo tiene</span>':'<span style="margin-left:auto;color:#f39c12;font-size:12px">— falta</span>')+
+      '</label>';
+    }).join('');
+  }).catch(function(){ cont.innerHTML='<span style="color:#c0392b">Error al cargar sucursales.</span>'; });
+}
+
 function wfGuardar(){
   var msg=document.getElementById('wf_msg');
   var datos={
@@ -2692,8 +2746,10 @@ function wfGuardar(){
     sucursal:document.getElementById('wf_sucursal').value||null,
     activo:document.getElementById('wf_activo').checked?1:0
   };
-  var chkTodas=document.getElementById('wf_todas_coex');
-  if(!wfActual && chkTodas && chkTodas.checked) datos.todas_coexistencia=true;
+  if(!wfActual){
+    var wfcobs=Array.prototype.slice.call(document.querySelectorAll('#wf_cobertura .wf-cob:checked:not(:disabled)')).map(function(c){return c.value;});
+    if(wfcobs.length) datos.sucursales=wfcobs;
+  }
   if(!datos.nombre){ msg.textContent='Ponle un nombre'; msg.style.color='#c62828'; return; }
   if(!datos.pasos.length){ msg.textContent='Añade al menos un paso'; msg.style.color='#c62828'; return; }
   var envios=datos.pasos.filter(function(p){return p.tipo==='enviar_plantilla'}).length;

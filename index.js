@@ -1274,6 +1274,13 @@ app.post('/api/plantillas', auth, requireRole('admin', 'supervisor', 'recepcioni
   const { nombre, categoria, contenido, phone_number_id, header_type, header_text, footer, botones, muestras } = req.body;
   if (!nombre || !contenido) return res.json({ ok: false, error: 'Nombre y contenido son obligatorios' });
   const extras = { header_type, header_text, footer, botones, muestras };
+  // Lista explicita de numeros (multi-seleccion de sucursales en coexistencia)
+  const lista = Array.isArray(req.body.numeros) ? req.body.numeros.filter(Boolean) : null;
+  if (lista && lista.length) {
+    const resultados = [];
+    for (const pn of lista) resultados.push(await crearPlantillaEnNumero(nombre, categoria, contenido, pn, extras));
+    return res.json({ ok: true, todas: true, total: lista.length, enviadas: resultados.filter(r => r.estado === 'enviada').length, fallidas: resultados.filter(r => r.estado === 'error_envio').length, resultados });
+  }
   // "TODAS" = replicar a cada sucursal en coexistencia (una plantilla por WABA)
   if (phone_number_id === 'TODAS') {
     const nums = await new Promise(r => db.all("SELECT phone_number_id, sucursal FROM numeros WHERE es_coexistencia=1 AND waba_id IS NOT NULL AND waba_id!='' AND token IS NOT NULL AND token!=''", [], (e, rr) => r(rr || [])));
@@ -1284,6 +1291,18 @@ app.post('/api/plantillas', auth, requireRole('admin', 'supervisor', 'recepcioni
   }
   const r = await crearPlantillaEnNumero(nombre, categoria, contenido, phone_number_id || req.user.numero_id, extras);
   res.json({ ok: true, id: r.id, estado: r.estado });
+});
+
+// Cobertura de una plantilla por nombre: sucursales en coexistencia y cuales ya la tienen.
+app.get('/api/plantillas/cobertura', auth, requireRole('admin', 'supervisor'), (req, res) => {
+  const nombre = String(req.query.nombre || '').toLowerCase().replace(/\s+/g, '_');
+  db.all("SELECT phone_number_id, sucursal FROM numeros WHERE es_coexistencia=1 AND waba_id IS NOT NULL AND waba_id!='' AND token IS NOT NULL AND token!='' ORDER BY sucursal", [], (e, nums) => {
+    if (e) return res.status(500).json({ error: e.message });
+    db.all("SELECT DISTINCT phone_number_id FROM plantillas WHERE nombre=?", [nombre], (e2, pl) => {
+      const tienen = new Set((pl || []).map(p => p.phone_number_id));
+      res.json((nums || []).map(n => ({ phone_number_id: n.phone_number_id, sucursal: n.sucursal, tiene: tienen.has(n.phone_number_id) })));
+    });
+  });
 });
 
 app.put('/api/plantillas/:id', auth, requireRole('admin', 'supervisor', 'recepcionista'), (req, res) => {
@@ -3243,22 +3262,34 @@ app.get('/api/workflows', auth, requireRole('admin', 'supervisor'), async (req, 
 });
 
 app.post('/api/workflows', auth, requireRole('admin', 'supervisor'), async (req, res) => {
-  const { nombre, trigger_tipo, trigger_config, pasos, sucursal, todas_coexistencia } = req.body;
+  const { nombre, trigger_tipo, trigger_config, pasos, sucursal, todas_coexistencia, sucursales } = req.body;
   if (!nombre || !trigger_tipo) return res.status(400).json({ error: 'Nombre y disparador son obligatorios' });
   const cfg = JSON.stringify(trigger_config || {}), pj = JSON.stringify(pasos || []);
   try {
-    // "todas_coexistencia" = crear una copia del workflow por cada sucursal en coexistencia
-    if (todas_coexistencia) {
-      const sucs = await new Promise(r => db.all("SELECT DISTINCT sucursal FROM numeros WHERE es_coexistencia=1 AND sucursal IS NOT NULL AND sucursal!=''", [], (e, rr) => r(rr || [])));
-      if (!sucs.length) return res.status(400).json({ error: 'No hay sucursales en coexistencia' });
-      for (const s of sucs) await wfRun('INSERT INTO workflows (nombre, trigger_tipo, trigger_config, pasos, sucursal, activo) VALUES (?,?,?,?,?,0)', [nombre, trigger_tipo, cfg, pj, s.sucursal]);
-      return res.json({ ok: true, todas: true, creados: sucs.length, sucursales: sucs.map(s => s.sucursal), aviso: 'Creados desactivados, uno por sucursal en coexistencia.' });
+    // Lista de sucursales (multi-seleccion) o "todas_coexistencia": una copia por sucursal
+    let listaSuc = Array.isArray(sucursales) ? sucursales.filter(Boolean) : null;
+    if (!listaSuc && todas_coexistencia) listaSuc = (await new Promise(r => db.all("SELECT DISTINCT sucursal FROM numeros WHERE es_coexistencia=1 AND sucursal IS NOT NULL AND sucursal!=''", [], (e, rr) => r(rr || [])))).map(s => s.sucursal);
+    if (listaSuc && listaSuc.length) {
+      for (const suc of listaSuc) await wfRun('INSERT INTO workflows (nombre, trigger_tipo, trigger_config, pasos, sucursal, activo) VALUES (?,?,?,?,?,0)', [nombre, trigger_tipo, cfg, pj, suc]);
+      return res.json({ ok: true, todas: true, creados: listaSuc.length, sucursales: listaSuc, aviso: 'Creados desactivados, uno por sucursal.' });
     }
     const r = await wfRun('INSERT INTO workflows (nombre, trigger_tipo, trigger_config, pasos, sucursal, activo) VALUES (?,?,?,?,?,0)',
       [nombre, trigger_tipo, cfg, pj, sucursal || null]);
     // Nace desactivado a proposito
     res.json({ ok: true, id: r.lastID, activo: 0, aviso: 'Creado desactivado. Actívalo cuando lo hayas revisado.' });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Cobertura de un workflow por nombre: sucursales en coexistencia y cuales ya lo tienen.
+app.get('/api/workflows/cobertura', auth, requireRole('admin', 'supervisor'), (req, res) => {
+  const nombre = String(req.query.nombre || '').trim();
+  db.all("SELECT DISTINCT sucursal FROM numeros WHERE es_coexistencia=1 AND sucursal IS NOT NULL AND sucursal!='' ORDER BY sucursal", [], (e, sucs) => {
+    if (e) return res.status(500).json({ error: e.message });
+    db.all("SELECT DISTINCT sucursal FROM workflows WHERE nombre=?", [nombre], (e2, wf) => {
+      const tienen = new Set((wf || []).map(w => w.sucursal));
+      res.json((sucs || []).map(s => ({ sucursal: s.sucursal, tiene: tienen.has(s.sucursal) })));
+    });
+  });
 });
 
 app.put('/api/workflows/:id', auth, requireRole('admin', 'supervisor'), async (req, res) => {

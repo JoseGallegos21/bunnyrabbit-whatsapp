@@ -431,10 +431,10 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
           <!-- Importar CSV -->
           <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:20px">
             <h2 style="margin:0 0 12px;font-size:18px;color:#111">Importar contactos</h2>
-            <p style="font-size:13px;color:#666;margin-bottom:12px">Sube un CSV con columnas: <strong>telefono, nombre, etapa</strong> (etapa opcional)</p>
+            <p style="font-size:13px;color:#666;margin-bottom:12px">Sube tu CSV de <strong>Google Contactos</strong> (en Google Contactos → <em>Exportar → Google CSV</em>) o uno propio. Cruzamos por número y les ponemos el <strong>nombre real</strong> a tus contactos; los que falten se agregan. No duplica.</p>
             <div style="background:#f9f9f9;border:1px dashed #ddd;border-radius:8px;padding:12px;margin-bottom:12px;font-size:12px;color:#666">
-              Ejemplo CSV:<br>
-              <code>telefono,nombre,etapa<br>5215512345678,María García,Nuevo<br>5215598765432,Ana López,Seguimiento</code>
+              Detecta el formato de Google (First Name, Last Name, Phone 1 - Value…) o el simple:<br>
+              <code>telefono,nombre<br>5215512345678,María García</code>
             </div>
             <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
               <input type="file" id="csv_file" accept=".csv" style="flex:1;min-width:200px">
@@ -977,7 +977,7 @@ function importarCSV(){
   .then(function(r){return r.json()})
   .then(function(d){
     if(d.ok){
-      msg.textContent='✓ '+d.importados+' importados, '+d.errores+' errores de '+d.total+' filas';
+      msg.textContent='✓ '+d.actualizados+' nombres actualizados, '+d.nuevos+' nuevos'+(d.sin_telefono?', '+d.sin_telefono+' sin teléfono':'')+' (de '+d.total+' filas)';
       msg.style.color='#2e7d32';
       cargarContactos();
     } else { msg.textContent=d.error||'Error'; msg.style.color='red'; }

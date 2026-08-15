@@ -420,28 +420,66 @@ app.delete('/api/contactos/:id', auth, requireRole('admin', 'supervisor', 'recep
 // ===== IMPORTAR CSV =====
 const uploadCSV = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5*1024*1024 } });
 
-app.post('/api/contactos/importar', auth, uploadCSV.single('csv'), async (req, res) => {
-  if(!req.file) return res.status(400).json({ error: 'No se subio archivo' });
-  const numero_id = req.user.numero_id;
-  const text = req.file.buffer.toString('utf-8');
-  const lines = text.split(/\r?\n/).filter(l => l.trim());
-  let importados = 0, errores = 0;
-  for(let i=1; i<lines.length; i++) {
-    const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g,''));
-    const telefono = cols[0]?.replace(/[^0-9]/g,'');
-    const nombre = cols[1] || '';
-    const etapa = cols[2] || 'Nuevo';
-    if(!telefono || telefono.length < 10) { errores++; continue; }
-    await new Promise(resolve => {
-      db.run('INSERT OR IGNORE INTO contactos (telefono, nombre, etapa, numero_id) VALUES (?,?,?,?)',
-        [telefono, nombre, etapa, numero_id], (err) => {
-          if(!err) importados++;
-          else errores++;
-          resolve();
-        });
-    });
+// Parser CSV robusto: respeta comillas, comas dentro de comillas y "" escapadas.
+function parseCSV(text) {
+  text = String(text || '').replace(/^﻿/, '');
+  const rows = []; let row = [], field = '', inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQ = false; }
+      else field += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+    else if (c !== '\r') field += c;
   }
-  res.json({ ok: true, importados, errores, total: lines.length-1 });
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+// Ultimos 10 digitos = numero local (MX). Cruza aunque el formato varie (+52, 1, espacios).
+function tel10(raw) { const d = String(raw || '').replace(/\D/g, ''); return d.length >= 10 ? d.slice(-10) : null; }
+
+// Importa contactos desde un CSV de Google Contactos (Contactos -> Exportar -> Google CSV)
+// o uno simple (telefono, nombre). Cruza por los ultimos 10 digitos: si el numero ya
+// existe le pone el nombre real; si no, lo crea (origen 'google'). No duplica.
+app.post('/api/contactos/importar', auth, requireRole('admin', 'supervisor', 'recepcionista'), uploadCSV.single('csv'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No se subio archivo' });
+  const numero_id = req.user.numero_id || null;
+  const sucursal = req.user.sucursal || null;
+  const rows = parseCSV(req.file.buffer.toString('utf-8')).filter(r => r.some(c => (c || '').trim()));
+  if (rows.length < 2) return res.json({ ok: true, actualizados: 0, nuevos: 0, sin_telefono: 0, total: 0 });
+  const H = rows[0].map(h => (h || '').trim().toLowerCase());
+  const phoneCols = [];
+  H.forEach((h, i) => { if (/^phone\s*\d*\s*-\s*value$/.test(h) || ['telefono', 'teléfono', 'phone', 'celular', 'movil', 'móvil', 'whatsapp'].includes(h)) phoneCols.push(i); });
+  const idxNombre = H.indexOf('nombre'), idxName = H.indexOf('name');
+  const idxFirst = H.findIndex(h => h === 'first name' || h === 'given name');
+  const idxMiddle = H.findIndex(h => h === 'middle name' || h === 'additional name');
+  const idxLast = H.findIndex(h => h === 'last name' || h === 'family name');
+  const nombreDe = (cols) => {
+    if (idxNombre >= 0 && (cols[idxNombre] || '').trim()) return cols[idxNombre].trim();
+    if (idxName >= 0 && (cols[idxName] || '').trim()) return cols[idxName].trim();
+    return [idxFirst, idxMiddle, idxLast].filter(x => x >= 0).map(x => (cols[x] || '').trim()).filter(Boolean).join(' ').trim();
+  };
+  const simple = phoneCols.length === 0; // sin columnas reconocidas -> col0=telefono, col1=nombre
+  const mapa = await new Promise(resolve => db.all('SELECT telefono FROM contactos', [], (e, rr) => {
+    const m = {}; (rr || []).forEach(x => { const k = tel10(x.telefono); if (k && !(k in m)) m[k] = x.telefono; }); resolve(m);
+  }));
+  const run = (sql, p) => new Promise(r => db.run(sql, p, () => r()));
+  let actualizados = 0, nuevos = 0, sinTel = 0, filas = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const cols = rows[i]; filas++;
+    const nombre = simple ? (cols[1] || '').trim() : nombreDe(cols);
+    const telsRaw = simple ? [cols[0]] : phoneCols.map(ci => cols[ci]).filter(Boolean).flatMap(v => String(v).split(/\s*:::\s*/));
+    let algun = false;
+    for (const raw of telsRaw) {
+      const k = tel10(raw); if (!k) continue; algun = true;
+      if (mapa[k]) { if (nombre) { await run("UPDATE contactos SET nombre=? WHERE telefono=?", [nombre, mapa[k]]); actualizados++; } }
+      else { const tel = '521' + k; await run("INSERT OR IGNORE INTO contactos (telefono, nombre, numero_id, sucursal, origen, etapa, prioridad) VALUES (?,?,?,?,'google','Nuevo','Media')", [tel, nombre || null, numero_id, sucursal]); mapa[k] = tel; nuevos++; }
+    }
+    if (!algun) sinTel++;
+  }
+  res.json({ ok: true, actualizados, nuevos, sin_telefono: sinTel, total: filas });
 });
 
 

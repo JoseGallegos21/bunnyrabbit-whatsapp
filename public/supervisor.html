@@ -168,6 +168,10 @@
 
   <!-- TAB MÉTRICAS -->
   <div class="tab-panel active" id="tab-metricas">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+      <span style="font-size:13px;color:#8696a0">Sucursal:</span>
+      <select id="metSuc" class="filter-input" style="min-width:220px" onchange="cargarMetricas()"></select>
+    </div>
     <div class="metricas-grid" id="metricasGrid">
       <div class="loading">Cargando métricas...</div>
     </div>
@@ -349,7 +353,7 @@ function switchTab(tab, el) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   el.classList.add('active');
   document.getElementById('tab-' + tab).classList.add('active');
-  if (tab === 'metricas') cargarMetricas();
+  if (tab === 'metricas') cargarSucursalesMet().then(cargarMetricas);
   if (tab === 'solicitudes') cargarSolicitudes();
   if (tab === 'calendario') {
     cargarSucursalesFiltro()
@@ -361,17 +365,26 @@ function switchTab(tab, el) {
 }
 
 // ── MÉTRICAS ──
+// Llena el selector de sucursal del tab de métricas (o "Todas"). Por defecto, la
+// del supervisor; el admin arranca en "Todas".
+async function cargarSucursalesMet(){
+  if(!sucursalesFiltro.length){ const d=await api('/api/sucursales'); sucursalesFiltro=Array.isArray(d)?d:[]; }
+  const sel=document.getElementById('metSuc'); if(!sel) return;
+  const actual=sel.value;
+  sel.innerHTML='<option value="">Todas las sucursales</option>'+sucursalesFiltro.map(function(s){return '<option value="'+_escAl(s.nombre)+'">'+_escAl(s.nombre)+'</option>';}).join('');
+  if(!actual && USER.sucursal && sucursalesFiltro.some(function(s){return s.nombre===USER.sucursal})) sel.value=USER.sucursal;
+}
 async function cargarMetricas() {
   const data = await api('/api/metricas/supervisor');
   const grid = document.getElementById('metricasGrid');
-  // Citas de HOY desde Google Calendar + palomeo de asistencias (datos reales),
-  // en vez de la tabla interna de citas (que está vacía).
+  // Citas de HOY desde Google Calendar + palomeo, para la(s) sucursal(es) elegida(s).
   const hoy = ymdLocal(new Date());
-  const suc = USER.sucursal || '';
+  const sucSel = (document.getElementById('metSuc') && document.getElementById('metSuc').value) || '';
+  let sucs = sucSel ? [sucSel] : (sucursalesFiltro.length ? sucursalesFiltro.map(function(s){return s.nombre}) : (USER.sucursal?[USER.sucursal]:[]));
   let citasHoy = 0, vino = 0, noVino = 0;
-  if (suc) {
+  for (const suc of sucs) {
     const g = await api(`/api/google-calendar/eventos?fecha_inicio=${hoy}&fecha_fin=${hoy}&sucursal=${encodeURIComponent(suc)}`);
-    citasHoy = (g && g.configurado && Array.isArray(g.eventos)) ? g.eventos.length : 0;
+    citasHoy += (g && g.configurado && Array.isArray(g.eventos)) ? g.eventos.length : 0;
     const asis = await api(`/api/asistencias?fecha=${hoy}&sucursal=${encodeURIComponent(suc)}`);
     (Array.isArray(asis) ? asis : []).forEach(a => { if (a.estado === 'asistio') vino++; else if (a.estado === 'no_asistio') noVino++; });
   }
@@ -390,9 +403,11 @@ async function cargarMetricas() {
 // scoped al número de la sucursal del supervisor (o todos para admin).
 let _sucNumCache = null;
 async function numeroDeSucursalActual() {
-  if (!USER.sucursal) return USER.numero_id || '';
+  const sel = document.getElementById('metSuc');
+  const nombre = (sel && sel.value) || USER.sucursal;
+  if (!nombre) return ''; // "Todas": sin filtro de número (cuenta todos)
   if (!_sucNumCache) { const d = await api('/api/sucursales'); _sucNumCache = Array.isArray(d) ? d : []; }
-  const s = _sucNumCache.find(x => x.nombre === USER.sucursal);
+  const s = _sucNumCache.find(x => x.nombre === nombre);
   return s ? (s.phone_number_id || '') : '';
 }
 async function cargarConvMetricas() {

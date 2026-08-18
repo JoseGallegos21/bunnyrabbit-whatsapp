@@ -50,6 +50,7 @@ CRM de WhatsApp (bunnyrabbit.lat) que reemplaza GoHighLevel para 23 sucursales d
 - [ ] Para escalar (>30 días / límites): PLBV (lo lidera Raga como Tech Provider) o Meta Verified.
 
 ### 4. Mejoras pendientes
+- [ ] **Llamadas (voz) en el chat** — IDEA. Límite: los números están en COEXISTENCIA (viven en la app del celular), así que las llamadas de WhatsApp suenan en el TELÉFONO, no en la web; el CRM no las puede tomar. Voz real en la web requeriría migrar a Cloud API (perder la app del celular) + construir un cliente WebRTC (proyecto grande). VIABLE y rápido en su lugar: botón "📞 Llamar" que abre la llamada en el dispositivo de la recepcionista (WhatsApp/marcador) + registro de llamadas (realizada/recibida + nota) para seguimiento/embudo. Falta decidir con el usuario (¿llamar rápido, contestar en compu, o solo registro?; ¿compu o celular?).
 - [ ] **Encabezado de IMAGEN** en plantillas (requiere subir la imagen a Meta con la Resumable Upload API; hoy solo texto/pie/botones).
 - [ ] **Sistema de cortes** del recepcionista (sobre el palomeo de asistencia; la tabla `asistencias` ya tiene `monto`/`metodo_pago`).
 - [ ] Responsividad móvil de `admin.html` y `supervisor.html`.

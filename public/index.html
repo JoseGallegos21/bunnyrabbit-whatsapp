@@ -33,6 +33,12 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
 .chat-item{padding:10px 14px;border-bottom:1px solid #2a3942;cursor:pointer;display:flex;align-items:center;gap:10px}
 .chat-item:hover{background:#182229}
 .chat-item.active{background:#2a3942}
+.chat-menu-btn{background:none;border:none;color:#8696a0;cursor:pointer;padding:2px 6px;font-size:19px;line-height:1;flex-shrink:0;border-radius:6px;opacity:0.55}
+.chat-item:hover .chat-menu-btn{opacity:1}
+.chat-menu-btn:hover{background:#3b4a54;color:#e9edef}
+#chatMenu{position:fixed;z-index:3000;background:#233138;border:1px solid #2a3942;border-radius:12px;padding:6px;min-width:210px;box-shadow:0 10px 40px rgba(0,0,0,0.5);display:none}
+.chat-menu-item{padding:10px 12px;border-radius:8px;cursor:pointer;color:#e9edef;font-size:13.5px;white-space:nowrap}
+.chat-menu-item:hover{background:#2a3942}
 .chat-avatar{width:42px;height:42px;border-radius:50%;background:#075e54;display:flex;align-items:center;justify-content:center;color:white;font-size:14px;font-weight:500;flex-shrink:0}
 .chat-info{flex:1;min-width:0}
 .chat-name{font-size:14px;font-weight:500;color:#e9edef;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
@@ -612,7 +618,8 @@ var nombresContactos={}; // telefono -> nombre del contacto (para la lista de ch
 var filtroBusqueda=''; // texto del buscador de chats (persiste entre re-renders)
 var conversaciones=[]; // lista de conversaciones (una por contacto) para la barra lateral
 function cargarConversaciones(){
-  fetch('/api/conversaciones',{headers:{Authorization:'Bearer '+token}})
+  var qs = filtroEtapa==='__archivados' ? '?archivados=1' : '';
+  fetch('/api/conversaciones'+qs,{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
   .then(function(d){
     conversaciones=Array.isArray(d)?d:[];
@@ -1719,16 +1726,18 @@ function cargarEtiquetas(){
 }
 
 function renderFiltros(){
-  var etapas=['Todos','Nuevo','Seguimiento','Propuesta','Cerrado','Perdido'];
-  document.getElementById('filtros').innerHTML=etapas.map(function(e){
-    return '<button class="filter-btn'+(filtroEtapa===''&&e==='Todos'?' active':filtroEtapa===e?' active':'')+'" data-etapa="'+(e==='Todos'?'':e)+'">'+e+'</button>';
+  var filtros=[['Todos',''],['No leídos','__noleidos'],['Favoritos','__favoritos'],['Nuevo','Nuevo'],['Seguimiento','Seguimiento'],['Propuesta','Propuesta'],['Cerrado','Cerrado'],['Perdido','Perdido'],['Archivados','__archivados']];
+  document.getElementById('filtros').innerHTML=filtros.map(function(f){
+    return '<button class="filter-btn'+(((filtroEtapa===''&&f[1]==='')||filtroEtapa===f[1])?' active':'')+'" data-etapa="'+f[1]+'">'+f[0]+'</button>';
   }).join('');
   document.querySelectorAll('.filter-btn').forEach(function(btn){
     btn.addEventListener('click',function(){
+      var prev=filtroEtapa;
       filtroEtapa=this.dataset.etapa;
       document.querySelectorAll('.filter-btn').forEach(function(b){b.classList.remove('active');});
       btn.classList.add('active');
-      renderChats();
+      if(filtroEtapa==='__archivados' || prev==='__archivados') cargarConversaciones();
+      else renderChats();
     });
   });
 }
@@ -1776,7 +1785,10 @@ function horaLista(ts){
 }
 function renderChats(){
   var lista=(conversaciones||[]).slice();
-  if(filtroEtapa)lista=lista.filter(function(c){return (c.etapa||'Nuevo')===filtroEtapa;});
+  if(filtroEtapa==='__noleidos') lista=lista.filter(function(c){return (c.no_leidos>0)||c.no_leido;});
+  else if(filtroEtapa==='__favoritos') lista=lista.filter(function(c){return c.favorito;});
+  else if(filtroEtapa==='__archivados'){ /* la lista ya viene archivada del servidor */ }
+  else if(filtroEtapa) lista=lista.filter(function(c){return (c.etapa||'Nuevo')===filtroEtapa;});
   if(filtroBusqueda){
     lista=lista.filter(function(c){
       var tel=c.contacto;
@@ -1786,26 +1798,76 @@ function renderChats(){
   var html=lista.map(function(c){
     var tel=c.contacto, etapa=c.etapa||'Nuevo';
     var preview=String(c.mensaje||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');
+    var iconos=(c.fijado?'<span title="Fijado" style="font-size:12px">📌</span>':'')+(c.favorito?'<span title="Favorito" style="font-size:12px">⭐</span>':'');
+    var badge=(c.no_leidos>0)?('<div class="badge">'+c.no_leidos+'</div>'):(c.no_leido?'<div class="badge">●</div>':'');
     return '<div class="chat-item'+(chatActivo===tel?' active':'')+'" data-tel="'+tel+'">'+
       '<div class="chat-avatar" style="background:'+colorAvatar(tel)+'">'+inicialesDe(tel,c.nombre)+'</div>'+
       '<div class="chat-info">'+
         '<div class="chat-name" style="display:flex;align-items:center;gap:6px">'+
           '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+nombreDe(tel)+' <span class="etapa-pill etapa-'+etapa+'">'+etapa+'</span></span>'+
+          iconos+
           '<span style="font-size:11px;color:#8696a0;font-weight:400;flex-shrink:0;white-space:nowrap">'+horaLista(c.timestamp)+'</span>'+
         '</div>'+
         '<div class="chat-preview">'+preview+'</div>'+
       '</div>'+
-      (c.no_leidos>0?'<div class="badge">'+c.no_leidos+'</div>':'')+
+      badge+
+      '<button class="chat-menu-btn" data-tel="'+tel+'" title="Opciones">⋮</button>'+
     '</div>';
   }).join('');
   var vacio = filtroBusqueda
     ? '<p style="padding:24px 16px;color:#8696a0;text-align:center">🔎 No se encontró ningún contacto que coincida con “'+filtroBusqueda.replace(/</g,'&lt;')+'”.</p>'
-    : '<p style="padding:16px;color:#999;text-align:center">Sin conversaciones</p>';
+    : (filtroEtapa==='__archivados'?'<p style="padding:16px;color:#999;text-align:center">No hay chats archivados</p>':'<p style="padding:16px;color:#999;text-align:center">Sin conversaciones</p>');
   document.getElementById('chatList').innerHTML=html||vacio;
   document.querySelectorAll('.chat-item').forEach(function(el){
-    el.addEventListener('click',function(){abrirChat(this.dataset.tel);});
+    el.addEventListener('click',function(ev){ if(ev.target.closest('.chat-menu-btn'))return; abrirChat(this.dataset.tel); });
+  });
+  document.querySelectorAll('.chat-menu-btn').forEach(function(b){
+    b.addEventListener('click',function(ev){ ev.stopPropagation(); abrirMenuChat(this.dataset.tel, this); });
   });
 }
+
+// Menú contextual de un chat (fijar, favorito, no leído, archivar, vaciar, eliminar)
+function cerrarMenuChat(){ var m=document.getElementById('chatMenu'); if(m) m.style.display='none'; }
+function abrirMenuChat(tel, btn){
+  var c=(conversaciones||[]).find(function(x){return x.contacto===tel;})||{};
+  var noleido=(c.no_leidos>0)||c.no_leido;
+  var m=document.getElementById('chatMenu');
+  function it(txt, fn){ return '<div class="chat-menu-item" onclick="'+fn+'">'+txt+'</div>'; }
+  m.innerHTML=
+    it((c.fijado?'📌 Desfijar chat':'📌 Fijar chat'), "chatFlag('"+tel+"','fijado',"+(c.fijado?0:1)+")")+
+    it((c.favorito?'⭐ Quitar de favoritos':'⭐ Añadir a favoritos'), "chatFlag('"+tel+"','favorito',"+(c.favorito?0:1)+")")+
+    it((noleido?'✔️ Marcar como leído':'🔵 Marcar como no leído'), noleido?("marcarLeidoChat('"+tel+"')"):("chatFlag('"+tel+"','no_leido',1)"))+
+    it((c.archivado?'🗂️ Desarchivar':'🗂️ Archivar chat'), "chatFlag('"+tel+"','archivado',"+(c.archivado?0:1)+")")+
+    '<div style="height:1px;background:#2a3942;margin:4px 6px"></div>'+
+    it('🧹 Vaciar chat', "vaciarChat('"+tel+"')")+
+    it('🗑️ Eliminar chat', "eliminarChat('"+tel+"')");
+  m.style.display='block';
+  var r=btn.getBoundingClientRect();
+  var left=Math.max(8, r.right-210);
+  var top=r.bottom+4;
+  if(top+m.offsetHeight>window.innerHeight-8) top=Math.max(8, r.top-4-m.offsetHeight);
+  m.style.left=left+'px'; m.style.top=top+'px';
+}
+function chatFlag(tel, campo, valor){
+  cerrarMenuChat();
+  fetch('/api/chat-flag',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({telefono:tel,campo:campo,valor:valor})})
+  .then(function(){ cargarConversaciones(); });
+}
+function marcarLeidoChat(tel){
+  cerrarMenuChat();
+  fetch('/api/leer/'+tel,{method:'PUT',headers:{Authorization:'Bearer '+token}}).then(function(){ cargarConversaciones(); });
+}
+function vaciarChat(tel){
+  cerrarMenuChat();
+  if(!confirm('¿Vaciar este chat? Se borrarán los mensajes de esta conversación.'))return;
+  fetch('/api/mensajes/'+tel,{method:'DELETE',headers:{Authorization:'Bearer '+token}}).then(function(){ if(chatActivo===tel)chatActivo=null; cargarConversaciones(); });
+}
+function eliminarChat(tel){
+  cerrarMenuChat();
+  if(!confirm('¿Eliminar este chat de la lista? (se borran los mensajes)'))return;
+  fetch('/api/mensajes/'+tel,{method:'DELETE',headers:{Authorization:'Bearer '+token}}).then(function(){ if(chatActivo===tel)chatActivo=null; cargarConversaciones(); });
+}
+document.addEventListener('click',function(ev){ if(!ev.target.closest('#chatMenu')&&!ev.target.closest('.chat-menu-btn')) cerrarMenuChat(); });
 
 // En móvil, volver de la conversación a la lista de chats
 function volverAListaChats(){
@@ -2545,5 +2607,6 @@ window.escanearPasswords = (function(){
   return escanear;
 })();
 </script>
+<div id="chatMenu"></div>
 </body>
 </html>

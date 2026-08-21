@@ -173,7 +173,11 @@ db.serialize(() => {
     ['anuncio_tipo', 'TEXT'],     // ad | post
     ['anuncio_imagen', 'TEXT'],   // imagen/thumbnail del anuncio (referral.image_url/thumbnail_url)
     ['anuncio_cuerpo', 'TEXT'],   // cuerpo/descripcion del anuncio (referral.body)
-    ['etapa_desde', 'DATETIME']   // cuando entro a la etapa actual (para enfriar leads sin avance)
+    ['etapa_desde', 'DATETIME'],  // cuando entro a la etapa actual (para enfriar leads sin avance)
+    ['fijado', 'INTEGER DEFAULT 0'],     // chat fijado arriba
+    ['favorito', 'INTEGER DEFAULT 0'],   // chat marcado como favorito
+    ['archivado', 'INTEGER DEFAULT 0'],  // chat archivado (fuera de la lista principal)
+    ['no_leido', 'INTEGER DEFAULT 0']    // marcado manualmente como no leido
   ]);
   // ruta = posicion del contacto en el arbol del workflow (soporta ramas anidadas)
   ensureColumns('workflow_inscripciones', [
@@ -642,9 +646,11 @@ app.get('/api/conversaciones', auth, (req, res) => {
   cond.push("(origen IS NULL OR origen != 'formulario_ads')");
   const where = 'WHERE ' + cond.join(' AND ');
   const lim = Math.min(parseInt(req.query.limit, 10) || 400, 1000);
+  const arch = req.query.archivados === '1' ? 1 : 0;
   db.all(`
     SELECT sub.contacto, sub.mensaje, sub.timestamp, sub.direccion, sub.media_tipo, sub.msg_id, sub.no_leidos,
-           c.nombre, c.etapa
+           c.nombre, c.etapa, COALESCE(c.fijado,0) fijado, COALESCE(c.favorito,0) favorito,
+           COALESCE(c.archivado,0) archivado, COALESCE(c.no_leido,0) no_leido
     FROM (
       SELECT contacto, mensaje, timestamp, direccion, media_tipo, id AS msg_id,
              ROW_NUMBER() OVER (PARTITION BY contacto ORDER BY timestamp DESC) rn,
@@ -652,12 +658,23 @@ app.get('/api/conversaciones', auth, (req, res) => {
       FROM mensajes ${where}
     ) sub
     LEFT JOIN contactos c ON c.telefono = sub.contacto
-    WHERE sub.rn = 1
-    ORDER BY sub.timestamp DESC
+    WHERE sub.rn = 1 AND COALESCE(c.archivado,0) = ${arch}
+    ORDER BY fijado DESC, sub.timestamp DESC
     LIMIT ${lim}`, params, (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows || []);
   });
+});
+
+// Flags del chat (estilo WhatsApp): fijado, favorito, archivado, no_leido.
+app.post('/api/chat-flag', auth, (req, res) => {
+  const { telefono, campo, valor } = req.body;
+  const permitidos = ['fijado', 'favorito', 'archivado', 'no_leido'];
+  if (!telefono || !permitidos.includes(campo)) return res.status(400).json({ error: 'Parametros invalidos' });
+  const numero_id = (req.user.rol === 'tecnica' || req.user.rol === 'recepcionista') ? req.user.numero_id : (req.body.numero_id || null);
+  db.run(`INSERT INTO contactos (telefono, numero_id, etapa, prioridad) VALUES (?,?, 'Nuevo','Media') ON CONFLICT(telefono) DO NOTHING`, [telefono, numero_id]);
+  db.run(`UPDATE contactos SET ${campo}=? WHERE telefono=?`, [valor ? 1 : 0, telefono],
+    (err) => err ? res.status(500).json({ error: err.message }) : res.json({ ok: true, campo, valor: valor ? 1 : 0 }));
 });
 
 // Descarga bajo demanda el archivo multimedia de un mensaje. Pide a Meta la URL
@@ -848,7 +865,10 @@ app.put('/api/leer/:contacto', auth, (req, res) => {
   // un cliente, marcar leido en una ya no afecta a la otra.
   const cond = ['contacto = ?', "direccion = 'entrante'"], params = [req.params.contacto];
   if (numero_id) { cond.push('numero_id = ?'); params.push(numero_id); }
-  db.run(`UPDATE mensajes SET leido = 1 WHERE ${cond.join(' AND ')}`, params, () => res.json({ ok: true }));
+  db.run(`UPDATE mensajes SET leido = 1 WHERE ${cond.join(' AND ')}`, params, () => {
+    db.run("UPDATE contactos SET no_leido=0 WHERE telefono=?", [req.params.contacto]);
+    res.json({ ok: true });
+  });
 });
 
 app.get('/webhook', (req, res) => {

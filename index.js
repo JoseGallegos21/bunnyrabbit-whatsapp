@@ -713,7 +713,7 @@ app.get('/api/mensajes/:telefono', auth, (req, res) => {
 
 app.get('/api/numeros', auth, (req, res) => {
   if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
-  db.all('SELECT id, nombre, sucursal, phone_number_id FROM numeros', [], (err, rows) => res.json(rows || []));
+  db.all('SELECT id, nombre, sucursal, phone_number_id, es_coexistencia, sync_estado FROM numeros', [], (err, rows) => res.json(rows || []));
 });
 
 // Perfil del usuario en sesión (para el panel de perfil del propio usuario).

@@ -136,10 +136,9 @@ tr:last-child td{border-bottom:none}
       <!-- ===== Conexion de WhatsApp (coexistencia) — gestion unificada ===== -->
       <div class="card">
         <h2>📱 Conexión de WhatsApp</h2>
-        <div style="background:#e8f9ef;border-left:3px solid #25D366;border-radius:4px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#1b7a45">
-          <b>Conectar WhatsApp del celular (Coexistencia):</b> el número sigue funcionando en la app WhatsApp Business del teléfono <b>y</b> aquí en la plataforma, con chats y contactos sincronizados. Requiere WhatsApp Business ≥ 2.24.17 en el teléfono. La opción "Agregar número a sucursal" (abajo) es para pegar credenciales a mano.
-        </div>
-        <button onclick="coexIniciar()" style="padding:9px 16px;background:#25D366;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">📱 Conectar WhatsApp del celular</button>
+        <button onclick="coexIniciar()" style="padding:9px 16px;background:#25D366;color:white;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;margin-bottom:14px">📱 Conectar WhatsApp del celular</button>
+        <div style="font-size:12px;color:#888;font-weight:600;margin-bottom:6px">Números conectados en coexistencia</div>
+        <div id="coex-lista" style="border:1px solid #e0e0e0;border-radius:10px;background:#fff;font-size:13px;overflow:hidden">Cargando…</div>
         <div id="coex-msg" style="display:none;background:#fff;border:1px solid #cde;border-radius:6px;padding:10px 12px;margin-top:12px;font-size:13px;color:#333"></div>
       </div>
 
@@ -1512,6 +1511,21 @@ function cargarNumerosEnSelectores(){
     var pNum=document.getElementById('p_numero_id');
     if(rNum)rNum.innerHTML=opts;
     if(pNum)pNum.innerHTML=optsP;
+
+    // Lista de números conectados en coexistencia
+    var coexCont=document.getElementById('coex-lista');
+    if(coexCont){
+      var coex=d.filter(function(n){return n.es_coexistencia==1;});
+      if(!coex.length){ coexCont.innerHTML='<div style="padding:12px;color:#999">Aún no hay números conectados en coexistencia. Usa el botón de arriba para conectar el WhatsApp del celular.</div>'; }
+      else coexCont.innerHTML=coex.map(function(n){
+        var estado=(n.sync_estado==='listo')?'<span style="background:#e8f5e9;color:#2e7d32;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600">✓ Sincronizado</span>':(n.sync_estado==='sincronizando'?'<span style="background:#fff3e0;color:#e67e22;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600">⟳ Sincronizando</span>':'<span style="background:#e7f0fd;color:#1877F2;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600">Conectado</span>');
+        return '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid #f2f2f2">'+
+          '<span style="width:30px;height:30px;border-radius:8px;background:#e8f9ef;color:#25D366;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0">📱</span>'+
+          '<div style="flex:1;min-width:0"><div style="font-weight:600;color:#333">'+h(n.sucursal||n.nombre||'Sin sucursal')+'</div><div style="font-size:11px;color:#999">ID '+h(n.phone_number_id)+'</div></div>'+
+          estado+
+        '</div>';
+      }).join('');
+    }
 
     // Numero asignado al usuario: desplegable, no texto libre. Escribir el
     // telefono (+1 555...) en vez del Phone Number ID deja al usuario sin ver

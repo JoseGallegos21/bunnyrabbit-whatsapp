@@ -1774,9 +1774,16 @@ function limpiarRangoMetricas(){
 }
 
 // Hora del último mensaje para la lista: hoy -> HH:MM, ayer -> "Ayer", más viejo -> fecha.
+// Los timestamps de la DB estan en UTC "YYYY-MM-DD HH:MM:SS" (sin zona). new Date()
+// los tomaria como hora LOCAL (desfase de 6h en Mexico). Este helper los trata como UTC.
+function parseTS(ts){
+  if(!ts) return null;
+  var s=String(ts);
+  var d=/[TZ]|[+-]\d\d:?\d\d$/.test(s)?new Date(s):new Date(s.replace(' ','T')+'Z');
+  return isNaN(d)?null:d;
+}
 function horaLista(ts){
-  if(!ts) return '';
-  var d=new Date(ts); if(isNaN(d)) return '';
+  var d=parseTS(ts); if(!d) return '';
   var hoy=new Date();
   if(d.toDateString()===hoy.toDateString()) return d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
   var ayer=new Date(hoy.getTime()-86400000);
@@ -2141,11 +2148,11 @@ function renderMensajes(tel){
   // Si ya tenemos el historial completo de esta conversación, lo usamos; si no,
   // caemos a lo que haya en la lista global (mientras carga).
   var base=(convTel===tel && mensajesConv.length) ? mensajesConv : mensajes.filter(function(m){return m.contacto===tel;});
-  var msgs=base.slice().sort(function(a,b){return new Date(a.timestamp)-new Date(b.timestamp);});
+  var msgs=base.slice().sort(function(a,b){return (parseTS(a.timestamp)||0)-(parseTS(b.timestamp)||0);});
   var html='';
   var lastDate='';
   msgs.forEach(function(m){
-    var fecha=new Date(m.timestamp);
+    var fecha=parseTS(m.timestamp)||new Date(m.timestamp);
     var fechaStr=fecha.toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric'});
     var hoy=new Date().toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric'});
     var ayer=new Date(Date.now()-86400000).toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric'});

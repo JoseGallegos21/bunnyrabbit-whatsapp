@@ -101,7 +101,7 @@ tr:last-child td{border-bottom:none}
   <div class="tabs">
     <div class="tab active" onclick="showTab('usuarios',this)">Usuarios</div>
     <div class="tab" onclick="showTab('plantillas',this)">Plantillas</div>
-    <div class="tab" onclick="showTab('difusion',this)">Difusion</div>
+    <div class="tab" onclick="showTab('difusion',this)">📣 Remarketing</div>
     <div class="tab" onclick="showTab('reportes',this)">Reportes</div>
         <div class="tab" onclick="showTab('biblioteca',this)">Biblioteca</div>
         <div class="tab" onclick="showTab('facebook',this)">&#128279; Facebook CAPI</div>
@@ -215,9 +215,44 @@ tr:last-child td{border-bottom:none}
 
     <!-- PLANTILLAS -->
     <div class="section" id="sec-plantillas">
+      <div id="plantillaHelpModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:2000;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this)this.style.display='none'">
+        <div style="background:#fff;border-radius:14px;max-width:620px;width:100%;max-height:88vh;overflow:auto;padding:24px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <h3 style="margin:0;font-size:17px">Especificaciones de plantillas</h3>
+            <button onclick="document.getElementById('plantillaHelpModal').style.display='none'" style="background:none;border:none;font-size:24px;cursor:pointer;color:#888;line-height:1">&times;</button>
+          </div>
+          <div style="font-size:13.5px;color:#333;line-height:1.6">
+            <p style="margin:0 0 8px;color:#666">Meta revisa cada plantilla (minutos a ~24 h). Sigue esto para que la aprueben rápido.</p>
+            <h4 style="margin:14px 0 6px;font-size:14px;color:#111">📋 Formato</h4>
+            <ul style="margin:0;padding-left:20px">
+              <li><b>Nombre:</b> solo minúsculas, números y guion bajo (<code>a-z 0-9 _</code>). Sin espacios ni acentos. Que describa el contenido.</li>
+              <li><b>Categoría:</b> <b>Marketing</b> (promos, ofertas), <b>Utilidad</b> (transaccional: recordatorios, confirmaciones), <b>Autenticación</b> (códigos/OTP).</li>
+              <li><b>Idioma:</b> elige el correcto (ej. Español México). Debe coincidir con el texto.</li>
+              <li><b>Encabezado</b> (opcional): Texto (máx 60) o Imagen. La imagen se ve <b>horizontal</b> (~1.91:1); una vertical se recorta.</li>
+              <li><b>Cuerpo:</b> máx 1028 caracteres. Las variables (llaves dobles con un número dentro, tipo 1, 2…) <b>requieren un ejemplo</b>.</li>
+              <li><b>Pie de página</b> (opcional): máx 60 caracteres.</li>
+              <li><b>Botones</b> (opcional): hasta 3 de respuesta rápida.</li>
+            </ul>
+            <h4 style="margin:16px 0 6px;font-size:14px;color:#b45309">⚠️ Qué evita (o retrasa) la aprobación</h4>
+            <ul style="margin:0;padding-left:20px">
+              <li><b>Promoción en categoría Utilidad</b> → Meta la reclasifica a Marketing (pon Marketing si es promo).</li>
+              <li><b>Faltas de ortografía/gramática</b> o texto sin sentido.</li>
+              <li><b>Variables sin ejemplo</b>, mal numeradas, o pegadas al inicio/fin sin texto alrededor.</li>
+              <li><b>Exceso de MAYÚSCULAS</b> o demasiados emojis.</li>
+              <li><b>Enlaces acortados/sospechosos</b> o dominios no verificados.</li>
+              <li><b>Placeholders sin llenar</b> (<code>[nombre]</code>, <code>xxx</code>) o contenido incompleto.</li>
+              <li><b>Pedir datos sensibles</b> (tarjeta, contraseñas, CVV).</li>
+              <li><b>Contenido prohibido</b> según la política de Meta (según región).</li>
+            </ul>
+            <p style="margin:14px 0 0;color:#666;font-size:12.5px">Aunque elijas Utilidad, si el contenido es promocional Meta lo pasa a Marketing — es su regla, no del sistema.</p>
+          </div>
+        </div>
+      </div>
       <div style="display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start">
         <div class="card" style="margin:0">
-          <h2>Nueva plantilla</h2>
+          <h2 style="display:flex;align-items:center;gap:8px">Nueva plantilla
+            <button type="button" onclick="document.getElementById('plantillaHelpModal').style.display='flex'" title="Especificaciones y tips de aprobación" style="width:22px;height:22px;border-radius:50%;border:1px solid #cbd5e0;background:#fff;color:#2563eb;cursor:pointer;font-weight:700;font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0">?</button>
+          </h2>
           <div class="form-row">
             <div class="form-group"><label>Número WhatsApp</label>
               <select id="p_numero_id" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px"><option value="">-- Seleccionar número --</option></select>
@@ -353,24 +388,28 @@ tr:last-child td{border-bottom:none}
     <!-- DIFUSION -->
     <div class="section" id="sec-difusion">
       <div class="card">
-        <h2>Nueva difusion</h2>
+        <h2>📣 Nuevo remarketing</h2>
+        <p style="font-size:13px;color:#666;margin:-6px 0 14px">Envía una <b>plantilla aprobada</b> a tus contactos. El envío por texto libre no llega fuera de la ventana de 24h de Meta, por eso se usa plantilla. El costo lo cobra Meta según tus tarifas.</p>
         <div class="form-row">
-          <div class="form-group"><label>Nombre de la campana</label><input type="text" id="d_nombre" placeholder="Ej: Promo mayo"></div>
+          <div class="form-group"><label>Nombre de la campaña</label><input type="text" id="d_nombre" placeholder="Ej: Promo agosto"></div>
+          <div class="form-group"><label>Enviar desde número</label>
+            <select id="d_numero" onchange="cargarPlantillasDifusion();estimarDifusion()"></select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Plantilla (aprobada)</label>
+            <select id="d_plantilla" onchange="estimarDifusion()"><option value="">Cargando plantillas…</option></select>
+          </div>
           <div class="form-group"><label>Filtrar por etapa</label>
-            <select id="d_etapa">
+            <select id="d_etapa" onchange="estimarDifusion()">
               <option value="">Todos los contactos</option>
               <option>Nuevo</option><option>Seguimiento</option><option>Propuesta</option><option>Cerrado</option>
             </select>
           </div>
-          <div class="form-group"><label>Enviar desde numero</label>
-            <select id="d_numero"></select>
-          </div>
         </div>
-        <div class="form-group" style="margin-bottom:12px"><label>Mensaje</label>
-          <textarea id="d_mensaje" placeholder="Escribe el mensaje a enviar..."></textarea>
-        </div>
+        <div id="d_estimado" style="font-size:13px;color:#334;background:#f6f8f9;border:1px solid #eef1f3;border-radius:8px;padding:10px 12px;margin-bottom:12px;display:none"></div>
         <div style="display:flex;gap:10px;align-items:center">
-          <button class="btn btn-primary" id="btnEnviarDifusion">Enviar difusion</button>
+          <button class="btn btn-primary" id="btnEnviarDifusion">Enviar remarketing</button>
           <span id="msgDifusion" style="font-size:13px"></span>
         </div>
       </div>
@@ -953,6 +992,7 @@ function showTab(id,el){
   document.getElementById('sec-'+id).classList.add('active');
   el.classList.add('active');
   if(id==='usuarios'){cargarSucursales();cargarNumerosEnSelectSucursal();}
+  if(id==='difusion'){cargarPlantillasDifusion();}
   if(id==='reportes')cargarReportes();
     if(id==='biblioteca')cargarBiblioteca();
     if(id==='facebook'){setTimeout(function(){fbLoadNumeros();fbLoadStats();},100);}
@@ -1402,7 +1442,8 @@ function eliminarUsuario(id,nombre){
     }
 
 var _cobTimer=null;
-function cargarCoberturaPlantillaDebounced(){ clearTimeout(_cobTimer); _cobTimer=setTimeout(cargarCoberturaPlantilla,400); }
+function cargarCoberturaPlantillaDebounced(){ clearTimeout(_cobTimer); _cobTimer=setTimeout(cargarCoberturaPlantilla,700); }
+var _cobUltimoNombre='';
 function pCobCount(){ var c=document.querySelectorAll('#p_cobertura .p-cob:checked:not(:disabled)').length; var el=document.getElementById('p_cob_count'); if(el) el.textContent=c; }
 function pCobSel(v){ document.querySelectorAll('#p_cobertura .p-cob:not(:disabled)').forEach(function(c){ c.checked=!!v; }); pCobCount(); }
 // Al escribir el nombre: minúsculas, espacios -> guion bajo, y solo a-z 0-9 _ (lo que exige Meta).
@@ -1413,8 +1454,13 @@ function pNombreInput(el){
 function cargarCoberturaPlantilla(){
   var cont=document.getElementById('p_cobertura'); if(!cont) return;
   var nombre=(document.getElementById('p_nombre').value||'').toLowerCase().replace(/\s+/g,'_');
-  if(!nombre){ cont.innerHTML='<div style="color:#999;padding:10px">Escribe el nombre de la plantilla para elegir sucursales…</div>'; return; }
-  cont.innerHTML='<div style="color:#999;padding:10px">Cargando sucursales…</div>';
+  if(!nombre){ cont.innerHTML='<div style="color:#999;padding:10px">Escribe el nombre de la plantilla para elegir sucursales…</div>'; _cobUltimoNombre=''; return; }
+  if(nombre===_cobUltimoNombre) return;   // el nombre no cambió: no recargar (evita el parpadeo)
+  _cobUltimoNombre=nombre;
+  // Conservar la selección actual del usuario para reaplicarla tras recargar.
+  var seleccion={}; cont.querySelectorAll('.p-cob').forEach(function(c){ seleccion[c.value]=c.checked; });
+  // Solo mostrar "Cargando" la PRIMERA vez (si aún no hay lista), no en cada tecla.
+  if(!cont.querySelector('.p-cob')) cont.innerHTML='<div style="color:#999;padding:10px">Cargando sucursales…</div>';
   fetch('/api/plantillas/cobertura?nombre='+encodeURIComponent(nombre),{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
   .then(function(rows){
@@ -1426,8 +1472,9 @@ function cargarCoberturaPlantilla(){
     '</div>';
     var body=rows.map(function(n){
       var ya=n.tiene;
+      var marcado = ya ? true : (n.phone_number_id in seleccion ? seleccion[n.phone_number_id] : true);
       return '<label style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid #f2f2f2;cursor:'+(ya?'default':'pointer')+';'+(ya?'background:#fafffb':'')+'">'+
-        '<input type="checkbox" class="p-cob" value="'+n.phone_number_id+'" onchange="pCobCount()" '+(ya?'checked disabled':'checked')+' style="width:16px;height:16px;flex-shrink:0">'+
+        '<input type="checkbox" class="p-cob" value="'+n.phone_number_id+'" onchange="pCobCount()" '+(ya?'checked disabled':(marcado?'checked':''))+' style="width:16px;height:16px;flex-shrink:0">'+
         '<span style="width:28px;height:28px;border-radius:8px;background:#eef2f5;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">🏢</span>'+
         '<span style="flex:1;min-width:0;font-weight:500;color:#333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(n.sucursal||n.phone_number_id)+'</span>'+
         (ya
@@ -1597,17 +1644,46 @@ function cargarDifusiones(){
   });
 }
 
+// Carga las plantillas APROBADAS del número seleccionado en el selector de remarketing.
+function cargarPlantillasDifusion(){
+  var sel=document.getElementById('d_plantilla'); if(!sel) return;
+  fetch('/api/plantillas',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    var num=document.getElementById('d_numero').value;
+    var apr=(Array.isArray(d)?d:[]).filter(function(p){return p.estado_meta==='aprobada' && (!num || String(p.phone_number_id)===String(num) || !p.phone_number_id);});
+    sel.innerHTML = apr.length
+      ? '<option value="">— Elige una plantilla —</option>'+apr.map(function(p){return '<option value="'+p.id+'">'+h(p.nombre)+' ('+h(p.categoria)+')</option>';}).join('')
+      : '<option value="">No hay plantillas aprobadas para este número</option>';
+  }).catch(function(){});
+}
+// Estima cuántos contactos y cuánto costará (Meta) antes de enviar.
+function estimarDifusion(){
+  var box=document.getElementById('d_estimado'); if(!box) return;
+  var plantilla_id=document.getElementById('d_plantilla').value;
+  if(!plantilla_id){ box.style.display='none'; return; }
+  var data={numero_id:document.getElementById('d_numero').value,filtro_etapa:document.getElementById('d_etapa').value,plantilla_id:plantilla_id};
+  box.style.display='block'; box.innerHTML='Calculando…';
+  fetch('/api/difusion/estimar',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify(data)})
+  .then(function(r){return r.json()})
+  .then(function(e){
+    var mxn = (e.total_mxn!=null) ? e.total_mxn : ((e.total_usd&&e.tipo_cambio)?e.total_usd*e.tipo_cambio:null);
+    box.innerHTML='📊 <b>'+(e.total||0)+'</b> contactos · <b>'+(e.facturables||0)+'</b> facturables · costo estimado <b>$'+(Number(e.total_usd)||0).toFixed(2)+' USD</b>'+(mxn!=null?' (~$'+Math.round(mxn)+' MXN)':'')+
+      ((e.avisos&&e.avisos.length)?'<div style="color:#b45309;margin-top:8px;line-height:1.5">⚠ '+e.avisos.join('<br>⚠ ')+'</div>':'');
+  }).catch(function(){ box.innerHTML='<span style="color:#c0392b">No se pudo estimar.</span>'; });
+}
 document.getElementById('btnEnviarDifusion').addEventListener('click',function(){
-  var data={nombre:document.getElementById('d_nombre').value,mensaje:document.getElementById('d_mensaje').value,
-    filtro_etapa:document.getElementById('d_etapa').value,numero_id:document.getElementById('d_numero').value};
-  if(!data.mensaje){document.getElementById('msgDifusion').textContent='Escribe un mensaje';return;}
+  var plantilla_id=document.getElementById('d_plantilla').value;
   var msg=document.getElementById('msgDifusion');
+  if(!plantilla_id){msg.textContent='Selecciona una plantilla aprobada';msg.style.color='#c0392b';return;}
+  var data={nombre:document.getElementById('d_nombre').value,plantilla_id:plantilla_id,
+    filtro_etapa:document.getElementById('d_etapa').value,numero_id:document.getElementById('d_numero').value};
   msg.textContent='Enviando...';msg.style.color='#e65100';
   fetch('/api/difusion',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(data)})
   .then(function(r){return r.json()})
   .then(function(d){
-    if(d.ok){msg.textContent='Enviando a '+d.total+' contactos';msg.style.color='#2e7d32';
-      document.getElementById('d_nombre').value='';document.getElementById('d_mensaje').value='';
+    if(d.ok){msg.textContent='Enviando a '+d.total+' contactos ✓';msg.style.color='#2e7d32';
+      document.getElementById('d_nombre').value='';
       setTimeout(cargarDifusiones,2000);
     } else {msg.textContent=d.error||'Error';msg.style.color='red';}
   });

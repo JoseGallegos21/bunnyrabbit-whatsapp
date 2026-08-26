@@ -379,7 +379,13 @@ tr:last-child td{border-bottom:none}
       </div>
 
       <div class="card">
-        <h2>Plantillas guardadas</h2>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+          <h2 style="margin:0">Plantillas guardadas</h2>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span id="msgSyncPlantillas" style="font-size:12px;color:#666"></span>
+            <button class="btn" onclick="sincronizarPlantillasMeta()" title="Trae las plantillas creadas en Meta y actualiza su estado" style="background:#1f5c4a;color:#fff;border:none;padding:8px 14px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">🔄 Sincronizar con Meta</button>
+          </div>
+        </div>
         <table><thead><tr><th>Nombre</th><th>Categoría</th><th>Contenido</th><th>Estado Meta</th><th>Número</th><th>Acciones</th></tr></thead>
         <tbody id="tablaPlantillas"></tbody></table>
       </div>
@@ -1486,6 +1492,22 @@ function cargarCoberturaPlantilla(){
   }).catch(function(){ cont.innerHTML='<div style="color:#c0392b;padding:10px">Error al cargar sucursales.</div>'; });
 }
 
+// Trae las plantillas creadas/actualizadas en Meta (WhatsApp Manager) al sistema.
+function sincronizarPlantillasMeta(){
+  var msg=document.getElementById('msgSyncPlantillas');
+  if(msg){ msg.textContent='Sincronizando…'; msg.style.color='#e65100'; }
+  fetch('/api/plantillas/sync',{method:'POST',headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(!msg) return;
+    if(d && (d.importadas!=null || d.actualizadas!=null)){
+      msg.textContent='✓ '+(d.importadas||0)+' nuevas · '+(d.actualizadas||0)+' actualizadas';
+      msg.style.color='#2e7d32';
+      cargarPlantillas();
+      if(typeof cargarPlantillasDifusion==='function') cargarPlantillasDifusion();
+    } else { msg.textContent=(d&&d.error)||'No se pudo sincronizar'; msg.style.color='#c0392b'; }
+  }).catch(function(){ if(msg){ msg.textContent='Error al sincronizar'; msg.style.color='#c0392b'; } });
+}
 function cargarPlantillas(){
   fetch('/api/plantillas',{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})

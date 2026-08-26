@@ -1255,10 +1255,38 @@ app.get('/api/plantillas', auth, (req, res) => {
 // (ej. plantilla Global), queda como 'pendiente' sin enviarse.
 // Arma el arreglo `components` que Meta espera: encabezado (texto), cuerpo (con
 // ejemplos si hay variables {{n}}), pie y botones de respuesta rapida.
-function construirComponentesMeta(contenido, ex) {
+// Sube una imagen (URL local /uploads/…) a Meta por Resumable Upload y devuelve el
+// "header_handle" que exige una plantilla con encabezado de imagen (no acepta URLs).
+async function subirImagenHeaderMeta(headerImageUrl) {
+  const fs = require('fs'), path = require('path');
+  const APP_ID = process.env.META_APP_ID, APP_SECRET = process.env.META_APP_SECRET;
+  if (!APP_ID || !APP_SECRET) throw new Error('Falta META_APP_ID/META_APP_SECRET para subir la imagen del encabezado');
+  const fname = String(headerImageUrl).split('/uploads/')[1];
+  if (!fname) throw new Error('URL de imagen de encabezado inválida');
+  const filePath = path.join('./public/uploads', fname.split('?')[0]);
+  const buf = fs.readFileSync(filePath);
+  const ext = path.extname(filePath).toLowerCase();
+  const mime = ext === '.png' ? 'image/png' : (ext === '.webp' ? 'image/webp' : 'image/jpeg');
+  const appToken = APP_ID + '|' + APP_SECRET;
+  const V = process.env.META_GRAPH_VERSION || 'v21.0';
+  const ax = require('axios');
+  const s = await ax.post(`https://graph.facebook.com/${V}/${APP_ID}/uploads?file_length=${buf.length}&file_type=${encodeURIComponent(mime)}&access_token=${encodeURIComponent(appToken)}`);
+  const sessionId = s.data && s.data.id;
+  if (!sessionId) throw new Error('Meta no devolvió sesión de subida');
+  const u = await ax.post(`https://graph.facebook.com/${V}/${sessionId}`, buf, {
+    headers: { Authorization: 'OAuth ' + appToken, file_offset: '0', 'Content-Type': mime }, maxBodyLength: Infinity });
+  const handle = u.data && u.data.h;
+  if (!handle) throw new Error('Meta no devolvió el handle de la imagen');
+  return handle;
+}
+async function construirComponentesMeta(contenido, ex) {
   ex = ex || {};
   const comps = [];
   if (ex.header_type === 'TEXT' && ex.header_text) comps.push({ type: 'HEADER', format: 'TEXT', text: String(ex.header_text).slice(0, 60) });
+  else if (ex.header_type === 'IMAGE' && ex.header_image) {
+    const handle = await subirImagenHeaderMeta(ex.header_image);
+    comps.push({ type: 'HEADER', format: 'IMAGE', example: { header_handle: [handle] } });
+  }
   const body = { type: 'BODY', text: contenido };
   const vars = contenido.match(/\{\{(\d+)\}\}/g) || [];
   if (vars.length && Array.isArray(ex.muestras) && ex.muestras.length) body.example = { body_text: [ex.muestras.map(m => m || 'ejemplo')] };
@@ -1278,9 +1306,12 @@ async function crearPlantillaEnNumero(nombre, categoria, contenido, numId, extra
   const numRow = await new Promise(r => db.get('SELECT * FROM numeros WHERE phone_number_id=?', [numId], (e, row) => r(row)));
   if (!numRow || !numRow.token || !numRow.waba_id) return { estado: 'sin_waba', id: plantillaId, sucursal: (numRow && numRow.sucursal) || numId };
   try {
+    const catMeta = ['MARKETING', 'UTILITY', 'AUTHENTICATION'].includes(String(categoria || '').toUpperCase())
+      ? String(categoria).toUpperCase() : 'UTILITY';
+    const componentes = await construirComponentesMeta(contenido, extras);
     const metaRes = await require('axios').post(
       `https://graph.facebook.com/v18.0/${numRow.waba_id}/message_templates`,
-      { name: nombre.toLowerCase().replace(/\s+/g, '_'), category: categoria === 'Marketing' ? 'MARKETING' : 'UTILITY', language: 'es', components: construirComponentesMeta(contenido, extras) },
+      { name: nombre.toLowerCase().replace(/\s+/g, '_'), category: catMeta, language: 'es', components: componentes },
       { headers: { Authorization: 'Bearer ' + numRow.token } });
     await new Promise(r => db.run('UPDATE plantillas SET meta_template_id=?, estado_meta=? WHERE id=?', [metaRes.data?.id || null, 'enviada', plantillaId], () => r()));
     return { estado: 'enviada', id: plantillaId, sucursal: numRow.sucursal || numId };
@@ -1291,9 +1322,9 @@ async function crearPlantillaEnNumero(nombre, categoria, contenido, numId, extra
 }
 
 app.post('/api/plantillas', auth, requireRole('admin', 'supervisor', 'recepcionista'), async (req, res) => {
-  const { nombre, categoria, contenido, phone_number_id, header_type, header_text, footer, botones, muestras } = req.body;
+  const { nombre, categoria, contenido, phone_number_id, header_type, header_text, header_image, footer, botones, muestras } = req.body;
   if (!nombre || !contenido) return res.json({ ok: false, error: 'Nombre y contenido son obligatorios' });
-  const extras = { header_type, header_text, footer, botones, muestras };
+  const extras = { header_type, header_text, header_image, footer, botones, muestras };
   // Lista explicita de numeros (multi-seleccion de sucursales en coexistencia)
   const lista = Array.isArray(req.body.numeros) ? req.body.numeros.filter(Boolean) : null;
   if (lista && lista.length) {

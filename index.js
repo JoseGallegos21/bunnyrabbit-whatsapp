@@ -1300,9 +1300,10 @@ async function construirComponentesMeta(contenido, ex) {
 async function crearPlantillaEnNumero(nombre, categoria, contenido, numId, extras) {
   extras = extras || {};
   const botonesJson = JSON.stringify((extras.botones || []).map(b => b && b.text).filter(Boolean));
+  const idioma = extras.idioma || 'es';
   const plantillaId = await new Promise((resolve, reject) => db.run(
-    'INSERT INTO plantillas (nombre, categoria, contenido, phone_number_id, estado_meta, botones) VALUES (?,?,?,?,?,?)',
-    [nombre, categoria || 'General', contenido, numId, 'pendiente', botonesJson], function (e) { e ? reject(e) : resolve(this.lastID); }));
+    'INSERT INTO plantillas (nombre, categoria, contenido, phone_number_id, estado_meta, botones, idioma) VALUES (?,?,?,?,?,?,?)',
+    [nombre, categoria || 'General', contenido, numId, 'pendiente', botonesJson, idioma], function (e) { e ? reject(e) : resolve(this.lastID); }));
   const numRow = await new Promise(r => db.get('SELECT * FROM numeros WHERE phone_number_id=?', [numId], (e, row) => r(row)));
   if (!numRow || !numRow.token || !numRow.waba_id) return { estado: 'sin_waba', id: plantillaId, sucursal: (numRow && numRow.sucursal) || numId };
   try {
@@ -1311,7 +1312,7 @@ async function crearPlantillaEnNumero(nombre, categoria, contenido, numId, extra
     const componentes = await construirComponentesMeta(contenido, extras);
     const metaRes = await require('axios').post(
       `https://graph.facebook.com/v18.0/${numRow.waba_id}/message_templates`,
-      { name: nombre.toLowerCase().replace(/\s+/g, '_'), category: catMeta, language: 'es', components: componentes },
+      { name: nombre.toLowerCase().replace(/\s+/g, '_'), category: catMeta, language: idioma, components: componentes },
       { headers: { Authorization: 'Bearer ' + numRow.token } });
     await new Promise(r => db.run('UPDATE plantillas SET meta_template_id=?, estado_meta=? WHERE id=?', [metaRes.data?.id || null, 'enviada', plantillaId], () => r()));
     return { estado: 'enviada', id: plantillaId, sucursal: numRow.sucursal || numId };
@@ -1322,9 +1323,9 @@ async function crearPlantillaEnNumero(nombre, categoria, contenido, numId, extra
 }
 
 app.post('/api/plantillas', auth, requireRole('admin', 'supervisor', 'recepcionista'), async (req, res) => {
-  const { nombre, categoria, contenido, phone_number_id, header_type, header_text, header_image, footer, botones, muestras } = req.body;
+  const { nombre, categoria, contenido, phone_number_id, header_type, header_text, header_image, footer, botones, muestras, idioma } = req.body;
   if (!nombre || !contenido) return res.json({ ok: false, error: 'Nombre y contenido son obligatorios' });
-  const extras = { header_type, header_text, header_image, footer, botones, muestras };
+  const extras = { header_type, header_text, header_image, footer, botones, muestras, idioma };
   // Lista explicita de numeros (multi-seleccion de sucursales en coexistencia)
   const lista = Array.isArray(req.body.numeros) ? req.body.numeros.filter(Boolean) : null;
   if (lista && lista.length) {

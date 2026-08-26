@@ -223,7 +223,17 @@ tr:last-child td{border-bottom:none}
               <select id="p_numero_id" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:6px"><option value="">-- Seleccionar número --</option></select>
             </div>
             <div class="form-group"><label>Nombre de plantilla</label>
-              <input type="text" id="p_nombre" placeholder="ej: saludo_inicial" style="text-transform:lowercase" oninput="cargarCoberturaPlantillaDebounced()">
+              <input type="text" id="p_nombre" placeholder="ej: saludo_inicial" oninput="pNombreInput(this)">
+            </div>
+            <div class="form-group"><label>Idioma</label>
+              <select id="p_idioma">
+                <option value="es_MX">Español (México)</option>
+                <option value="es">Español</option>
+                <option value="es_AR">Español (Argentina)</option>
+                <option value="en_US">Inglés (EE. UU.)</option>
+                <option value="en">Inglés</option>
+                <option value="pt_BR">Portugués (Brasil)</option>
+              </select>
             </div>
             <div class="form-group"><label>Categoría</label>
               <select id="p_cat">
@@ -1355,7 +1365,7 @@ function eliminarUsuario(id,nombre){
         prevHeader.textContent = ht;
       } else if(tipoHeader==='IMAGE'){
         var hi = document.getElementById('p_header_image').value;
-        if(hi){ prevHeader.style.display='block'; prevHeader.innerHTML='<img src="'+hi+'" style="width:100%;border-radius:6px;max-height:140px;object-fit:cover">'; }
+        if(hi){ prevHeader.style.display='block'; prevHeader.innerHTML='<img src="'+hi+'" style="width:100%;height:auto;border-radius:6px;display:block">'; }
         else { prevHeader.style.display='none'; }
       } else {
         prevHeader.style.display='none';
@@ -1395,6 +1405,11 @@ var _cobTimer=null;
 function cargarCoberturaPlantillaDebounced(){ clearTimeout(_cobTimer); _cobTimer=setTimeout(cargarCoberturaPlantilla,400); }
 function pCobCount(){ var c=document.querySelectorAll('#p_cobertura .p-cob:checked:not(:disabled)').length; var el=document.getElementById('p_cob_count'); if(el) el.textContent=c; }
 function pCobSel(v){ document.querySelectorAll('#p_cobertura .p-cob:not(:disabled)').forEach(function(c){ c.checked=!!v; }); pCobCount(); }
+// Al escribir el nombre: minúsculas, espacios -> guion bajo, y solo a-z 0-9 _ (lo que exige Meta).
+function pNombreInput(el){
+  el.value = (el.value||'').toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
+  cargarCoberturaPlantillaDebounced();
+}
 function cargarCoberturaPlantilla(){
   var cont=document.getElementById('p_cobertura'); if(!cont) return;
   var nombre=(document.getElementById('p_nombre').value||'').toLowerCase().replace(/\s+/g,'_');
@@ -1448,6 +1463,7 @@ document.getElementById('btnCrearPlantilla').addEventListener('click',function()
   var data={
     nombre:document.getElementById('p_nombre').value.toLowerCase().replace(/\s+/g,'_'),
     categoria:document.getElementById('p_cat').value,
+    idioma:document.getElementById('p_idioma').value,
     contenido:document.getElementById('p_contenido').value,
     phone_number_id:numSel?numSel.value:null,
     header_type:tipoHeader,

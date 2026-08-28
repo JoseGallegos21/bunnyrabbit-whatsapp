@@ -690,6 +690,11 @@ tr:last-child td{border-bottom:none}
         <p style="font-size:13px;color:#666;margin-bottom:12px">Pega el <b>ID del calendario</b> de cada sucursal (lo encuentras en Google Calendar → Configuración del calendario → "Integrar calendario" → <i>ID del calendario</i>). Las citas de ese calendario aparecerán en la pestaña de las técnicas.</p>
         <div id="calListaSuc"><p style="color:#999;text-align:center;padding:20px">Cargando sucursales...</p></div>
       </div>
+      <div class="card">
+        <h2>🧾 CPL (compras) → etiqueta "Compró" + fecha de compra</h2>
+        <p style="font-size:13px;color:#666;margin-bottom:12px">Comparte tu hoja de compras (Google Sheets) con el <b>mismo correo de la cuenta de servicio de arriba</b> y pega su link/ID por sucursal. Cruzamos por teléfono, etiquetamos <b>"Compró"</b> y guardamos la <b>fecha de compra</b> (para remarketing por bloques). Se sincroniza solo cada 6h, o con el botón.</p>
+        <div id="cplListaSuc"><p style="color:#999;text-align:center;padding:20px">Cargando sucursales...</p></div>
+      </div>
     </div>
   </div>
 </div>
@@ -1003,7 +1008,7 @@ function showTab(id,el){
     if(id==='biblioteca')cargarBiblioteca();
     if(id==='facebook'){setTimeout(function(){fbLoadNumeros();fbLoadStats();},100);}
     if(id==='workflows')wfCargar();
-    if(id==='calendario')cargarCalendarioConfig();
+    if(id==='calendario'){cargarCalendarioConfig();cargarCPLConfig();}
 }
 
 // ── GOOGLE CALENDAR (config por sucursal) ──
@@ -1046,6 +1051,49 @@ function guardarCalendario(id, btn){
   .then(function(r){return r.json();}).then(function(d){
     if(d.ok){ cargarCalendarioConfig(); } else alert('Error: '+(d.error||'no se pudo guardar'));
   });
+}
+function cargarCPLConfig(){
+  var hdr={headers:{Authorization:'Bearer '+token}};
+  Promise.all([
+    fetch('/api/sucursales',hdr).then(function(r){return r.json();}),
+    fetch('/api/cpl/config',hdr).then(function(r){return r.json();})
+  ]).then(function(res){
+    var sucs=Array.isArray(res[0])?res[0]:[]; var cfgs=Array.isArray(res[1])?res[1]:[];
+    var map={}; cfgs.forEach(function(c){ map[c.sucursal]=c; });
+    var el=document.getElementById('cplListaSuc');
+    if(!sucs.length){ el.innerHTML='<p style="color:#999">No hay sucursales. Créalas primero en la pestaña Usuarios.</p>'; return; }
+    el.innerHTML=sucs.map(function(s){
+      var c=map[s.nombre]||{};
+      var sync=c.ultima_sync?('<span style="color:#16a34a;font-size:12px">✓ '+h(String(c.ultima_sync).substring(0,16).replace("T"," "))+'</span>'):'';
+      return '<div style="border:1px solid #eee;border-radius:8px;padding:12px;margin-bottom:8px">'+
+        '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
+          '<div style="min-width:150px;font-weight:600">'+h(s.nombre)+'</div>'+
+          '<input type="text" id="cpl_'+s.id+'" value="'+h(c.sheet_id||'')+'" placeholder="Link o ID de la hoja de Google" style="flex:1;min-width:220px;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">'+
+          '<input type="text" id="cplt_'+s.id+'" value="'+h(c.pestana||'CL C. Rafa')+'" placeholder="Pestaña" style="width:110px;padding:7px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px">'+
+          '<button onclick="guardarCPL('+s.id+',this)" data-suc="'+h(s.nombre)+'" style="padding:7px 14px;background:#1f5c4a;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">Guardar</button>'+
+          (c.sheet_id?'<button onclick="sincronizarCPLsuc(this)" data-suc="'+h(s.nombre)+'" style="padding:7px 14px;background:#fff;color:#1f5c4a;border:1px solid #1f5c4a;border-radius:6px;cursor:pointer;font-size:13px">Sincronizar ahora</button>':'')+
+          sync+
+        '</div>'+
+        '<div class="cpl-msg" style="font-size:12px;margin-top:6px;color:#555"></div>'+
+      '</div>';
+    }).join('');
+  });
+}
+function guardarCPL(id, btn){
+  var sid=document.getElementById('cpl_'+id).value.trim(), tab=document.getElementById('cplt_'+id).value.trim(), suc=btn.getAttribute('data-suc');
+  if(!sid){ alert('Pega el link o ID de la hoja primero.'); return; }
+  fetch('/api/cpl/config',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({sucursal:suc,sheet_id:sid,pestana:tab})})
+  .then(function(r){return r.json();}).then(function(d){ if(d.ok){ cargarCPLConfig(); } else alert('Error: '+(d.error||'no se pudo guardar')); });
+}
+function sincronizarCPLsuc(btn){
+  var suc=btn.getAttribute('data-suc'), msg=btn.parentNode.parentNode.querySelector('.cpl-msg');
+  btn.disabled=true; if(msg){ msg.textContent='Sincronizando… (puede tardar)'; msg.style.color='#b8860b'; }
+  fetch('/api/cpl/sync',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({sucursal:suc})})
+  .then(function(r){return r.json();}).then(function(d){
+    btn.disabled=false;
+    if(msg){ if(d.ok){ msg.style.color='#2e7d32'; msg.textContent='✓ '+d.actualizados+' actualizados, '+d.nuevos+' nuevos (de '+d.total+' compras)'; } else { msg.style.color='#c62828'; msg.textContent=d.error||'Error'; } }
+    cargarCPLConfig();
+  }).catch(function(){ btn.disabled=false; if(msg){msg.style.color='#c62828';msg.textContent='Error de conexión';} });
 }
 
 function h(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):''}

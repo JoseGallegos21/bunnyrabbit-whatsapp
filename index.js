@@ -149,7 +149,9 @@ db.serialize(() => {
   ensureColumns('usuarios', [['telefono', 'TEXT'], ['foto_url', 'TEXT']]);
   ensureColumns('plantillas', [
     ['idioma', "TEXT DEFAULT 'es'"],
-    ['botones', 'TEXT']   // JSON con los textos de los botones de respuesta rapida
+    ['botones', 'TEXT'],  // JSON con los textos de los botones de respuesta rapida
+    ['header_type', 'TEXT'],   // TEXT | IMAGE (formato del encabezado en Meta)
+    ['header_image', 'TEXT']   // URL publica de la imagen del encabezado (para reenviarla en cada envio)
   ]);
   ensureColumns('mensajes', [
     ['origen', 'TEXT'],
@@ -276,22 +278,51 @@ function configGet(clave) {
 // nombre completo como valor por defecto seguro, porque Meta RECHAZA el envio si
 // una variable va vacia. contacto = { nombre, telefono }.
 function construirComponentesPlantilla(plantilla, contacto) {
+  const comps = [];
+  // Encabezado de imagen: Meta EXIGE reenviar la imagen en cada envio (no reutiliza
+  // la muestra de la plantilla). Sin esto el mensaje sale sin foto o falla.
+  if (plantilla && plantilla.header_type === 'IMAGE' && plantilla.header_image) {
+    comps.push({ type: 'header', parameters: [{ type: 'image', image: { link: urlPublica(plantilla.header_image) } }] });
+  }
   const texto = (plantilla && plantilla.contenido) || '';
   let max = 0;
   const re = /\{\{\s*(\d+)\s*\}\}/g;
   let m;
   while ((m = re.exec(texto)) !== null) max = Math.max(max, parseInt(m[1], 10));
-  if (max === 0) return []; // sin variables
-
-  const nombre = (contacto && contacto.nombre) ? String(contacto.nombre).trim() : '';
-  const primerNombre = nombre ? nombre.split(/\s+/)[0] : 'Hola';
-  const parametros = [];
-  for (let i = 1; i <= max; i++) {
-    // {{1}} = primer nombre; el resto = nombre completo o un valor no vacio
-    const valor = i === 1 ? primerNombre : (nombre || primerNombre);
-    parametros.push({ type: 'text', text: valor });
+  if (max > 0) {
+    const nombre = (contacto && contacto.nombre) ? String(contacto.nombre).trim() : '';
+    const primerNombre = nombre ? nombre.split(/\s+/)[0] : 'Hola';
+    const parametros = [];
+    for (let i = 1; i <= max; i++) {
+      // {{1}} = primer nombre; el resto = nombre completo o un valor no vacio
+      const valor = i === 1 ? primerNombre : (nombre || primerNombre);
+      parametros.push({ type: 'text', text: valor });
+    }
+    comps.push({ type: 'body', parameters: parametros });
   }
-  return [{ type: 'body', parameters: parametros }];
+  return comps;
+}
+// Convierte una ruta local /uploads/x en URL publica https absoluta (Meta exige
+// que la imagen del encabezado sea un link accesible). Si ya es http(s), la deja igual.
+function urlPublica(u) {
+  const s = String(u || '');
+  if (/^https?:\/\//i.test(s)) return s;
+  const base = (process.env.PUBLIC_BASE_URL || 'https://bunnyrabbit.lat').replace(/\/+$/, '');
+  return base + (s.startsWith('/') ? s : '/' + s);
+}
+// Lee los componentes que Meta devuelve y saca el encabezado: si es IMAGE, la URL
+// publica viene en example.header_handle[0] (link scontent.whatsapp.net, reutilizable
+// al enviar). Devuelve { header_type, header_image }.
+function headerDeMeta(components) {
+  const h = (components || []).find(c => c.type === 'HEADER');
+  if (!h) return { header_type: null, header_image: null };
+  if (h.format === 'IMAGE') {
+    const hh = h.example && h.example.header_handle;
+    const url = Array.isArray(hh) ? hh[0] : (typeof hh === 'string' ? hh : null);
+    return { header_type: 'IMAGE', header_image: url || null };
+  }
+  if (h.format === 'TEXT') return { header_type: 'TEXT', header_image: null };
+  return { header_type: h.format || null, header_image: null };
 }
 
 // Resuelve el número desde el que se envía.
@@ -1307,9 +1338,11 @@ async function crearPlantillaEnNumero(nombre, categoria, contenido, numId, extra
   extras = extras || {};
   const botonesJson = JSON.stringify((extras.botones || []).map(b => b && b.text).filter(Boolean));
   const idioma = extras.idioma || 'es';
+  const hType = extras.header_type === 'IMAGE' ? 'IMAGE' : (extras.header_type === 'TEXT' ? 'TEXT' : null);
+  const hImg = (hType === 'IMAGE' && extras.header_image) ? urlPublica(extras.header_image) : null;
   const plantillaId = await new Promise((resolve, reject) => db.run(
-    'INSERT INTO plantillas (nombre, categoria, contenido, phone_number_id, estado_meta, botones, idioma) VALUES (?,?,?,?,?,?,?)',
-    [nombre, categoria || 'General', contenido, numId, 'pendiente', botonesJson, idioma], function (e) { e ? reject(e) : resolve(this.lastID); }));
+    'INSERT INTO plantillas (nombre, categoria, contenido, phone_number_id, estado_meta, botones, idioma, header_type, header_image) VALUES (?,?,?,?,?,?,?,?,?)',
+    [nombre, categoria || 'General', contenido, numId, 'pendiente', botonesJson, idioma, hType, hImg], function (e) { e ? reject(e) : resolve(this.lastID); }));
   const numRow = await new Promise(r => db.get('SELECT * FROM numeros WHERE phone_number_id=?', [numId], (e, row) => r(row)));
   if (!numRow || !numRow.token || !numRow.waba_id) return { estado: 'sin_waba', id: plantillaId, sucursal: (numRow && numRow.sucursal) || numId };
   try {
@@ -1395,10 +1428,11 @@ async function autoSyncPlantillasMeta() {
           const contenido = (body && body.text) ? body.text : '';
           const compBtns = (t.components || []).find(c => c.type === 'BUTTONS');
           const botonesJson = JSON.stringify(compBtns && Array.isArray(compBtns.buttons) ? compBtns.buttons.filter(x => x.type === 'QUICK_REPLY').map(x => x.text) : []);
+          const hdr = headerDeMeta(t.components);
           let fila = await new Promise(r => db.get('SELECT id FROM plantillas WHERE meta_template_id=?', [t.id], (e, row) => r(row)));
           if (!fila) fila = await new Promise(r => db.get('SELECT id FROM plantillas WHERE nombre=? AND phone_number_id=? AND (meta_template_id IS NULL OR meta_template_id="")', [t.name, n.phone_number_id], (e, row) => r(row)));
-          if (fila) { await new Promise(r => db.run(`UPDATE plantillas SET meta_template_id=?, estado_meta=?, contenido=CASE WHEN contenido IS NULL OR contenido='' THEN ? ELSE contenido END, idioma=?, botones=?, phone_number_id=COALESCE(phone_number_id,?) WHERE id=?`, [t.id, estado, contenido, t.language || 'es', botonesJson, n.phone_number_id, fila.id], () => r())); cambios++; }
-          else { await new Promise(r => db.run('INSERT INTO plantillas (nombre, categoria, contenido, phone_number_id, estado_meta, meta_template_id, idioma, botones) VALUES (?,?,?,?,?,?,?,?)', [t.name, t.category || 'General', contenido, n.phone_number_id, estado, t.id, t.language || 'es', botonesJson], () => r())); cambios++; }
+          if (fila) { await new Promise(r => db.run(`UPDATE plantillas SET meta_template_id=?, estado_meta=?, contenido=CASE WHEN contenido IS NULL OR contenido='' THEN ? ELSE contenido END, idioma=?, botones=?, header_type=?, header_image=COALESCE(?, header_image), phone_number_id=COALESCE(phone_number_id,?) WHERE id=?`, [t.id, estado, contenido, t.language || 'es', botonesJson, hdr.header_type, hdr.header_image, n.phone_number_id, fila.id], () => r())); cambios++; }
+          else { await new Promise(r => db.run('INSERT INTO plantillas (nombre, categoria, contenido, phone_number_id, estado_meta, meta_template_id, idioma, botones, header_type, header_image) VALUES (?,?,?,?,?,?,?,?,?,?)', [t.name, t.category || 'General', contenido, n.phone_number_id, estado, t.id, t.language || 'es', botonesJson, hdr.header_type, hdr.header_image], () => r())); cambios++; }
         }
       } catch (e) { /* seguir con la siguiente WABA */ }
     }
@@ -1438,6 +1472,7 @@ app.post('/api/plantillas/sync', auth, async (req, res) => {
               ? compBtns.buttons.filter(x => x.type === 'QUICK_REPLY').map(x => x.text)
               : [];
             const botonesJson = JSON.stringify(botones);
+            const hdr = headerDeMeta(t.components);
 
             // Enlazar por meta_template_id; si no, adoptar una local con el mismo nombre aún sin enlazar
             let fila = await new Promise(resolve =>
@@ -1451,14 +1486,15 @@ app.post('/api/plantillas/sync', auth, async (req, res) => {
             if (fila) {
               await new Promise(resolve => db.run(
                 `UPDATE plantillas SET meta_template_id=?, estado_meta=?, categoria=?, contenido=?, idioma=?, botones=?,
+                 header_type=?, header_image=COALESCE(?, header_image),
                  phone_number_id=COALESCE(phone_number_id,?) WHERE id=?`,
-                [t.id, estado, categoria, contenido, t.language || 'es', botonesJson, n.phone_number_id, fila.id], () => resolve()));
+                [t.id, estado, categoria, contenido, t.language || 'es', botonesJson, hdr.header_type, hdr.header_image, n.phone_number_id, fila.id], () => resolve()));
               vistas.add(fila.id);
               actualizadas++;
             } else {
               const nuevo = await new Promise(resolve => db.run(
-                'INSERT INTO plantillas (nombre, categoria, contenido, phone_number_id, estado_meta, meta_template_id, idioma, botones) VALUES (?,?,?,?,?,?,?,?)',
-                [t.name, categoria, contenido, n.phone_number_id, estado, t.id, t.language || 'es', botonesJson], function () { resolve(this.lastID); }));
+                'INSERT INTO plantillas (nombre, categoria, contenido, phone_number_id, estado_meta, meta_template_id, idioma, botones, header_type, header_image) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                [t.name, categoria, contenido, n.phone_number_id, estado, t.id, t.language || 'es', botonesJson, hdr.header_type, hdr.header_image], function () { resolve(this.lastID); }));
               vistas.add(nuevo);
               importadas++;
             }

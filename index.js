@@ -73,6 +73,8 @@ db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS facebook_capi_config (id INTEGER PRIMARY KEY AUTOINCREMENT, pixel_id TEXT, access_token TEXT, test_event_code TEXT, api_version TEXT DEFAULT 'v21.0', triggers TEXT DEFAULT '[]', activo INTEGER DEFAULT 1, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
   db.run(`CREATE TABLE IF NOT EXISTS facebook_capi_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, contacto_nombre TEXT, contacto_telefono TEXT, evento_tipo TEXT, etapa TEXT, event_id TEXT, status_code INTEGER, respuesta TEXT, numero_id TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
   db.run(`CREATE TABLE IF NOT EXISTS google_calendar_config (id INTEGER PRIMARY KEY AUTOINCREMENT, sucursal TEXT UNIQUE, calendar_id TEXT, access_token TEXT, refresh_token TEXT, activo INTEGER DEFAULT 1)`);
+  // CPL: hoja de Google (una por sucursal) con las compras/citas que se cruzan al CRM.
+  db.run(`CREATE TABLE IF NOT EXISTS cpl_config (id INTEGER PRIMARY KEY AUTOINCREMENT, sucursal TEXT UNIQUE, sheet_id TEXT, pestana TEXT DEFAULT 'CL C. Rafa', activo INTEGER DEFAULT 1, ultima_sync DATETIME)`);
   // Asistencia por cita (palomeo Vino/No vino). Base del sistema de cortes del
   // recepcionista. event_id = id del evento de Google (o 'cita:<id>' para citas
   // nativas). monto/metodo_pago quedan listos para la fase de corte de caja.
@@ -177,7 +179,11 @@ db.serialize(() => {
     ['fijado', 'INTEGER DEFAULT 0'],     // chat fijado arriba
     ['favorito', 'INTEGER DEFAULT 0'],   // chat marcado como favorito
     ['archivado', 'INTEGER DEFAULT 0'],  // chat archivado (fuera de la lista principal)
-    ['no_leido', 'INTEGER DEFAULT 0']    // marcado manualmente como no leido
+    ['no_leido', 'INTEGER DEFAULT 0'],   // marcado manualmente como no leido
+    ['compro', 'INTEGER DEFAULT 0'],     // 1 = aparece como COMPRÓ en el CPL (hoja)
+    ['fecha_compra', 'DATETIME'],        // fecha de compra (del CPL) para remarketing por bloques
+    ['servicio_compra', 'TEXT'],         // servicio comprado (del CPL)
+    ['monto_compra', 'REAL']             // monto de la compra (del CPL)
   ]);
   // ruta = posicion del contacto en el arbol del workflow (soporta ramas anidadas)
   ensureColumns('workflow_inscripciones', [
@@ -490,7 +496,7 @@ app.post('/api/contactos/importar', auth, requireRole('admin', 'supervisor', 're
 
 // ===== ETIQUETAS POR USUARIO =====
 app.get('/api/etiquetas', auth, (req, res) => {
-  db.all('SELECT * FROM etiquetas WHERE usuario_id=? ORDER BY nombre', [req.user.id], (err, rows) => {
+  db.all('SELECT * FROM etiquetas WHERE usuario_id=? OR usuario_id IS NULL ORDER BY nombre', [req.user.id], (err, rows) => {
     res.json(rows || []);
   });
 });
@@ -2384,6 +2390,101 @@ async function googleServiceToken() {
     return d.access_token;
   } catch (e) { console.error('[GCAL] error firmando/obteniendo service token:', e.message); return null; }
 }
+
+// ===== CPL: cruce de la hoja de compras (Google Sheets) con los contactos =====
+let _sheetsSA = { token: null, exp: 0 };
+async function googleSheetsToken() {
+  if (_sheetsSA.token && Date.now() < _sheetsSA.exp) return _sheetsSA.token;
+  const cr = _gcalSACreds();
+  if (!cr.email || !cr.key) return null;
+  const key = cr.key.replace(/\\n/g, '\n');
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const assertion = jwt.sign({ iss: cr.email, scope: 'https://www.googleapis.com/auth/spreadsheets.readonly', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 }, key, { algorithm: 'RS256' });
+    const d = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }) }).then(r => r.json());
+    if (!d.access_token) { console.error('[CPL] sheets token:', JSON.stringify(d).slice(0, 200)); return null; }
+    _sheetsSA = { token: d.access_token, exp: Date.now() + ((d.expires_in || 3600) - 60) * 1000 };
+    return d.access_token;
+  } catch (e) { console.error('[CPL] error token sheets:', e.message); return null; }
+}
+function _cplFecha(s) {
+  const m = String(s || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!m) return null;
+  const p = n => String(n).padStart(2, '0');
+  return `${m[3]}-${p(m[2])}-${p(m[1])} ${p(m[4] || 0)}:${p(m[5] || 0)}:${p(m[6] || 0)}`;
+}
+function _cplMonto(s) { const n = parseFloat(String(s || '').replace(/[^0-9.]/g, '')); return isNaN(n) ? null : n; }
+
+// Lee las hojas CPL (una por sucursal), cruza por telefono (ultimos 10 digitos): marca
+// compro=1, guarda fecha_compra/servicio/monto, crea los que falten y les pone la
+// etiqueta "Compró". Solo procesa filas con estado COMPRÓ.
+async function sincronizarCPL(soloSucursal) {
+  const token = await googleSheetsToken();
+  if (!token) return { error: 'Falta la cuenta de servicio de Google en el servidor' };
+  const cond = soloSucursal ? ' AND sucursal=?' : '';
+  const cfgs = await new Promise(r => db.all(`SELECT sucursal, sheet_id, pestana FROM cpl_config WHERE activo=1 AND sheet_id IS NOT NULL AND sheet_id!=''${cond}`, soloSucursal ? [soloSucursal] : [], (e, rr) => r(rr || [])));
+  if (!cfgs.length) return { error: 'No hay hojas CPL configuradas' };
+  const etiquetaId = await new Promise(r => db.get("SELECT id FROM etiquetas WHERE nombre='Compró' LIMIT 1", [], (e, row) => row ? r(row.id) : db.run("INSERT INTO etiquetas (nombre, color, usuario_id) VALUES ('Compró','#2e7d32',NULL)", function () { r(this.lastID); })));
+  const mapa = await new Promise(r => db.all("SELECT id, telefono FROM contactos", [], (e, rr) => { const m = {}; (rr || []).forEach(x => { const k = tel10(x.telefono); if (k && !(k in m)) m[k] = x; }); r(m); }));
+  const run = (sql, p) => new Promise(res => db.run(sql, p, function () { res(this); }));
+  let actualizados = 0, nuevos = 0, filas = 0, errores = [];
+  for (const cfg of cfgs) {
+    const rango = encodeURIComponent((cfg.pestana || 'CL C. Rafa') + '!A1:N10000');
+    let vals;
+    try { vals = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${cfg.sheet_id}/values/${rango}`, { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json()); }
+    catch (e) { errores.push(cfg.sucursal + ': ' + e.message); continue; }
+    if (vals.error) { errores.push(cfg.sucursal + ': ' + vals.error.message); continue; }
+    const rows = vals.values || [];
+    const head = (rows[0] || []).map(h => String(h || '').trim().toLowerCase());
+    const idx = (nombres) => { for (const n of nombres) { const i = head.indexOf(n); if (i >= 0) return i; } return -1; };
+    const cTel = idx(['telefono', 'teléfono', 'celular']), cNom = idx(['nombre']), cApe = idx(['apellido']);
+    const cServ = idx(['servicio']), cFecha = idx(['fecha_compra', 'fecha']), cMonto = idx(['monto']), cEstado = idx(['estado']);
+    if (cTel < 0) { errores.push(cfg.sucursal + ': sin columna telefono'); continue; }
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i]; if (!row) continue;
+      if (cEstado >= 0) { const est = String(row[cEstado] || '').trim().toUpperCase(); if (est && est.indexOf('COMPR') < 0) continue; }
+      const k = tel10(row[cTel]); if (!k) continue;
+      filas++;
+      const nombre = [cNom >= 0 ? row[cNom] : '', cApe >= 0 ? row[cApe] : ''].map(x => String(x || '').trim()).filter(Boolean).join(' ').trim() || null;
+      const fecha = cFecha >= 0 ? _cplFecha(row[cFecha]) : null;
+      const servicio = cServ >= 0 ? (String(row[cServ] || '').trim() || null) : null;
+      const monto = cMonto >= 0 ? _cplMonto(row[cMonto]) : null;
+      let c = mapa[k];
+      if (!c) {
+        const tel = '521' + k;
+        await run("INSERT OR IGNORE INTO contactos (telefono, nombre, sucursal, origen, etapa, prioridad, compro, fecha_compra, servicio_compra, monto_compra) VALUES (?,?,?, 'cpl', 'Cerrado','Media', 1, ?, ?, ?)", [tel, nombre, cfg.sucursal, fecha, servicio, monto]);
+        const nid = await new Promise(r => db.get("SELECT id FROM contactos WHERE telefono=?", [tel], (e, row) => r(row && row.id)));
+        c = { id: nid, telefono: tel }; mapa[k] = c; nuevos++;
+      } else {
+        await run("UPDATE contactos SET compro=1, fecha_compra=COALESCE(?,fecha_compra), servicio_compra=COALESCE(?,servicio_compra), monto_compra=COALESCE(?,monto_compra), nombre=COALESCE(NULLIF(nombre,''),?) WHERE id=?", [fecha, servicio, monto, nombre, c.id]);
+        actualizados++;
+      }
+      if (etiquetaId && c.id) await run("INSERT OR IGNORE INTO contacto_etiquetas (contacto_id, etiqueta_id) VALUES (?,?)", [c.id, etiquetaId]);
+    }
+    await run("UPDATE cpl_config SET ultima_sync=CURRENT_TIMESTAMP WHERE sucursal=?", [cfg.sucursal]);
+  }
+  console.log(`[CPL] sync: ${actualizados} actualizados, ${nuevos} nuevos (de ${filas} compras)` + (errores.length ? ' | errores: ' + errores.join('; ') : ''));
+  return { ok: true, actualizados, nuevos, total: filas, errores };
+}
+setInterval(() => sincronizarCPL().catch(() => {}), 6 * 60 * 60 * 1000);
+
+// CPL: config (sucursal -> hoja) y sync manual
+app.get('/api/cpl/config', auth, requireRole('admin', 'supervisor'), (req, res) => {
+  db.all('SELECT sucursal, sheet_id, pestana, activo, ultima_sync FROM cpl_config ORDER BY sucursal', [], (e, rows) => res.json(rows || []));
+});
+app.post('/api/cpl/config', auth, requireRole('admin'), (req, res) => {
+  const { sucursal, sheet_id, pestana } = req.body;
+  if (!sucursal || !sheet_id) return res.status(400).json({ error: 'Sucursal e ID/URL de la hoja son obligatorios' });
+  const m = String(sheet_id).match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  const sid = m ? m[1] : String(sheet_id).trim();
+  db.run(`INSERT INTO cpl_config (sucursal, sheet_id, pestana, activo) VALUES (?,?,?,1)
+     ON CONFLICT(sucursal) DO UPDATE SET sheet_id=excluded.sheet_id, pestana=COALESCE(NULLIF(excluded.pestana,''), pestana), activo=1`,
+    [sucursal, sid, pestana || 'CL C. Rafa'], (err) => err ? res.status(500).json({ error: err.message }) : res.json({ ok: true, sheet_id: sid }));
+});
+app.post('/api/cpl/sync', auth, requireRole('admin', 'supervisor'), async (req, res) => {
+  const r = await sincronizarCPL(req.body.sucursal || null);
+  res.json(r);
+});
 
 // (Legado) Refresca un access token OAuth con su refresh_token. Solo se usa si
 // una sucursal quedo configurada con el metodo viejo y no hay cuenta de servicio.

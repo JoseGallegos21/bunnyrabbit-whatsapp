@@ -356,7 +356,7 @@ app.delete('/api/biblioteca/:id', auth, (req, res) => {
 
 // ===== CONTACTOS =====
 app.get('/api/contactos', auth, (req, res) => {
-  const numero_id = req.user.rol === 'supervisor' ? req.query.numero_id || null : req.user.numero_id;
+  const numero_id = (req.user.rol === 'supervisor' || req.user.rol === 'admin') ? req.query.numero_id || null : req.user.numero_id;
   const cond = [], params = [];
   if (numero_id) { cond.push('numero_id=?'); params.push(numero_id); }
   if (req.query.incluir_formulario !== '1') cond.push("(origen IS NULL OR origen != 'formulario_ads')");
@@ -623,7 +623,7 @@ app.post('/api/login', (req, res) => {
 });
 
 app.get('/api/mensajes', auth, (req, res) => {
-  const numero_id = req.user.rol === 'supervisor' ? req.query.numero_id : req.user.numero_id;
+  const numero_id = (req.user.rol === 'supervisor' || req.user.rol === 'admin') ? req.query.numero_id : req.user.numero_id;
   const cond = [], params = [];
   if (numero_id) { cond.push('numero_id = ?'); params.push(numero_id); }
   // Con ?contacto=<tel> se pide el historial COMPLETO de esa conversación (hasta
@@ -640,7 +640,7 @@ app.get('/api/mensajes', auth, (req, res) => {
 // último mensaje, no leídos, nombre y etapa. Ordenadas por reciente. Así se ven
 // todas las conversaciones, no solo las que caben en los últimos 100 mensajes.
 app.get('/api/conversaciones', auth, (req, res) => {
-  const numero_id = req.user.rol === 'supervisor' ? req.query.numero_id : req.user.numero_id;
+  const numero_id = (req.user.rol === 'supervisor' || req.user.rol === 'admin') ? req.query.numero_id : req.user.numero_id;
   const cond = [], params = [];
   if (numero_id) { cond.push('numero_id = ?'); params.push(numero_id); }
   cond.push("(origen IS NULL OR origen != 'formulario_ads')");
@@ -705,7 +705,7 @@ app.get('/api/media/:id', auth, (req, res) => {
 
 // Historial de mensajes de un contacto (lo usa el panel de supervisor al abrir un chat)
 app.get('/api/mensajes/:telefono', auth, (req, res) => {
-  const numero_id = req.user.rol === 'supervisor' ? req.query.numero_id : req.user.numero_id;
+  const numero_id = (req.user.rol === 'supervisor' || req.user.rol === 'admin') ? req.query.numero_id : req.user.numero_id;
   const cond = ['contacto = ?'], params = [req.params.telefono];
   if (numero_id) { cond.push('numero_id = ?'); params.push(numero_id); }
   db.all(`SELECT * FROM mensajes WHERE ${cond.join(' AND ')} ORDER BY timestamp ASC LIMIT 500`, params, (err, rows) => res.json(rows || []));
@@ -731,7 +731,7 @@ app.post('/api/mi-perfil/foto', auth, upload.single('foto'), (req, res) => {
 });
 
 app.get('/api/metricas', auth, (req, res) => {
-  const numero_id = req.user.rol === 'supervisor' ? req.query.numero_id || null : req.user.numero_id;
+  const numero_id = (req.user.rol === 'supervisor' || req.user.rol === 'admin') ? req.query.numero_id || null : req.user.numero_id;
   const cond = [], params = [];
   if (numero_id) { cond.push('numero_id = ?'); params.push(numero_id); }
   // Rango de fechas opcional (contabilidad por periodo). Se compara por día local.
@@ -745,7 +745,7 @@ app.get('/api/metricas', auth, (req, res) => {
 // para contabilidad: cuántas conversaciones hubo en el periodo, cuántas nuevas,
 // a cuántas se respondió y cuántas quedan sin leer. Acepta fecha_inicio/fecha_fin.
 app.get('/api/metricas/conversaciones', auth, (req, res) => {
-  const numero_id = req.user.rol === 'supervisor' ? req.query.numero_id || null : req.user.numero_id;
+  const numero_id = (req.user.rol === 'supervisor' || req.user.rol === 'admin') ? req.query.numero_id || null : req.user.numero_id;
   // Base: numero + excluir leads de anuncios + rango de fechas.
   const cond = ["(origen IS NULL OR origen != 'formulario_ads')"], params = [];
   if (numero_id) { cond.unshift('numero_id = ?'); params.push(numero_id); }
@@ -860,7 +860,7 @@ app.put('/api/contactos/tel/:telefono', auth, requireRole('admin', 'supervisor',
 
 
 app.put('/api/leer/:contacto', auth, (req, res) => {
-  const numero_id = req.user.rol === 'supervisor' ? req.query.numero_id : req.user.numero_id;
+  const numero_id = (req.user.rol === 'supervisor' || req.user.rol === 'admin') ? req.query.numero_id : req.user.numero_id;
   // Solo los mensajes de ESTE numero: si dos sucursales comparten el telefono de
   // un cliente, marcar leido en una ya no afecta a la otra.
   const cond = ['contacto = ?', "direccion = 'entrante'"], params = [req.params.contacto];

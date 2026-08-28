@@ -205,6 +205,9 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
         <div class="mtab" data-k="contactos" onclick="switchMainTab('contactos',this)"><i class="ti ti-users" aria-hidden="true"></i><span>Contactos</span></div>
         <div class="mtab" data-k="etiquetas" onclick="switchMainTab('etiquetas',this)"><i class="ti ti-tag" aria-hidden="true"></i><span>Etiquetas</span></div>
       </div>
+      <div id="numeroSelWrap" style="display:none;padding:8px 14px 2px">
+        <select id="numeroSelChat" onchange="cambiarNumeroChat()" style="width:100%;padding:8px;border:1px solid #2a3942;background:#202c33;color:#e9edef;border-radius:8px;font-size:13px"></select>
+      </div>
       <div class="filters" id="filtros"></div>
       <div class="search-box"><input type="text" id="buscar" placeholder="Buscar..."></div>
       <div class="chat-list" id="chatList"></div>
@@ -613,12 +616,17 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
 </div>
 <script>
 var token='',usuario={},mensajes=[],chatActivo=null,etiquetas=[],filtroEtapa='',iv=null;
+var numeroSel=''; // numero elegido por admin/supervisor (que no tienen numero fijo)
+function numActivo(){ return numeroSel || usuario.numero_id || ''; }
 var mensajesConv=[],convTel=null; // historial COMPLETO de la conversación abierta
 var nombresContactos={}; // telefono -> nombre del contacto (para la lista de chats)
 var filtroBusqueda=''; // texto del buscador de chats (persiste entre re-renders)
 var conversaciones=[]; // lista de conversaciones (una por contacto) para la barra lateral
 function cargarConversaciones(){
-  var qs = filtroEtapa==='__archivados' ? '?archivados=1' : '';
+  var params=[];
+  if(numActivo()) params.push('numero_id='+encodeURIComponent(numActivo()));
+  if(filtroEtapa==='__archivados') params.push('archivados=1');
+  var qs=params.length?('?'+params.join('&')):'';
   fetch('/api/conversaciones'+qs,{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
   .then(function(d){
@@ -626,6 +634,33 @@ function cargarConversaciones(){
     conversaciones.forEach(function(c){ if(c.nombre) nombresContactos[c.contacto]=c.nombre; });
     renderChats();
   }).catch(function(){});
+}
+// Admin/supervisor no tienen numero fijo: mostrar un selector para elegir cual WhatsApp
+// ver. Recepcionista tiene numero fijo, se le oculta.
+function setupNumeroSelector(){
+  var wrap=document.getElementById('numeroSelWrap'), sel=document.getElementById('numeroSelChat');
+  if(!wrap||!sel) return;
+  if(usuario.numero_id){ wrap.style.display='none'; numeroSel=''; return; }
+  fetch('/api/numeros',{headers:{Authorization:'Bearer '+token}})
+  .then(function(r){return r.ok?r.json():[];})
+  .then(function(nums){
+    nums=Array.isArray(nums)?nums:[];
+    if(!nums.length){ wrap.style.display='none'; return; }
+    sel.innerHTML=nums.map(function(n){return '<option value="'+n.phone_number_id+'">'+(n.sucursal||n.nombre||n.phone_number_id)+'</option>';}).join('');
+    var guardado=''; try{ guardado=localStorage.getItem('numeroSelChat')||''; }catch(e){}
+    numeroSel=(guardado && nums.some(function(n){return n.phone_number_id===guardado;}))?guardado:nums[0].phone_number_id;
+    sel.value=numeroSel; wrap.style.display='block';
+    cargarMensajes();
+  }).catch(function(){ wrap.style.display='none'; });
+}
+function cambiarNumeroChat(){
+  numeroSel=document.getElementById('numeroSelChat').value;
+  try{ localStorage.setItem('numeroSelChat', numeroSel); }catch(e){}
+  chatActivo=null; convTel=null; mensajesConv=[];
+  var noChat=document.getElementById('noChat'); if(noChat)noChat.style.display='';
+  var mArea=document.getElementById('mensajesArea'); if(mArea)mArea.style.display='none';
+  var head=document.getElementById('chatHeader'); if(head)head.innerHTML='';
+  cargarMensajes();
 }
 function nombreDe(tel){ var n=nombresContactos[tel]; return n ? String(n).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ('+'+tel); }
 // Iniciales del contacto (del nombre si lo hay; si no, los últimos 2 dígitos).
@@ -1664,6 +1699,7 @@ function aplicarSesion(){
   cargarEtiquetas();cargarNombresContactos();cargarMensajes();
   clearInterval(iv); iv=setInterval(cargarMensajes,5000);
   setInterval(cargarNombresContactos,60000); // refrescar nombres de contactos
+  setupNumeroSelector();
 }
 
 // Borra la sesión del navegador (al salir o si el token ya no sirve)
@@ -1743,7 +1779,7 @@ function renderFiltros(){
 }
 
 function cargarMensajes(){
-  fetch('/api/mensajes',{headers:{Authorization:'Bearer '+token}})
+  fetch('/api/mensajes'+(numActivo()?'?numero_id='+encodeURIComponent(numActivo()):''),{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
   .then(function(d){mensajes=d;cargarMetricas();if(chatActivo)cargarConversacion(chatActivo);});
   cargarConversaciones();
@@ -1862,7 +1898,7 @@ function chatFlag(tel, campo, valor){
 }
 function marcarLeidoChat(tel){
   cerrarMenuChat();
-  fetch('/api/leer/'+tel,{method:'PUT',headers:{Authorization:'Bearer '+token}}).then(function(){ cargarConversaciones(); });
+  fetch('/api/leer/'+tel+(numActivo()?'?numero_id='+encodeURIComponent(numActivo()):''),{method:'PUT',headers:{Authorization:'Bearer '+token}}).then(function(){ cargarConversaciones(); });
 }
 function vaciarChat(tel){
   cerrarMenuChat();
@@ -1886,7 +1922,7 @@ function abrirChat(tel){
   // Si estabas en otra pestaña (Plantillas/Etiquetas/etc.), volver al Chat para verlo
   switchMainTab('chat');
   chatActivo=tel;renderChats();
-  fetch('/api/leer/'+tel,{method:'PUT',headers:{Authorization:'Bearer '+token}}).then(function(){});fetch('/api/contactos/'+tel,{headers:{Authorization:'Bearer '+token}})
+  fetch('/api/leer/'+tel+(numActivo()?'?numero_id='+encodeURIComponent(numActivo()):''),{method:'PUT',headers:{Authorization:'Bearer '+token}}).then(function(){});fetch('/api/contactos/'+tel,{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
   .then(function(p){
     document.getElementById('noChat').style.display='none';
@@ -2138,7 +2174,7 @@ function enviarSticker(url){
 // Carga el historial COMPLETO de una conversación (hasta 1000 msgs) y lo pinta.
 // Antes el chat solo mostraba lo que cupiera en los últimos 100 mensajes globales.
 function cargarConversacion(tel){
-  fetch('/api/mensajes?contacto='+encodeURIComponent(tel),{headers:{Authorization:'Bearer '+token}})
+  fetch('/api/mensajes?contacto='+encodeURIComponent(tel)+(numActivo()?'&numero_id='+encodeURIComponent(numActivo()):''),{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
   .then(function(d){ mensajesConv=Array.isArray(d)?d:[]; convTel=tel; if(chatActivo===tel)renderMensajes(tel); });
 }
@@ -2227,7 +2263,7 @@ function enviar(){
   var msg=input.value.trim();
   if(!msg||!chatActivo)return;
   input.value='';
-  fetch('/api/enviar',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({telefono:chatActivo,mensaje:msg,numero_id:usuario.numero_id||null})})
+  fetch('/api/enviar',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({telefono:chatActivo,mensaje:msg,numero_id:numActivo()||null})})
   .then(function(){cargarMensajes();});
 }
 
@@ -2580,7 +2616,7 @@ function enviarPlantillaChat(id) {
   fetch('/api/enviar-plantilla', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-    body: JSON.stringify({ telefono: chatActivo, plantilla_id: id, numero_id: usuario.numero_id })
+    body: JSON.stringify({ telefono: chatActivo, plantilla_id: id, numero_id: numActivo() })
   }).then(function(r){ return r.json(); })
     .then(function(d) {
       if (d.ok) { cargarMensajes(chatActivo); }

@@ -1477,30 +1477,10 @@ function sincronizarPlantillas(){
   .catch(function(){ if(m){ m.textContent='Error de conexión'; m.style.color='#c62828'; } });
 }
 
-function guardarPlantillaPanel(){
-  var data = {
-    nombre: document.getElementById('np_nombre').value,
-    categoria: document.getElementById('np_cat').value,
-    contenido: document.getElementById('np_contenido').value,
-    footer: document.getElementById('np_footer').value,
-    phone_number_id: usuario.numero_id || null
-  };
-  var msg = document.getElementById('msgNuevaPlantilla');
-  if(!data.nombre||!data.contenido){ msg.textContent='Nombre y contenido requeridos'; msg.style.color='red'; return; }
-  msg.textContent='Guardando...'; msg.style.color='#f39c12';
-  fetch('/api/plantillas',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(data)})
-  .then(function(r){return r.json()})
-  .then(function(d){
-    if(d.ok){
-      msg.textContent='✓ Guardada y enviada a Meta'; msg.style.color='#2e7d32';
-      document.getElementById('np_nombre').value='';
-      document.getElementById('np_contenido').value='';
-      document.getElementById('np_footer').value='';
-      document.getElementById('formNuevaPlantilla').style.display='none';
-      cargarPlantillasPanel();
-    } else { msg.textContent=d.error||'Error'; msg.style.color='red'; }
-  });
-}
+// NOTA: la version completa de guardarPlantillaPanel() esta mas arriba (envia
+// encabezado, botones y muestras). Aqui habia una segunda definicion reducida que
+// en JS PISABA a la completa y hacia que las plantillas de la recepcionista se
+// crearan SIN botones/imagen. Se elimino para que quede activa la completa.
 
 function cargarHistorialDifPanel(){
   fetch('/api/difusiones',{headers:{Authorization:'Bearer '+token}})

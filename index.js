@@ -2438,6 +2438,68 @@ async function googleServiceToken() {
     return d.access_token;
   } catch (e) { console.error('[GCAL] error firmando/obteniendo service token:', e.message); return null; }
 }
+// Token de ESCRITURA (scope calendar.events). Solo funciona si el calendario esta
+// compartido con la cuenta de servicio con permiso "Hacer cambios en los eventos".
+let _gcalSARW = { token: null, exp: 0 };
+async function googleServiceTokenRW() {
+  if (_gcalSARW.token && Date.now() < _gcalSARW.exp) return _gcalSARW.token;
+  const cr = _gcalSACreds();
+  if (!cr.email || !cr.key) return null;
+  const key = cr.key.replace(/\\n/g, '\n');
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const assertion = jwt.sign({ iss: cr.email, scope: 'https://www.googleapis.com/auth/calendar.events', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 }, key, { algorithm: 'RS256' });
+    const d = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }) }).then(r => r.json());
+    if (!d.access_token) { console.error('[GCAL] RW token:', JSON.stringify(d).slice(0, 200)); return null; }
+    _gcalSARW = { token: d.access_token, exp: Date.now() + ((d.expires_in || 3600) - 60) * 1000 };
+    return d.access_token;
+  } catch (e) { console.error('[GCAL] error token RW:', e.message); return null; }
+}
+// Resuelve el calendar_id de la sucursal del usuario (o la pasada por admin/supervisor).
+function _gcalConfigDeUsuario(req) {
+  const sucursal = (req.user.rol === 'admin' || req.user.rol === 'supervisor') ? (req.body.sucursal || req.query.sucursal || req.user.sucursal) : req.user.sucursal;
+  return new Promise(resolve => db.get('SELECT * FROM google_calendar_config WHERE sucursal=? AND activo=1', [sucursal], (e, r) => resolve(r)));
+}
+// Editar/mover un evento de Google Calendar (PATCH). Requiere permiso de escritura.
+app.put('/api/google-calendar/evento/:id', auth, requireRole('admin', 'supervisor', 'recepcionista'), async (req, res) => {
+  try {
+    const config = await _gcalConfigDeUsuario(req);
+    if (!config || !config.calendar_id) return res.status(404).json({ error: 'Tu sucursal no tiene calendario configurado.' });
+    const token = await googleServiceTokenRW();
+    if (!token) return res.status(500).json({ error: 'Falta la cuenta de servicio de Google en el servidor.' });
+    const { fecha, hora_inicio, hora_fin, titulo } = req.body;
+    const body = {};
+    if (titulo != null) body.summary = titulo;
+    if (fecha && hora_inicio) {
+      const fin = hora_fin || (function () { const [h, m] = hora_inicio.split(':').map(Number); const t = (h * 60 + m + 60); return String(Math.floor(t / 60) % 24).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); })();
+      body.start = { dateTime: fecha + 'T' + (hora_inicio.length === 5 ? hora_inicio + ':00' : hora_inicio) + '-06:00', timeZone: 'America/Mexico_City' };
+      body.end = { dateTime: fecha + 'T' + (fin.length === 5 ? fin + ':00' : fin) + '-06:00', timeZone: 'America/Mexico_City' };
+    }
+    const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendar_id)}/events/${encodeURIComponent(req.params.id)}`;
+    const r = await fetch(url, { method: 'PATCH', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (d.error) {
+      const forbidden = r.status === 403 || (d.error && d.error.code === 403);
+      return res.status(forbidden ? 403 : 500).json({ error: forbidden ? 'La cuenta de servicio no tiene permiso de EDICIÓN en este calendario. En Google Calendar comparte el calendario con ' + (_gcalSACreds().email || 'la cuenta de servicio') + ' con permiso "Hacer cambios en los eventos".' : d.error.message });
+    }
+    res.json({ ok: true, id: d.id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Eliminar un evento de Google Calendar
+app.delete('/api/google-calendar/evento/:id', auth, requireRole('admin', 'supervisor', 'recepcionista'), async (req, res) => {
+  try {
+    const config = await _gcalConfigDeUsuario(req);
+    if (!config || !config.calendar_id) return res.status(404).json({ error: 'Tu sucursal no tiene calendario configurado.' });
+    const token = await googleServiceTokenRW();
+    if (!token) return res.status(500).json({ error: 'Falta la cuenta de servicio de Google en el servidor.' });
+    const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(config.calendar_id)}/events/${encodeURIComponent(req.params.id)}`;
+    const r = await fetch(url, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
+    if (r.status === 204 || r.status === 200) return res.json({ ok: true });
+    if (r.status === 403) return res.status(403).json({ error: 'La cuenta de servicio no tiene permiso de EDICIÓN en este calendario.' });
+    const d = await r.json().catch(() => ({}));
+    res.status(500).json({ error: (d.error && d.error.message) || 'No se pudo eliminar' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // ===== CPL: cruce de la hoja de compras (Google Sheets) con los contactos =====
 let _sheetsSA = { token: null, exp: 0 };

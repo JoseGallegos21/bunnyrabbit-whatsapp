@@ -119,7 +119,13 @@
 
   /* ===== MÓVIL ===== */
   @media (max-width: 640px) {
-    .topbar { padding: 10px 14px; }
+    .topbar { padding: 10px 14px; gap: 8px 10px; flex-wrap: wrap; }
+    .logo { font-size: 17px; }
+    .topbar-left { gap: 8px; min-width: 0; }
+    .topbar-right { gap: 10px; min-width: 0; }
+    .badge-rol { flex-shrink: 0; }
+    .nombre-usuario { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+    .btn-logout { padding: 6px 10px; font-size: 12px; white-space: nowrap; flex-shrink: 0; }
     .tabs { padding: 0 6px; overflow-x: auto; }
     .tab { padding: 12px 12px; font-size: 13px; white-space: nowrap; }
     .content { padding: 14px; }

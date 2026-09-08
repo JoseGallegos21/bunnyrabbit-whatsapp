@@ -664,6 +664,7 @@ var _chatListHtml='';        // ultimo HTML pintado (si no cambia, no re-pintamo
 var _chatListScrolling=false;// true mientras el usuario scrollea/toca la lista
 var _chatListPend=false;     // hay un re-pintado pendiente que se aplazo por scroll
 var _chatScrollGuardOn=false;// listeners de scroll ya instalados
+var _msgsHtml='';            // ultimo HTML pintado de la conversacion abierta (evita recargar media y saltos cada 5s)
 var forzarScrollAbajo=false; // true = el proximo renderMensajes baja hasta el fondo (al abrir chat o enviar)
 var conversaciones=[]; // lista de conversaciones (una por contacto) para la barra lateral
 function cargarConversaciones(){
@@ -2388,11 +2389,22 @@ function renderMensajes(tel){
     }
     html+='<div class="msg '+cls+'">'+contenido+'<div class="msg-time">'+t+' '+palomas+'</div></div>';
   });
+  var finalHtml=html||'<div style="text-align:center;color:#8696a0;font-size:13px;margin-top:40px">Sin mensajes aún</div>';
+  // Si el contenido es IDÉNTICO (mismo chat, sin mensajes nuevos), NO re-pintamos:
+  // así el media ya cargado no se recarga (parpadeo) y el scroll no salta cada 5s.
+  if(area.getAttribute('data-tel')===tel && _msgsHtml===finalHtml){
+    if(forzarScrollAbajo){ area.scrollTop=area.scrollHeight; forzarScrollAbajo=false; }
+    return;
+  }
   // ¿El usuario estaba pegado al fondo ANTES de re-pintar? Solo entonces (o si se
   // forzo al abrir/enviar) bajamos solos; si estaba leyendo historial arriba, lo respetamos.
   var pegadoAbajo=(area.scrollHeight-area.scrollTop-area.clientHeight)<120;
-  area.innerHTML=html||'<div style="text-align:center;color:#8696a0;font-size:13px;margin-top:40px">Sin mensajes aún</div>';
+  var prevTop=area.scrollTop;
+  area.innerHTML=finalHtml;
+  area.setAttribute('data-tel',tel);
+  _msgsHtml=finalHtml;
   if(forzarScrollAbajo||pegadoAbajo){ area.scrollTop=area.scrollHeight; }
+  else { area.scrollTop=prevTop; } // conservar la posición (no regresar arriba al re-pintar)
   forzarScrollAbajo=false;
   cargarMediaVisibles();
 }

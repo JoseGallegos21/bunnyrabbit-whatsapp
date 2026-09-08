@@ -1864,6 +1864,8 @@ function renderChats(){
   document.getElementById('chatList').innerHTML=html||vacio;
   document.querySelectorAll('.chat-item').forEach(function(el){
     el.addEventListener('click',function(ev){ if(ev.target.closest('.chat-menu-btn'))return; abrirChat(this.dataset.tel); });
+    // Clic derecho sobre un chat: abrir su menú de opciones en el cursor (sin el menú de Chrome)
+    el.addEventListener('contextmenu',function(ev){ ev.preventDefault(); abrirMenuChat(this.dataset.tel,{clientX:ev.clientX,clientY:ev.clientY}); });
   });
   document.querySelectorAll('.chat-menu-btn').forEach(function(b){
     b.addEventListener('click',function(ev){ ev.stopPropagation(); abrirMenuChat(this.dataset.tel, this); });
@@ -1872,7 +1874,7 @@ function renderChats(){
 
 // Menú contextual de un chat (fijar, favorito, no leído, archivar, vaciar, eliminar)
 function cerrarMenuChat(){ var m=document.getElementById('chatMenu'); if(m) m.style.display='none'; }
-function abrirMenuChat(tel, btn){
+function abrirMenuChat(tel, anchor){
   var c=(conversaciones||[]).find(function(x){return x.contacto===tel;})||{};
   var noleido=(c.no_leidos>0)||c.no_leido;
   var m=document.getElementById('chatMenu');
@@ -1883,19 +1885,43 @@ function abrirMenuChat(tel, btn){
     it((noleido?'✔️ Marcar como leído':'🔵 Marcar como no leído'), noleido?("marcarLeidoChat('"+tel+"')"):("chatFlag('"+tel+"','no_leido',1)"))+
     it((c.archivado?'🗂️ Desarchivar':'🗂️ Archivar chat'), "chatFlag('"+tel+"','archivado',"+(c.archivado?0:1)+")")+
     '<div style="height:1px;background:#2a3942;margin:4px 6px"></div>'+
+    '<div style="padding:4px 12px 2px;font-size:11px;color:#8696a0">Etapa del lead</div>'+
+    '<div style="display:flex;flex-wrap:wrap;gap:6px;padding:4px 12px 8px">'+
+      ['Nuevo','Seguimiento','Propuesta','Cerrado','Perdido'].map(function(e){
+        var act=(c.etapa||'Nuevo')===e;
+        return '<span onclick="cambiarEtapaChat(\''+tel+'\',\''+e+'\')" class="etapa-pill etapa-'+e+'" style="cursor:pointer;'+(act?'outline:2px solid #00a884;outline-offset:1px':'opacity:.75')+'">'+e+'</span>';
+      }).join('')+
+    '</div>'+
+    '<div style="height:1px;background:#2a3942;margin:4px 6px"></div>'+
     it('🧹 Vaciar chat', "vaciarChat('"+tel+"')")+
     it('🗑️ Eliminar chat', "eliminarChat('"+tel+"')");
   m.style.display='block';
-  var r=btn.getBoundingClientRect();
-  var left=Math.max(8, r.right-210);
-  var top=r.bottom+4;
-  if(top+m.offsetHeight>window.innerHeight-8) top=Math.max(8, r.top-4-m.offsetHeight);
-  m.style.left=left+'px'; m.style.top=top+'px';
+  var left, top;
+  if(anchor && typeof anchor.clientX==='number'){
+    // Clic derecho: abrir en la posición del cursor
+    left=anchor.clientX; top=anchor.clientY;
+  } else {
+    // Botón "⋮": abrir bajo el botón
+    var r=anchor.getBoundingClientRect();
+    left=Math.max(8, r.right-210); top=r.bottom+4;
+    if(top+m.offsetHeight>window.innerHeight-8) top=Math.max(8, r.top-4-m.offsetHeight);
+  }
+  // Mantener el menú dentro de la pantalla
+  var mw=m.offsetWidth||210, mh=m.offsetHeight||260;
+  if(left+mw>window.innerWidth-8) left=window.innerWidth-8-mw;
+  if(top+mh>window.innerHeight-8) top=window.innerHeight-8-mh;
+  m.style.left=Math.max(8,left)+'px'; m.style.top=Math.max(8,top)+'px';
 }
 function chatFlag(tel, campo, valor){
   cerrarMenuChat();
   fetch('/api/chat-flag',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({telefono:tel,campo:campo,valor:valor})})
   .then(function(){ cargarConversaciones(); });
+}
+function cambiarEtapaChat(tel, etapa){
+  cerrarMenuChat();
+  fetch('/api/contactos/etapa',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({telefono:tel,etapa:etapa,numero_id:numActivo()||null})})
+  .then(function(r){return r.json()})
+  .then(function(d){ if(d&&d.error){ alert('No se pudo cambiar la etapa: '+d.error); return; } cargarConversaciones(); });
 }
 function marcarLeidoChat(tel){
   cerrarMenuChat();

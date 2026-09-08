@@ -714,6 +714,18 @@ app.post('/api/chat-flag', auth, (req, res) => {
     (err) => err ? res.status(500).json({ error: err.message }) : res.json({ ok: true, campo, valor: valor ? 1 : 0 }));
 });
 
+// Cambio rapido de etapa del lead (desde el menu del chat). Solo toca la etapa,
+// sin pisar nombre/notas/prioridad como haria el guardado completo del perfil.
+app.post('/api/contactos/etapa', auth, requireRole('admin', 'supervisor', 'recepcionista'), (req, res) => {
+  const { telefono, etapa } = req.body;
+  const permitidas = ['Nuevo', 'Seguimiento', 'Propuesta', 'Cerrado', 'Perdido'];
+  if (!telefono || !permitidas.includes(etapa)) return res.status(400).json({ error: 'Parametros invalidos' });
+  const numero_id = req.user.rol === 'recepcionista' ? req.user.numero_id : (req.body.numero_id || null);
+  db.run(`INSERT INTO contactos (telefono, numero_id, etapa, prioridad) VALUES (?,?,?, 'Media') ON CONFLICT(telefono) DO UPDATE SET etapa=excluded.etapa`,
+    [telefono, numero_id, etapa],
+    (err) => err ? res.status(500).json({ error: err.message }) : res.json({ ok: true, etapa }));
+});
+
 // Descarga bajo demanda el archivo multimedia de un mensaje. Pide a Meta la URL
 // temporal con el token del número y hace de proxy (el navegador nunca ve el
 // token). Solo funciona mientras el archivo siga en los servidores de Meta;

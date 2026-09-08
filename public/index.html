@@ -2648,21 +2648,44 @@ function mostrarPreviewFoto(file){
   if(cap){ cap.addEventListener('keypress',function(e){ if(e.key==='Enter'){ e.preventDefault(); enviarFotoPendiente(); } }); setTimeout(function(){cap.focus();},100); }
 }
 function cancelarFotoPendiente(){ _fotoPendiente=null; var m=document.getElementById('fotoPreviewModal'); if(m) m.remove(); }
+// Convierte cualquier imagen (incluyendo capturas de iPhone en color wide-gamut P3,
+// PNG de 16 bits, etc.) a un JPEG sRGB 8-bit que WhatsApp SÍ acepta, y la reduce si es
+// muy grande. Usa un canvas del navegador (no necesita nada en el servidor).
+function _normalizarImagen(file, cb){
+  try{
+    var img=new Image();
+    img.onload=function(){
+      try{
+        var max=1600, w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+        if(w>max||h>max){ if(w>=h){ h=Math.round(h*max/w); w=max; } else { w=Math.round(w*max/h); h=max; } }
+        var canvas=document.createElement('canvas'); canvas.width=w; canvas.height=h;
+        var ctx=canvas.getContext('2d');
+        ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,w,h); // fondo blanco (por si el PNG es transparente)
+        ctx.drawImage(img,0,0,w,h);
+        canvas.toBlob(function(blob){ URL.revokeObjectURL(img.src); cb(blob||file); }, 'image/jpeg', 0.9);
+      }catch(e){ cb(file); }
+    };
+    img.onerror=function(){ cb(file); };
+    img.src=URL.createObjectURL(file);
+  }catch(e){ cb(file); }
+}
 function enviarFotoPendiente(){
   if(!_fotoPendiente || !chatActivo){ cancelarFotoPendiente(); return; }
   var file=_fotoPendiente;
   var caption=((document.getElementById('fotoCaption')||{}).value||'').trim();
   var btn=document.getElementById('fotoEnviarBtn'); if(btn) btn.disabled=true;
   var tel=chatActivo;
-  var fd=new FormData(); fd.append('imagen',file);
-  fetch('/api/upload',{method:'POST',headers:{Authorization:'Bearer '+token},body:fd})
-  .then(function(r){return r.json()})
-  .then(function(d){
-    if(d.ok){
-      cancelarFotoPendiente();
-      enviarMensaje(tel, '[imagen:'+d.url+']'+(caption?('\n'+caption):''));
-    } else { alert('No se pudo subir la imagen'); if(btn) btn.disabled=false; }
-  }).catch(function(){ alert('Error al subir la imagen'); if(btn) btn.disabled=false; });
+  _normalizarImagen(file, function(blob){
+    var fd=new FormData(); fd.append('imagen', blob, 'foto.jpg');
+    fetch('/api/upload',{method:'POST',headers:{Authorization:'Bearer '+token},body:fd})
+    .then(function(r){return r.json()})
+    .then(function(d){
+      if(d.ok){
+        cancelarFotoPendiente();
+        enviarMensaje(tel, '[imagen:'+d.url+']'+(caption?('\n'+caption):''));
+      } else { alert('No se pudo subir la imagen'); if(btn) btn.disabled=false; }
+    }).catch(function(){ alert('Error al subir la imagen'); if(btn) btn.disabled=false; });
+  });
 }
 
 function abrirStickers(){

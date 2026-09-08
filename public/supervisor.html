@@ -129,6 +129,8 @@
     .chats-grid{grid-template-columns:1fr;height:auto}
     .chats-lista{max-height:42vh}
     .modal{padding:20px}
+    /* Remarketing: formulario a 1 columna en móvil */
+    #tab-remarketing [style*="grid-template-columns:1fr 1fr"]{grid-template-columns:1fr!important}
   }
   .btn-cancel { background: transparent; border: 1px solid #2a3942; color: #8696a0; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; }
 
@@ -155,7 +157,8 @@
 
 <div class="tabs">
   <div class="tab active" onclick="switchTab('metricas', this)">📊 Métricas</div>
-  <div class="tab" onclick="switchTab('solicitudes', this)">📣 Solicitudes <span id="solicitudesBadge" style="display:none;background:#e74c3c;color:#fff;border-radius:10px;padding:0 6px;font-size:11px;margin-left:2px"></span></div>
+  <div class="tab" onclick="switchTab('solicitudes', this)">📥 Solicitudes <span id="solicitudesBadge" style="display:none;background:#e74c3c;color:#fff;border-radius:10px;padding:0 6px;font-size:11px;margin-left:2px"></span></div>
+  <div class="tab" onclick="switchTab('remarketing', this)">📣 Remarketing</div>
   <div class="tab" onclick="switchTab('calendario', this)">📅 Calendario</div>
   <div class="tab" onclick="switchTab('chats', this)">💬 Chats</div>
   <div class="tab" onclick="switchTab('usuarios', this)">👥 Equipo</div>
@@ -200,6 +203,50 @@
     <div class="section-title">Solicitudes de remarketing</div>
     <p style="color:#8696a0;font-size:13px;margin:-8px 0 16px">Tus recepcionistas piden aprobación antes de enviar. Revisa contenido, costo y # de contactos.</p>
     <div id="solicitudesLista"><div class="loading">Cargando solicitudes...</div></div>
+  </div>
+
+  <!-- TAB REMARKETING (el gerente envía directo a una sucursal) -->
+  <div class="tab-panel" id="tab-remarketing">
+    <div class="section-title">Enviar remarketing a una sucursal</div>
+    <p style="color:#8696a0;font-size:13px;margin:-8px 0 16px">Como gerente puedes lanzar una <b>plantilla aprobada</b> a los contactos de la sucursal que elijas. El costo lo cobra Meta según tus tarifas. El envío por texto libre no llega fuera de la ventana de 24 h, por eso se usa plantilla.</p>
+    <div style="background:#1f2c34;border:1px solid #2a3942;border-radius:12px;padding:18px;max-width:720px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="font-size:12px;color:#8696a0;display:block;margin-bottom:4px">Sucursal (desde qué número)</label>
+          <select id="rmk_numero" class="filter-input" style="width:100%" onchange="rmkCargarPlantillas();rmkEstimar()"></select>
+        </div>
+        <div>
+          <label style="font-size:12px;color:#8696a0;display:block;margin-bottom:4px">Nombre de la campaña</label>
+          <input type="text" id="rmk_nombre" class="filter-input" style="width:100%" placeholder="Ej: Promo septiembre">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="font-size:12px;color:#8696a0;display:block;margin-bottom:4px">Plantilla (aprobada)</label>
+          <select id="rmk_plantilla" class="filter-input" style="width:100%" onchange="rmkEstimar()"><option value="">Cargando plantillas…</option></select>
+        </div>
+        <div>
+          <label style="font-size:12px;color:#8696a0;display:block;margin-bottom:4px">Filtrar por etapa</label>
+          <select id="rmk_etapa" class="filter-input" style="width:100%" onchange="rmkEstimar()">
+            <option value="">Todos los contactos</option>
+            <option>Nuevo</option><option>Seguimiento</option><option>Propuesta</option><option>Cerrado</option><option>Perdido</option>
+          </select>
+        </div>
+      </div>
+      <div id="rmk_estimado" style="font-size:13px;color:#e9edef;background:#182229;border:1px solid #2a3942;border-radius:8px;padding:10px 12px;margin-bottom:12px;display:none"></div>
+      <div style="display:flex;gap:12px;align-items:center">
+        <button id="rmk_enviar" onclick="rmkEnviar()" style="background:#00a884;color:#fff;border:none;padding:10px 22px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">Enviar remarketing</button>
+        <span id="rmk_msg" style="font-size:13px"></span>
+      </div>
+    </div>
+
+    <div class="section-title" style="margin-top:24px">Historial de envíos</div>
+    <div class="tabla-container">
+      <table>
+        <thead><tr><th>Campaña</th><th>Sucursal</th><th>Fecha</th><th>Etapa</th><th>Progreso</th><th>Estado</th></tr></thead>
+        <tbody id="rmk_historial"><tr><td colspan="6" class="loading">—</td></tr></tbody>
+      </table>
+    </div>
   </div>
 
   <!-- TAB CALENDARIO -->
@@ -348,6 +395,77 @@ function logout() {
   window.location.href = '/';
 }
 
+// ── REMARKETING (envío directo del gerente hacia una sucursal) ──
+function rmkInit(){
+  api('/api/numeros').then(function(nums){
+    var sel=document.getElementById('rmk_numero'); if(!sel) return;
+    nums=Array.isArray(nums)?nums:[];
+    sel.innerHTML = nums.length
+      ? nums.map(function(n){return '<option value="'+n.phone_number_id+'">'+_escAl(n.sucursal||n.nombre||n.phone_number_id)+'</option>';}).join('')
+      : '<option value="">No hay números configurados</option>';
+    rmkCargarPlantillas();
+  });
+  rmkHistorial();
+}
+function rmkCargarPlantillas(){
+  var sel=document.getElementById('rmk_plantilla'); if(!sel) return;
+  api('/api/plantillas').then(function(d){
+    var num=document.getElementById('rmk_numero').value;
+    var apr=(Array.isArray(d)?d:[]).filter(function(p){return p.estado_meta==='aprobada' && (!num || String(p.phone_number_id)===String(num) || !p.phone_number_id);});
+    sel.innerHTML = apr.length
+      ? '<option value="">— Elige una plantilla —</option>'+apr.map(function(p){return '<option value="'+p.id+'">'+_escAl(p.nombre)+' ('+_escAl(p.categoria)+')</option>';}).join('')
+      : '<option value="">No hay plantillas aprobadas</option>';
+  });
+}
+function rmkEstimar(){
+  var box=document.getElementById('rmk_estimado'); if(!box) return;
+  var plantilla_id=document.getElementById('rmk_plantilla').value;
+  if(!plantilla_id){ box.style.display='none'; return; }
+  var data={numero_id:document.getElementById('rmk_numero').value,filtro_etapa:document.getElementById('rmk_etapa').value,plantilla_id:plantilla_id};
+  box.style.display='block'; box.textContent='Calculando…';
+  api('/api/difusion/estimar',{method:'POST',body:JSON.stringify(data)}).then(function(e){
+    if(!e||e.ok===false){ box.innerHTML='<span style="color:#f15c6d">No se pudo estimar.</span>'; return; }
+    var mxn=(e.costo_mxn!=null)?e.costo_mxn:null;
+    box.innerHTML='📊 <b>'+(e.total_contactos||0)+'</b> contactos · <b>'+(e.facturables||0)+'</b> facturables · costo estimado <b>$'+(Number(e.costo_usd)||0).toFixed(2)+' USD</b>'+(mxn!=null?' (~$'+Math.round(mxn)+' MXN)':'')+
+      ((e.avisos&&e.avisos.length)?'<div style="color:#f0b429;margin-top:8px;line-height:1.5">⚠ '+e.avisos.map(_escAl).join('<br>⚠ ')+'</div>':'');
+  }).catch(function(){ box.innerHTML='<span style="color:#f15c6d">No se pudo estimar.</span>'; });
+}
+function rmkEnviar(){
+  var msg=document.getElementById('rmk_msg');
+  var plantilla_id=document.getElementById('rmk_plantilla').value;
+  if(!plantilla_id){ msg.textContent='Selecciona una plantilla aprobada'; msg.style.color='#f15c6d'; return; }
+  var suc=document.getElementById('rmk_numero');
+  var sucTxt=suc.options[suc.selectedIndex]?suc.options[suc.selectedIndex].textContent:'';
+  if(!confirm('¿Enviar remarketing a la sucursal "'+sucTxt+'"?\n\nEsto envía la plantilla a los contactos y tiene costo según Meta.')) return;
+  var data={nombre:document.getElementById('rmk_nombre').value,plantilla_id:plantilla_id,filtro_etapa:document.getElementById('rmk_etapa').value,numero_id:suc.value};
+  var btn=document.getElementById('rmk_enviar'); btn.disabled=true;
+  msg.textContent='Enviando…'; msg.style.color='#f0b429';
+  api('/api/difusion',{method:'POST',body:JSON.stringify(data)}).then(function(d){
+    btn.disabled=false;
+    if(d&&d.ok){ msg.textContent='Enviando a '+d.total+' contactos ✓'; msg.style.color='#00a884'; document.getElementById('rmk_nombre').value=''; setTimeout(rmkHistorial,2000); }
+    else { msg.textContent=(d&&d.error)||'Error'; msg.style.color='#f15c6d'; }
+  }).catch(function(){ btn.disabled=false; msg.textContent='Error de conexión'; msg.style.color='#f15c6d'; });
+}
+function rmkHistorial(){
+  api('/api/difusiones').then(function(d){
+    var tb=document.getElementById('rmk_historial'); if(!tb) return;
+    d=Array.isArray(d)?d:[];
+    var col={pendiente:'#f39c12',enviando:'#3d85c8',completado:'#25d366',error:'#e74c3c'};
+    tb.innerHTML = d.length ? d.map(function(df){
+      var pct=df.total>0?Math.round(df.enviados/df.total*100):0;
+      var fecha=new Date(df.created_at).toLocaleString('es-MX',{dateStyle:'short',timeStyle:'short'});
+      return '<tr>'+
+        '<td>'+_escAl(df.nombre||'—')+'</td>'+
+        '<td style="font-size:11px;color:#8696a0;font-family:monospace">'+_escAl(df.phone_number_id||'—')+'</td>'+
+        '<td style="font-size:12px;color:#8696a0">'+fecha+'</td>'+
+        '<td>'+(df.filtro_etapa?_escAl(df.filtro_etapa):'Todos')+'</td>'+
+        '<td>'+df.enviados+'/'+df.total+' ('+pct+'%)</td>'+
+        '<td><span style="color:'+(col[df.estado]||'#8696a0')+'">● </span>'+_escAl(df.estado)+'</td>'+
+      '</tr>';
+    }).join('') : '<tr><td colspan="6" style="text-align:center;color:#8696a0;padding:16px">Sin envíos aún</td></tr>';
+  });
+}
+
 function switchTab(tab, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -355,6 +473,7 @@ function switchTab(tab, el) {
   document.getElementById('tab-' + tab).classList.add('active');
   if (tab === 'metricas') cargarSucursalesMet().then(cargarMetricas);
   if (tab === 'solicitudes') cargarSolicitudes();
+  if (tab === 'remarketing') rmkInit();
   if (tab === 'calendario') {
     cargarSucursalesFiltro()
       .then(() => cargarTecnicas(document.getElementById('filtroPorSucursal').value))

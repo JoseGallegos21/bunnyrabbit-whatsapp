@@ -28,7 +28,10 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
 .filter-btn{padding:3px 10px;border:1px solid #2a3942;border-radius:12px;font-size:11px;cursor:pointer;background:#2a3942;color:#8696a0}
 .filter-btn.active{background:#00a884;color:white;border-color:#00a884}
 .search-box{padding:6px 8px;background:#111b21}
-.search-box input{width:100%;padding:7px 12px;border:none;border-radius:8px;background:#202c33;font-size:13px;color:#e9edef}
+.search-wrap{position:relative}
+.search-box input{width:100%;padding:7px 32px 7px 12px;border:none;border-radius:8px;background:#202c33;font-size:13px;color:#e9edef;box-sizing:border-box}
+.search-clear{position:absolute;right:5px;top:50%;transform:translateY(-50%);display:none;border:none;background:transparent;color:#8696a0;font-size:20px;line-height:1;cursor:pointer;padding:0 7px}
+.search-clear:hover{color:#e9edef}
 .chat-list{flex:1;overflow-y:auto}
 .chat-item{padding:10px 14px;border-bottom:1px solid #2a3942;cursor:pointer;display:flex;align-items:center;gap:10px}
 .chat-item:hover{background:#182229}
@@ -209,7 +212,7 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
         <select id="numeroSelChat" onchange="cambiarNumeroChat()" style="width:100%;padding:8px;border:1px solid #2a3942;background:#202c33;color:#e9edef;border-radius:8px;font-size:13px"></select>
       </div>
       <div class="filters" id="filtros"></div>
-      <div class="search-box"><input type="text" id="buscar" placeholder="Buscar..."></div>
+      <div class="search-box"><div class="search-wrap"><input type="text" id="buscar" placeholder="Buscar..."><button type="button" id="buscarClear" class="search-clear" title="Limpiar (Esc)" aria-label="Limpiar búsqueda">&times;</button></div></div>
       <div class="chat-list" id="chatList"></div>
     </div>
     <div class="main" id="mainArea">
@@ -621,6 +624,7 @@ function numActivo(){ return numeroSel || usuario.numero_id || ''; }
 var mensajesConv=[],convTel=null; // historial COMPLETO de la conversación abierta
 var nombresContactos={}; // telefono -> nombre del contacto (para la lista de chats)
 var filtroBusqueda=''; // texto del buscador de chats (persiste entre re-renders)
+var forzarScrollAbajo=false; // true = el proximo renderMensajes baja hasta el fondo (al abrir chat o enviar)
 var conversaciones=[]; // lista de conversaciones (una por contacto) para la barra lateral
 function cargarConversaciones(){
   var params=[];
@@ -1730,10 +1734,21 @@ document.getElementById('btnCerrarPerfil').addEventListener('click',function(){
   document.getElementById('panelPerfil').classList.remove('open');
 });
 
+function limpiarBusqueda(){
+  var inp=document.getElementById('buscar');
+  inp.value=''; filtroBusqueda='';
+  var x=document.getElementById('buscarClear'); if(x) x.style.display='none';
+  renderChats(); inp.focus();
+}
 document.getElementById('buscar').addEventListener('input',function(){
   filtroBusqueda=this.value.trim().toLowerCase();
+  var x=document.getElementById('buscarClear'); if(x) x.style.display=this.value?'block':'none';
   renderChats();
 });
+document.getElementById('buscar').addEventListener('keydown',function(e){
+  if(e.key==='Escape'){ e.preventDefault(); limpiarBusqueda(); }
+});
+document.getElementById('buscarClear').addEventListener('click',limpiarBusqueda);
 
 function cargarEtiquetas(){
   fetch('/api/etiquetas',{headers:{Authorization:'Bearer '+token}})
@@ -1901,7 +1916,7 @@ function volverAListaChats(){
 function abrirChat(tel){
   // Si estabas en otra pestaña (Plantillas/Etiquetas/etc.), volver al Chat para verlo
   switchMainTab('chat');
-  chatActivo=tel;renderChats();
+  chatActivo=tel;forzarScrollAbajo=true;renderChats();
   fetch('/api/leer/'+tel+(numActivo()?'?numero_id='+encodeURIComponent(numActivo()):''),{method:'PUT',headers:{Authorization:'Bearer '+token}}).then(function(){});fetch('/api/contactos/'+tel,{headers:{Authorization:'Bearer '+token}})
   .then(function(r){return r.json()})
   .then(function(p){
@@ -2195,8 +2210,12 @@ function renderMensajes(tel){
     }
     html+='<div class="msg '+cls+'">'+contenido+'<div class="msg-time">'+t+' '+palomas+'</div></div>';
   });
+  // ¿El usuario estaba pegado al fondo ANTES de re-pintar? Solo entonces (o si se
+  // forzo al abrir/enviar) bajamos solos; si estaba leyendo historial arriba, lo respetamos.
+  var pegadoAbajo=(area.scrollHeight-area.scrollTop-area.clientHeight)<120;
   area.innerHTML=html||'<div style="text-align:center;color:#8696a0;font-size:13px;margin-top:40px">Sin mensajes aún</div>';
-  area.scrollTop=area.scrollHeight;
+  if(forzarScrollAbajo||pegadoAbajo){ area.scrollTop=area.scrollHeight; }
+  forzarScrollAbajo=false;
   cargarMediaVisibles();
 }
 // Visor de imagen dentro de la app (lightbox). Se crea al primer uso y se cierra
@@ -2243,6 +2262,7 @@ function enviar(){
   var msg=input.value.trim();
   if(!msg||!chatActivo)return;
   input.value='';
+  forzarScrollAbajo=true;
   fetch('/api/enviar',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({telefono:chatActivo,mensaje:msg,numero_id:numActivo()||null})})
   .then(function(){cargarMensajes();});
 }

@@ -2451,7 +2451,7 @@ function abrirChat(tel){
         '<div class="attach-item" onclick="adjuntarTipo(\'respuestas\')"><i class="bx bx-bolt-circle" style="background:#7f66ff;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px"></i>Respuestas rapidas</div>'+
         '<div class="attach-item" onclick="abrirPlantillasChat()"><i class="bx bx-layout" style="background:#25d366;color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px"></i>Plantillas</div>'+
       '</div>'+
-      '<input type="file" id="fileInput" style="display:none" onchange="subirArchivo(this)">'+
+      '<input type="file" id="fileInput" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none;left:-10px;bottom:0" onchange="subirArchivo(this)">'+
       '<input type="text" id="msgInput" placeholder="Escribe un mensaje..." style="flex:1;padding:9px 14px;border:none;border-radius:8px;background:#2a3942;font-size:13px;outline:none;color:#e9edef">'+
       '<button id="btnEnviar" style="flex-shrink:0;background:#00a884;color:white;border:none;border-radius:50%;width:40px;height:40px;cursor:pointer;display:flex;align-items:center;justify-content:center"><i class="bx bx-send" style="font-size:16px"></i></button>';
     document.getElementById('btnAbrirPerfil').addEventListener('click',function(){abrirPerfil(tel);});
@@ -2483,7 +2483,10 @@ function adjuntarTipo(tipo){
   if(tipo==='fotos'||tipo==='documento'||tipo==='audio'||tipo==='camara'){
     var fi = document.getElementById('fileInput');
     if(fi){
-      fi.accept = tipo==='fotos'||tipo==='camara' ? 'image/*,video/*' : tipo==='audio' ? 'audio/*' : '*/*';
+      fi.accept = tipo==='camara' ? 'image/*,video/*' : tipo==='fotos' ? 'image/*,video/*' : tipo==='audio' ? 'audio/*' : '*/*';
+      // Cámara: abrir la cámara directamente en el teléfono; los demás abren la galería/archivos
+      if(tipo==='camara') fi.setAttribute('capture','environment'); else fi.removeAttribute('capture');
+      fi.value=''; // permite volver a elegir el mismo archivo
       fi.click();
     }
   } else if(tipo==='respuestas'){ abrirRespuestasRapidas();

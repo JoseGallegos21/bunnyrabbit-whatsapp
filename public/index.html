@@ -103,7 +103,8 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
 /* Ocultar barras de scroll (siguen siendo arrastrables/scrolleables) */
 ::-webkit-scrollbar{width:0;height:0;background:transparent}
 *{scrollbar-width:none;-ms-overflow-style:none}
-.main-tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;background:#111b21;border-bottom:1px solid #2a3942;padding:8px}
+.main-tabs{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;background:#111b21;border-bottom:1px solid #2a3942;padding:8px}
+.mtab span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .mtab{display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 2px;border-radius:10px;cursor:pointer;color:#8696a0;font-size:10.5px;font-weight:500;text-align:center;line-height:1.1}
 .mtab i{font-size:18px}
 .mtab:hover{background:#182229;color:#e9edef}
@@ -141,6 +142,9 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
   .layout.chat-open .sidebar{display:none}
   .layout.chat-open .main{display:flex}
   .btn-atras{display:inline-block}
+  .main-tabs{gap:2px;padding:6px}
+  .mtab{font-size:9px;padding:8px 1px}
+  .mtab i{font-size:16px}
   .barra-volver-movil{display:flex!important}
   .metrics-bar{gap:10px;font-size:10px;overflow-x:auto}
   .filters{overflow-x:auto}
@@ -213,6 +217,7 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
         <div class="mtab" data-k="remarketing" onclick="switchMainTab('remarketing',this)"><i class="ti ti-speakerphone" aria-hidden="true"></i><span>Remarketing</span></div>
         <div class="mtab" data-k="contactos" onclick="switchMainTab('contactos',this)"><i class="ti ti-users" aria-hidden="true"></i><span>Contactos</span></div>
         <div class="mtab" data-k="etiquetas" onclick="switchMainTab('etiquetas',this)"><i class="ti ti-tag" aria-hidden="true"></i><span>Etiquetas</span></div>
+        <div class="mtab" data-k="calendario" onclick="switchMainTab('calendario',this)"><i class="ti ti-calendar" aria-hidden="true"></i><span>Agenda</span></div>
       </div>
       <div id="numeroSelWrap" style="display:none;padding:8px 14px 2px">
         <select id="numeroSelChat" onchange="cambiarNumeroChat()" style="width:100%;padding:8px;border:1px solid #2a3942;background:#202c33;color:#e9edef;border-radius:8px;font-size:13px"></select>
@@ -555,6 +560,28 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
               <p style="color:#999;font-size:13px">Cargando...</p>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- AGENDA / CALENDARIO (recepcionista): ve espacios ocupados y libres del día -->
+      <div class="main-section" id="msec-calendario" style="flex:1;flex-direction:column;overflow-y:auto;background:#f0f2f5">
+        <div style="max-width:760px;margin:0 auto;width:100%;padding:20px;box-sizing:border-box">
+          <div style="background:#fff;border-radius:12px;padding:18px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:16px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:8px">
+                <button onclick="calRecepMover(-1)" title="Día anterior" style="border:1px solid #ddd;background:#f8f9fa;border-radius:8px;width:34px;height:34px;cursor:pointer;font-size:16px">‹</button>
+                <button onclick="calRecepMover(1)" title="Día siguiente" style="border:1px solid #ddd;background:#f8f9fa;border-radius:8px;width:34px;height:34px;cursor:pointer;font-size:16px">›</button>
+                <button onclick="calRecepHoy()" style="border:1px solid #075e54;background:#e8f5f0;color:#075e54;border-radius:8px;padding:0 14px;height:34px;cursor:pointer;font-size:13px;font-weight:600">Hoy</button>
+              </div>
+              <input type="date" id="calRecepFecha" onchange="cargarCalendarioRecep()" style="padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px">
+            </div>
+            <h2 id="calRecepTitulo" style="margin:14px 0 2px;font-size:18px;color:#111">—</h2>
+            <p id="calRecepResumen" style="margin:0;font-size:13px;color:#667781">—</p>
+          </div>
+          <div id="calRecepLista" style="background:#fff;border-radius:12px;padding:8px;box-shadow:0 1px 3px rgba(0,0,0,0.08)">
+            <p style="color:#999;font-size:13px;text-align:center;padding:24px">Cargando…</p>
+          </div>
+          <p style="font-size:12px;color:#8696a0;text-align:center;margin:14px 0 0">Muestra las citas del sistema y los eventos del Google Calendar de tu sucursal. Lo que agendes aquí aparece al instante.</p>
         </div>
       </div>
 
@@ -1217,6 +1244,7 @@ function switchMainTab(tab, btn){
   if(tab==='remarketing') remkInit();
   if(tab==='contactos') cargarContactos();
   if(tab==='etiquetas') cargarEtiquetasPanel();
+  if(tab==='calendario') calRecepInit();
   // Escritorio: ocultar el panel de chat vacio cuando hay otra seccion activa, para
   // que la seccion ocupe todo el ancho (evita la columna oscura al lado).
   var layDesk=document.querySelector('.layout');
@@ -1243,6 +1271,80 @@ function ponerBotonVolverSeccion(sec){
 // Volver del contenido al menú (lista + pestañas) en móvil
 function volverAlMenu(){
   var lay=document.querySelector('.layout'); if(lay) lay.classList.remove('chat-open');
+}
+
+// ==================== AGENDA / CALENDARIO (recepcionista) ====================
+// Vista de día que fusiona las citas del sistema (tabla local) con los eventos
+// del Google Calendar de la sucursal, para ver espacios ocupados y libres.
+function calRecepHoyStr(){
+  var d=new Date(); var mx=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Mexico_City',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
+  return mx; // YYYY-MM-DD
+}
+function calRecepInit(){
+  var inp=document.getElementById('calRecepFecha');
+  if(inp && !inp.value){ inp.value=calRecepHoyStr(); }
+  cargarCalendarioRecep();
+}
+function calRecepHoy(){ var inp=document.getElementById('calRecepFecha'); if(inp) inp.value=calRecepHoyStr(); cargarCalendarioRecep(); }
+function calRecepMover(delta){
+  var inp=document.getElementById('calRecepFecha'); if(!inp) return;
+  var base=inp.value||calRecepHoyStr();
+  var p=base.split('-'); var d=new Date(Date.UTC(+p[0],+p[1]-1,+p[2]));
+  d.setUTCDate(d.getUTCDate()+delta);
+  inp.value=d.toISOString().split('T')[0];
+  cargarCalendarioRecep();
+}
+function _calMinDesde(hhmm){ var m=String(hhmm||'').match(/(\d{1,2}):(\d{2})/); return m?(+m[1]*60+ +m[2]):-1; }
+function _calHoraGcal(dt){ // dt ISO con zona -> HH:MM en MX
+  try{ return new Date(dt).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit',timeZone:'America/Mexico_City'}); }catch(e){ return ''; }
+}
+function _calMinGcal(dt){ try{ var t=new Date(dt).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',timeZone:'America/Mexico_City'}); return _calMinDesde(t);}catch(e){ return -1; } }
+function cargarCalendarioRecep(){
+  var fecha=(document.getElementById('calRecepFecha')||{}).value||calRecepHoyStr();
+  var cont=document.getElementById('calRecepLista');
+  var tit=document.getElementById('calRecepTitulo');
+  var res=document.getElementById('calRecepResumen');
+  if(cont) cont.innerHTML='<p style="color:#999;font-size:13px;text-align:center;padding:24px">Cargando…</p>';
+  var p=fecha.split('-');
+  if(tit) tit.textContent=new Date(Date.UTC(+p[0],+p[1]-1,+p[2],12)).toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long',year:'numeric',timeZone:'UTC'});
+  var hdr={headers:{Authorization:'Bearer '+token}};
+  var qs='fecha_inicio='+fecha+'&fecha_fin='+fecha;
+  Promise.all([
+    fetch('/api/citas?'+qs,hdr).then(function(r){return r.json();}).catch(function(){return [];}),
+    fetch('/api/google-calendar/eventos?'+qs,hdr).then(function(r){return r.json();}).catch(function(){return {eventos:[]};})
+  ]).then(function(arr){
+    var citas=Array.isArray(arr[0])?arr[0]:[];
+    var gcal=(arr[1]&&arr[1].eventos)?arr[1].eventos:[];
+    var items=[];
+    citas.forEach(function(c){
+      var ini=(c.hora_inicio||'').slice(0,5), fin=(c.hora_fin||'').slice(0,5);
+      items.push({min:_calMinDesde(c.hora_inicio),hora:ini+(fin?(' – '+fin):''),titulo:(c.contacto_nombre||'Sin nombre'),sub:[c.servicio,c.tecnica_nombre].filter(Boolean).join(' · '),src:'sistema',estado:c.estado});
+    });
+    gcal.forEach(function(e){
+      var allDay=!(e.start&&e.start.dateTime);
+      var ini=allDay?'Todo el día':_calHoraGcal(e.start.dateTime);
+      var fin=(!allDay&&e.end&&e.end.dateTime)?_calHoraGcal(e.end.dateTime):'';
+      items.push({min:allDay?-1:_calMinGcal(e.start.dateTime),hora:ini+(fin?(' – '+fin):''),titulo:(e.summary||'(sin título)'),sub:e.location||'',src:'google',estado:''});
+    });
+    items.sort(function(a,b){return a.min-b.min;});
+    if(res) res.textContent=items.length?(items.length+' evento'+(items.length!==1?'s':'')+' este día'):'Sin eventos · día libre';
+    if(!cont) return;
+    if(!items.length){ cont.innerHTML='<p style="color:#8696a0;font-size:14px;text-align:center;padding:30px">🎉 No hay nada agendado este día.</p>'; return; }
+    cont.innerHTML=items.map(function(it){
+      var badge=it.src==='google'
+        ? '<span style="font-size:10px;background:#e8f0fe;color:#1a73e8;padding:2px 7px;border-radius:10px;white-space:nowrap">📅 Google</span>'
+        : '<span style="font-size:10px;background:#e8f5f0;color:#075e54;padding:2px 7px;border-radius:10px;white-space:nowrap">🗓️ Sistema</span>';
+      var estado=it.estado==='completada'?' ✅':(it.estado==='cancelada'?' ❌':'');
+      var esc=function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');};
+      return '<div style="display:flex;gap:12px;align-items:flex-start;padding:12px 12px;border-bottom:1px solid #f0f2f5">'+
+        '<div style="min-width:96px;font-weight:600;color:#111;font-size:13px">'+esc(it.hora)+'</div>'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-size:14px;color:#111;font-weight:500">'+esc(it.titulo)+estado+'</div>'+
+          (it.sub?'<div style="font-size:12px;color:#667781;margin-top:2px">'+esc(it.sub)+'</div>':'')+
+        '</div>'+badge+
+      '</div>';
+    }).join('');
+  });
 }
 
 // ==================== REMARKETING (solicitud con aprobación del gerente) ====================
@@ -2548,6 +2650,9 @@ function guardarCitaChat(tel, ctx, modal){
     if(d.ok){
       msg.textContent = 'Cita agendada'; msg.style.color='#00a884';
       setTimeout(function(){ modal.remove(); }, 900);
+      // Si la Agenda está abierta, refrescarla para que la cita aparezca al instante
+      var secCal=document.getElementById('msec-calendario');
+      if(secCal && secCal.classList.contains('active')) cargarCalendarioRecep();
     } else {
       btn.disabled = false;
       msg.textContent = d.error || 'No se pudo agendar'; msg.style.color='#f15c6d';

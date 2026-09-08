@@ -28,6 +28,17 @@ body{background:#111b21;height:100vh;height:100dvh;display:flex;align-items:cent
 .filters{padding:6px 8px;background:#111b21;display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid #2a3942}
 .filter-btn{padding:3px 10px;border:1px solid #2a3942;border-radius:12px;font-size:11px;cursor:pointer;background:#2a3942;color:#8696a0}
 .filter-btn.active{background:#00a884;color:white;border-color:#00a884}
+.chat-toolbar{display:flex;gap:6px;padding:2px 8px 6px;background:#111b21}
+.ct-btn{flex:1;display:flex;align-items:center;justify-content:center;gap:5px;background:#202c33;border:none;color:#8696a0;padding:7px 8px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:500}
+.ct-btn:hover{background:#2a3942;color:#e9edef}
+.ct-btn i{font-size:15px}
+.ct-cancel{color:#f2a4a0}
+.sel-bar{display:none;align-items:center;gap:6px;padding:6px 8px;background:#182229;border-top:1px solid #2a3942;border-bottom:1px solid #2a3942}
+.sel-bar #selCount{font-size:12px;color:#e9edef;flex:1;white-space:nowrap}
+.sel-bar .ct-btn{flex:none;padding:6px 10px}
+.chat-item.sel{background:#0b2e26}
+.chat-check{flex-shrink:0;width:20px;height:20px;border-radius:50%;border:2px solid #4a5a63;display:flex;align-items:center;justify-content:center;margin-right:2px;color:#fff;font-size:12px}
+.chat-item.sel .chat-check{background:#00a884;border-color:#00a884}
 .search-box{padding:6px 8px;background:#111b21}
 .search-wrap{position:relative}
 .search-box input{width:100%;padding:7px 32px 7px 12px;border:none;border-radius:8px;background:#202c33;font-size:13px;color:#e9edef;box-sizing:border-box}
@@ -270,6 +281,17 @@ body{background:#111b21;height:100vh;height:100dvh;display:flex;align-items:cent
       </div>
       <div class="filters" id="filtros"></div>
       <div class="search-box"><div class="search-wrap"><input type="text" id="buscar" placeholder="Buscar..."><button type="button" id="buscarClear" class="search-clear" title="Limpiar (Esc)" aria-label="Limpiar búsqueda">&times;</button></div></div>
+      <div class="chat-toolbar" id="chatToolbar">
+        <button class="ct-btn" id="btnSeleccionar" onclick="toggleSeleccion()"><i class="ti ti-checkbox"></i> Seleccionar</button>
+        <button class="ct-btn" onclick="leerTodos()"><i class="ti ti-checks"></i> Leer todos</button>
+      </div>
+      <div class="sel-bar" id="selBar">
+        <span id="selCount">0 seleccionados</span>
+        <button class="ct-btn" onclick="selTodos()">Todos</button>
+        <button class="ct-btn" onclick="selAplicar('leer')">Leído</button>
+        <button class="ct-btn" onclick="selAplicar('archivar')">Archivar</button>
+        <button class="ct-btn ct-cancel" onclick="toggleSeleccion()">Cancelar</button>
+      </div>
       <div class="chat-list" id="chatList"></div>
     </div>
     <div class="main" id="mainArea">
@@ -730,6 +752,8 @@ var _chatListScrolling=false;// true mientras el usuario scrollea/toca la lista
 var _chatListPend=false;     // hay un re-pintado pendiente que se aplazo por scroll
 var _chatScrollGuardOn=false;// listeners de scroll ya instalados
 var _msgsHtml='';            // ultimo HTML pintado de la conversacion abierta (evita recargar media y saltos cada 5s)
+var modoSeleccion=false;     // modo "seleccionar chats"
+var chatSel={};              // telefonos seleccionados (tel -> true)
 var forzarScrollAbajo=false; // true = el proximo renderMensajes baja hasta el fondo (al abrir chat o enviar)
 var conversaciones=[]; // lista de conversaciones (una por contacto) para la barra lateral
 function cargarConversaciones(){
@@ -2190,7 +2214,9 @@ function renderChats(){
     var preview=String(c.mensaje||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');
     var iconos=(c.fijado?'<span title="Fijado" style="font-size:12px">📌</span>':'')+(c.favorito?'<span title="Favorito" style="font-size:12px">⭐</span>':'');
     var badge=(c.no_leidos>0)?('<div class="badge">'+c.no_leidos+'</div>'):(c.no_leido?'<div class="badge">●</div>':'');
-    return '<div class="chat-item'+(chatActivo===tel?' active':'')+'" data-tel="'+tel+'">'+
+    var check=modoSeleccion?('<div class="chat-check">'+(chatSel[tel]?'✓':'')+'</div>'):'';
+    return '<div class="chat-item'+(chatActivo===tel?' active':'')+(modoSeleccion&&chatSel[tel]?' sel':'')+'" data-tel="'+tel+'">'+
+      check+
       '<div class="chat-avatar" style="background:'+colorAvatar(tel)+'">'+inicialesDe(tel,c.nombre)+'</div>'+
       '<div class="chat-info">'+
         '<div class="chat-name" style="display:flex;align-items:center;gap:6px">'+
@@ -2225,9 +2251,9 @@ function aplicarChatList(cont, finalHtml){
   _chatListHtml=finalHtml;
   _chatListPend=false;
   cont.querySelectorAll('.chat-item').forEach(function(el){
-    el.addEventListener('click',function(ev){ if(ev.target.closest('.chat-menu-btn'))return; abrirChat(this.dataset.tel); });
+    el.addEventListener('click',function(ev){ if(ev.target.closest('.chat-menu-btn'))return; if(modoSeleccion){ toggleChatSel(this.dataset.tel); return; } abrirChat(this.dataset.tel); });
     // Clic derecho sobre un chat: abrir su menú de opciones en el cursor (sin el menú de Chrome)
-    el.addEventListener('contextmenu',function(ev){ ev.preventDefault(); abrirMenuChat(this.dataset.tel,{clientX:ev.clientX,clientY:ev.clientY}); });
+    el.addEventListener('contextmenu',function(ev){ ev.preventDefault(); if(modoSeleccion)return; abrirMenuChat(this.dataset.tel,{clientX:ev.clientX,clientY:ev.clientY}); });
   });
   cont.querySelectorAll('.chat-menu-btn').forEach(function(b){
     b.addEventListener('click',function(ev){ ev.stopPropagation(); abrirMenuChat(this.dataset.tel, this); });
@@ -2300,6 +2326,51 @@ function cambiarEtapaChat(tel, etapa){
   fetch('/api/contactos/etapa',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({telefono:tel,etapa:etapa,numero_id:numActivo()||null})})
   .then(function(r){return r.json()})
   .then(function(d){ if(d&&d.error){ alert('No se pudo cambiar la etapa: '+d.error); return; } cargarConversaciones(); });
+}
+
+// ── Seleccionar chats (multi-selección) + Leer todos ──
+function toggleSeleccion(){
+  modoSeleccion=!modoSeleccion; chatSel={};
+  var bar=document.getElementById('selBar'); if(bar) bar.style.display=modoSeleccion?'flex':'none';
+  var btn=document.getElementById('btnSeleccionar'); if(btn) btn.innerHTML=modoSeleccion?'<i class="ti ti-x"></i> Salir':'<i class="ti ti-checkbox"></i> Seleccionar';
+  _chatListHtml=''; renderChats(); // forzar re-pintado (cambian los checkboxes)
+  actualizarSelCount();
+}
+function toggleChatSel(tel){
+  if(chatSel[tel]) delete chatSel[tel]; else chatSel[tel]=true;
+  _chatListHtml=''; renderChats();
+  actualizarSelCount();
+}
+function actualizarSelCount(){
+  var n=Object.keys(chatSel).length;
+  var el=document.getElementById('selCount'); if(el) el.textContent=n+' seleccionado'+(n!==1?'s':'');
+}
+function selTodos(){
+  // selecciona todos los chats visibles (según filtro/búsqueda actual)
+  (conversaciones||[]).forEach(function(c){
+    if(filtroBusqueda){ var tel=c.contacto; if(tel.toLowerCase().indexOf(filtroBusqueda)===-1 && (nombresContactos[tel]||c.nombre||'').toLowerCase().indexOf(filtroBusqueda)===-1) return; }
+    chatSel[c.contacto]=true;
+  });
+  _chatListHtml=''; renderChats(); actualizarSelCount();
+}
+function selAplicar(accion){
+  var tels=Object.keys(chatSel);
+  if(!tels.length){ return; }
+  if(accion==='leer'){
+    fetch('/api/leer-todos',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({telefonos:tels,numero_id:numActivo()||null})})
+    .then(function(){ toggleSeleccion(); cargarConversaciones(); });
+  } else if(accion==='archivar'){
+    if(!confirm('¿Archivar '+tels.length+' chat(s)?')) return;
+    Promise.all(tels.map(function(tel){ return fetch('/api/chat-flag',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({telefono:tel,campo:'archivado',valor:1})}); }))
+    .then(function(){ toggleSeleccion(); cargarConversaciones(); });
+  }
+}
+function leerTodos(){
+  var noLeidos=(conversaciones||[]).filter(function(c){return (c.no_leidos>0)||c.no_leido;}).length;
+  if(!noLeidos){ return; }
+  if(!confirm('¿Marcar como leídos todos los chats ('+noLeidos+' sin leer)?')) return;
+  fetch('/api/leer-todos',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({numero_id:numActivo()||null})})
+  .then(function(){ cargarConversaciones(); });
 }
 function marcarLeidoChat(tel){
   cerrarMenuChat();

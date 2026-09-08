@@ -920,6 +920,22 @@ app.put('/api/leer/:contacto', auth, (req, res) => {
   });
 });
 
+// Marcar leído en bloque: sin `telefonos` marca TODOS los del número (botón "Leer todos");
+// con `telefonos` marca solo esa lista (selección múltiple de chats).
+app.post('/api/leer-todos', auth, (req, res) => {
+  const numero_id = (req.user.rol === 'supervisor' || req.user.rol === 'admin') ? (req.body.numero_id || null) : req.user.numero_id;
+  const telefonos = Array.isArray(req.body.telefonos) ? req.body.telefonos.filter(Boolean) : null;
+  const cond = ["direccion = 'entrante'", 'leido = 0'], params = [];
+  if (numero_id) { cond.push('numero_id = ?'); params.push(numero_id); }
+  if (telefonos && telefonos.length) { cond.push(`contacto IN (${telefonos.map(() => '?').join(',')})`); telefonos.forEach(t => params.push(t)); }
+  db.run(`UPDATE mensajes SET leido = 1 WHERE ${cond.join(' AND ')}`, params, function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    if (telefonos && telefonos.length) db.run(`UPDATE contactos SET no_leido=0 WHERE telefono IN (${telefonos.map(() => '?').join(',')})`, telefonos);
+    else db.run('UPDATE contactos SET no_leido=0');
+    res.json({ ok: true, actualizados: this.changes });
+  });
+});
+
 app.get('/webhook', (req, res) => {
   if (req.query['hub.verify_token'] === process.env.WEBHOOK_VERIFY_TOKEN) return res.send(req.query['hub.challenge']);
   res.status(403).send('Token inválido');

@@ -869,11 +869,12 @@ app.post('/api/enviar', auth, async (req, res) => {
   // Formato interno para imágenes: "[imagen:URL]" -> mensaje de imagen real (type:image).
   // Preferimos SUBIR la imagen a Meta y mandarla por media id (más confiable, sobre todo
   // en coexistencia) y caemos a "link" solo si la subida falla.
-  const imgMatch = /^\s*\[imagen:(.+?)\]\s*$/.exec(String(mensaje || ''));
+  const imgMatch = /^\s*\[imagen:([^\]]+)\]([\s\S]*)$/.exec(String(mensaje || ''));
   try {
     let payload;
     if (imgMatch) {
       const url = imgMatch[1].trim();
+      const caption = (imgMatch[2] || '').trim();
       let imageObj = { link: url };
       const fname = url.split('/uploads/')[1];
       const localPath = fname ? require('path').join('./public/uploads', fname.split('?')[0]) : null;
@@ -885,6 +886,7 @@ app.post('/api/enviar', auth, async (req, res) => {
           console.error('[ENVIAR] subir media a Meta falló, uso link:', JSON.stringify(up.response?.data || up.message));
         }
       }
+      if (caption) imageObj.caption = caption;
       payload = { messaging_product: 'whatsapp', to: telefono, type: 'image', image: imageObj };
     } else {
       payload = { messaging_product: 'whatsapp', to: telefono, type: 'text', text: { body: mensaje } };
@@ -1202,7 +1204,10 @@ app.post('/webhook', verificarFirmaMeta, (req, res) => {
         }
         // Estados de entrega: si un mensaje que se esperaba FALLO, enrutar a "no entregado"
         for (const st of (value.statuses || [])) {
-          if (st.status === 'failed') wfRutearUndelivered(st.id).catch(err => console.error('[WF] rutear undelivered:', err.message));
+          if (st.status === 'failed') {
+            console.error('[STATUS failed]', st.id, 'para', st.recipient_id, JSON.stringify(st.errors || st));
+            wfRutearUndelivered(st.id).catch(err => console.error('[WF] rutear undelivered:', err.message));
+          }
         }
         // Coexistencia (trafico en vivo): mensajes del celular y contactos
         if (field === 'smb_message_echoes' || value.message_echoes) { coexLogPrimeraVez('smb_message_echoes', value); coexProcesarEchoes(value); }

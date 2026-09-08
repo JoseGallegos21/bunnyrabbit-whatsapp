@@ -2612,19 +2612,57 @@ function compartirContactoData(el){
 function subirArchivo(input){
   var file = input.files[0];
   if(!file) return;
+  // Las IMÁGENES van a una bandeja/preview (como WhatsApp): se ve la foto, se le puede
+  // poner un comentario y se envía con el botón. Otros archivos se suben directo.
+  var esImagen = (file.type && file.type.indexOf('image/')===0) || ['jpg','jpeg','png','gif','webp'].includes((file.name.split('.').pop()||'').toLowerCase());
+  if(esImagen){ mostrarPreviewFoto(file); input.value=''; return; }
   var fd = new FormData();
   fd.append('imagen', file);
   fetch('/api/upload',{method:'POST',headers:{Authorization:'Bearer '+token},body:fd})
   .then(function(r){return r.json()})
+  .then(function(d){ if(d.ok && chatActivo){ enviarMensaje(chatActivo, d.url); } });
+}
+// ── Bandeja / preview de foto antes de enviar (estilo WhatsApp) ──
+var _fotoPendiente=null;
+function mostrarPreviewFoto(file){
+  _fotoPendiente=file;
+  var prev=document.getElementById('fotoPreviewModal'); if(prev) prev.remove();
+  var url=URL.createObjectURL(file);
+  var m=document.createElement('div');
+  m.id='fotoPreviewModal';
+  m.style.cssText='position:fixed;inset:0;background:#0b141a;z-index:10000;display:flex;flex-direction:column';
+  m.innerHTML=
+    '<div style="display:flex;align-items:center;gap:14px;padding:14px 16px;color:#e9edef">'+
+      '<button onclick="cancelarFotoPendiente()" title="Cancelar" style="background:none;border:none;color:#e9edef;font-size:26px;cursor:pointer;line-height:1">&times;</button>'+
+      '<span style="font-size:15px;font-weight:500">Enviar foto</span>'+
+    '</div>'+
+    '<div style="flex:1;display:flex;align-items:center;justify-content:center;padding:8px;overflow:hidden">'+
+      '<img src="'+url+'" style="max-width:100%;max-height:100%;border-radius:10px;object-fit:contain">'+
+    '</div>'+
+    '<div style="display:flex;gap:10px;align-items:center;padding:12px 14px 20px;background:#111b21">'+
+      '<input id="fotoCaption" type="text" placeholder="Añade un comentario…" style="flex:1;padding:12px 16px;border:none;border-radius:24px;background:#2a3942;color:#e9edef;font-size:14px;outline:none">'+
+      '<button id="fotoEnviarBtn" onclick="enviarFotoPendiente()" style="flex-shrink:0;background:#00a884;color:#fff;border:none;border-radius:50%;width:50px;height:50px;cursor:pointer;display:flex;align-items:center;justify-content:center"><i class="bx bx-send" style="font-size:20px"></i></button>'+
+    '</div>';
+  document.body.appendChild(m);
+  var cap=document.getElementById('fotoCaption');
+  if(cap){ cap.addEventListener('keypress',function(e){ if(e.key==='Enter'){ e.preventDefault(); enviarFotoPendiente(); } }); setTimeout(function(){cap.focus();},100); }
+}
+function cancelarFotoPendiente(){ _fotoPendiente=null; var m=document.getElementById('fotoPreviewModal'); if(m) m.remove(); }
+function enviarFotoPendiente(){
+  if(!_fotoPendiente || !chatActivo){ cancelarFotoPendiente(); return; }
+  var file=_fotoPendiente;
+  var caption=((document.getElementById('fotoCaption')||{}).value||'').trim();
+  var btn=document.getElementById('fotoEnviarBtn'); if(btn) btn.disabled=true;
+  var tel=chatActivo;
+  var fd=new FormData(); fd.append('imagen',file);
+  fetch('/api/upload',{method:'POST',headers:{Authorization:'Bearer '+token},body:fd})
+  .then(function(r){return r.json()})
   .then(function(d){
-    if(d.ok && chatActivo){
-      var msg = d.url;
-      var ext = file.name.split('.').pop().toLowerCase();
-      var esImagen = ['jpg','jpeg','png','gif','webp'].includes(ext);
-      if(esImagen) msg = '[imagen:'+d.url+']';
-      enviarMensaje(chatActivo, msg);
-    }
-  });
+    if(d.ok){
+      cancelarFotoPendiente();
+      enviarMensaje(tel, '[imagen:'+d.url+']'+(caption?('\n'+caption):''));
+    } else { alert('No se pudo subir la imagen'); if(btn) btn.disabled=false; }
+  }).catch(function(){ alert('Error al subir la imagen'); if(btn) btn.disabled=false; });
 }
 
 function abrirStickers(){
@@ -2699,8 +2737,11 @@ function renderMensajes(tel){
       var cap=(contenido && contenido!==etiquetas[m.media_tipo] && contenido!=='[media]')?'<div style="margin-top:4px">'+esc(contenido)+'</div>':'';
       contenido='<div class="media-wrap" data-mid="'+m.id+'" data-mtipo="'+m.media_tipo+'"><div style="font-size:12px;color:#8696a0;padding:6px 0">⏳ cargando '+(etiquetas[m.media_tipo]||'archivo')+'…</div></div>'+cap;
     } else if(contenido.startsWith('[imagen:')){
-      var url=contenido.replace('[imagen:','').replace(']','');
-      contenido='<img src="'+url+'" style="max-width:200px;border-radius:6px;display:block;margin-bottom:4px">';
+      var mImg=/^\[imagen:([^\]]+)\]([\s\S]*)$/.exec(contenido);
+      var url=mImg?mImg[1].trim():contenido.replace('[imagen:','').replace(']','');
+      var capTxt=mImg?(mImg[2]||'').trim():'';
+      contenido='<img src="'+url+'" style="max-width:220px;border-radius:6px;display:block;margin-bottom:4px;cursor:zoom-in" onclick="abrirLightbox(this.src)">'+
+        (capTxt?'<div style="margin-bottom:4px">'+esc(capTxt)+'</div>':'');
     } else {
       contenido=esc(contenido);
     }

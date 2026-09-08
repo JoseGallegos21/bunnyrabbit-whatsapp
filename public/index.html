@@ -2762,6 +2762,25 @@ function cargarMediaVisibles(){
   });
 }
 
+// Envía un mensaje arbitrario (texto o imagen "[imagen:url]") a un chat, con render
+// optimista. La usan adjuntar foto, stickers/biblioteca, encuestas y eventos.
+function enviarMensaje(tel, msg){
+  if(!msg || !tel) return;
+  forzarScrollAbajo=true;
+  var tmp={id:'tmp_'+Date.now(),contacto:tel,mensaje:msg,direccion:'saliente',timestamp:new Date().toISOString(),_optimista:true};
+  if(convTel===tel){ mensajesConv.push(tmp); } else { mensajes.push(tmp); }
+  if(chatActivo===tel) renderMensajes(tel);
+  function fallo(motivo){
+    mensajesConv=mensajesConv.filter(function(x){return x.id!==tmp.id;});
+    mensajes=mensajes.filter(function(x){return x.id!==tmp.id;});
+    if(chatActivo===tel) renderMensajes(tel);
+    alert('No se pudo enviar: '+(motivo||'error'));
+  }
+  fetch('/api/enviar',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({telefono:tel,mensaje:msg,numero_id:numActivo()||null})})
+  .then(function(r){return r.json().catch(function(){return {};});})
+  .then(function(d){ if(d&&d.error){ fallo(d.error); return; } cargarMensajes(); })
+  .catch(function(){ fallo('Sin conexión'); });
+}
 function enviar(){
   var input=document.getElementById('msgInput');
   var msg=input.value.trim();

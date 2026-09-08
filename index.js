@@ -866,8 +866,15 @@ app.post('/api/enviar', auth, async (req, res) => {
   if (!num) return res.status(404).json({ error: 'No hay un número de WhatsApp configurado para enviar. Asigna uno en el panel de administración.' });
   if (!num.token) return res.status(400).json({ error: 'El número ' + num.phone_number_id + ' no tiene token de WhatsApp configurado.' });
   const nid = num.phone_number_id;
+  // Formato interno para imágenes: "[imagen:URL]" -> se manda como mensaje de imagen
+  // real a WhatsApp (type:image), no como texto. Meta descarga la imagen del link
+  // (debe ser una URL pública, como /uploads/... de bunnyrabbit.lat).
+  const imgMatch = /^\s*\[imagen:(.+?)\]\s*$/.exec(String(mensaje || ''));
   try {
-    await axios.post(`https://graph.facebook.com/v18.0/${nid}/messages`, { messaging_product: 'whatsapp', to: telefono, type: 'text', text: { body: mensaje } }, { headers: { Authorization: `Bearer ${num.token}` } });
+    const payload = imgMatch
+      ? { messaging_product: 'whatsapp', to: telefono, type: 'image', image: { link: imgMatch[1].trim() } }
+      : { messaging_product: 'whatsapp', to: telefono, type: 'text', text: { body: mensaje } };
+    await axios.post(`https://graph.facebook.com/v18.0/${nid}/messages`, payload, { headers: { Authorization: `Bearer ${num.token}` } });
     db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion) VALUES (?, ?, ?, ?)', [nid, telefono, mensaje, 'saliente']);
     res.json({ ok: true });
   } catch (e) { console.error('Error enviar:', JSON.stringify(e.response?.data || e.message)); res.status(500).json({ error: e.response?.data?.error?.message || e.message }); }

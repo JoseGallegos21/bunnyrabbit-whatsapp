@@ -61,6 +61,11 @@ tr:last-child td{border-bottom:none}
 .alert-error{background:#fee2e2;color:#dc2626}
 .difusion-estado-enviando{color:#e65100}
 .difusion-estado-completado{color:#2e7d32}
+/* Editor de automatizaciones a pantalla completa */
+#wf_editor{background:#f8f9fa;border:1px solid #e0e0e0;border-radius:12px;padding:20px;margin-top:18px}
+#wf_editor.wf-full{position:fixed;inset:0;z-index:2000;margin:0;border:none;border-radius:0;padding:16px 22px;flex-direction:column;box-sizing:border-box;overflow:auto}
+#wf_editor.wf-full #wf_lienzo{flex:1 1 auto;min-height:360px}
+#wf_editor.wf-full #wf_viewport{height:100%!important}
 /* Ocultar barras de scroll (siguen arrastrables) */
 ::-webkit-scrollbar{width:0;height:0;background:transparent}
 *{scrollbar-width:none;-ms-overflow-style:none}
@@ -525,8 +530,8 @@ tr:last-child td{border-bottom:none}
       <!-- Lista -->
       <div id="wf_lista"><p style="color:#999;text-align:center;padding:20px">Cargando…</p></div>
 
-      <!-- Editor -->
-      <div id="wf_editor" style="display:none;background:#f8f9fa;border:1px solid #e0e0e0;border-radius:12px;padding:20px;margin-top:18px">
+      <!-- Editor (pantalla completa) -->
+      <div id="wf_editor" class="wf-full" style="display:none">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
           <h3 id="wf_editor_titulo" style="margin:0;font-size:16px">Nueva automatización</h3>
           <button onclick="wfCerrarEditor()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#888;line-height:1">&times;</button>
@@ -550,7 +555,7 @@ tr:last-child td{border-bottom:none}
         </div>
 
         <!-- Lienzo del flujo (estilo GHL: arbol arriba->abajo, con zoom y desplazamiento) -->
-        <div style="position:relative;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden;background:#f4f6f8">
+        <div id="wf_lienzo" style="position:relative;border:1px solid #e0e0e0;border-radius:10px;overflow:hidden;background:#f4f6f8">
           <!-- Controles de zoom -->
           <div style="position:absolute;top:10px;right:10px;z-index:30;display:flex;gap:4px;background:#fff;border:1px solid #ddd;border-radius:8px;padding:3px;box-shadow:0 1px 4px rgba(0,0,0,0.1)">
             <button onclick="wfZoom(-0.1)" title="Alejar" style="border:none;background:none;width:28px;height:28px;cursor:pointer;font-size:16px">−</button>
@@ -2560,8 +2565,8 @@ function wfNuevo(){
   document.getElementById('wf_detalle').style.display='none';
   wfRenderTriggerConfig(); wfRenderPasos(); wfZoomReset();
   cargarCoberturaWorkflow();
-  document.getElementById('wf_editor').style.display='block';
-  document.getElementById('wf_editor').scrollIntoView({behavior:'smooth'});
+  document.getElementById('wf_editor').style.display='flex';
+  window.scrollTo(0,0);
 }
 
 function wfEditar(id){
@@ -2577,8 +2582,8 @@ function wfEditar(id){
   document.getElementById('wf_detalle').style.display='none';
   wfRenderTriggerConfig(w.trigger_config||{}); wfRenderPasos(); wfZoomReset();
   cargarCoberturaWorkflow();
-  document.getElementById('wf_editor').style.display='block';
-  document.getElementById('wf_editor').scrollIntoView({behavior:'smooth'});
+  document.getElementById('wf_editor').style.display='flex';
+  window.scrollTo(0,0);
 }
 
 function wfCerrarEditor(){ document.getElementById('wf_editor').style.display='none'; }

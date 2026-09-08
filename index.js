@@ -866,19 +866,53 @@ app.post('/api/enviar', auth, async (req, res) => {
   if (!num) return res.status(404).json({ error: 'No hay un número de WhatsApp configurado para enviar. Asigna uno en el panel de administración.' });
   if (!num.token) return res.status(400).json({ error: 'El número ' + num.phone_number_id + ' no tiene token de WhatsApp configurado.' });
   const nid = num.phone_number_id;
-  // Formato interno para imágenes: "[imagen:URL]" -> se manda como mensaje de imagen
-  // real a WhatsApp (type:image), no como texto. Meta descarga la imagen del link
-  // (debe ser una URL pública, como /uploads/... de bunnyrabbit.lat).
+  // Formato interno para imágenes: "[imagen:URL]" -> mensaje de imagen real (type:image).
+  // Preferimos SUBIR la imagen a Meta y mandarla por media id (más confiable, sobre todo
+  // en coexistencia) y caemos a "link" solo si la subida falla.
   const imgMatch = /^\s*\[imagen:(.+?)\]\s*$/.exec(String(mensaje || ''));
   try {
-    const payload = imgMatch
-      ? { messaging_product: 'whatsapp', to: telefono, type: 'image', image: { link: imgMatch[1].trim() } }
-      : { messaging_product: 'whatsapp', to: telefono, type: 'text', text: { body: mensaje } };
-    await axios.post(`https://graph.facebook.com/v18.0/${nid}/messages`, payload, { headers: { Authorization: `Bearer ${num.token}` } });
+    let payload;
+    if (imgMatch) {
+      const url = imgMatch[1].trim();
+      let imageObj = { link: url };
+      const fname = url.split('/uploads/')[1];
+      const localPath = fname ? require('path').join('./public/uploads', fname.split('?')[0]) : null;
+      if (localPath && require('fs').existsSync(localPath)) {
+        try {
+          const mediaId = await subirMediaMensajeMeta(nid, num.token, localPath);
+          imageObj = { id: mediaId };
+        } catch (up) {
+          console.error('[ENVIAR] subir media a Meta falló, uso link:', JSON.stringify(up.response?.data || up.message));
+        }
+      }
+      payload = { messaging_product: 'whatsapp', to: telefono, type: 'image', image: imageObj };
+    } else {
+      payload = { messaging_product: 'whatsapp', to: telefono, type: 'text', text: { body: mensaje } };
+    }
+    const rMeta = await axios.post(`https://graph.facebook.com/v18.0/${nid}/messages`, payload, { headers: { Authorization: `Bearer ${num.token}` } });
+    if (imgMatch) console.log('[ENVIAR imagen] Meta ok:', JSON.stringify(rMeta.data), 'via', payload.image.id ? 'id' : 'link');
     db.run('INSERT INTO mensajes (numero_id, contacto, mensaje, direccion) VALUES (?, ?, ?, ?)', [nid, telefono, mensaje, 'saliente']);
     res.json({ ok: true });
   } catch (e) { console.error('Error enviar:', JSON.stringify(e.response?.data || e.message)); res.status(500).json({ error: e.response?.data?.error?.message || e.message }); }
 });
+
+// Sube un archivo local a Meta (endpoint /media del número) y devuelve el media id,
+// para enviarlo luego por id en un mensaje. Es lo recomendado para media saliente.
+async function subirMediaMensajeMeta(nid, token, localPath) {
+  const fs = require('fs'), path = require('path'), FormData = require('form-data');
+  const ext = path.extname(localPath).toLowerCase();
+  const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : (ext === '.gif' ? 'image/gif' : 'image/jpeg');
+  const fd = new FormData();
+  fd.append('messaging_product', 'whatsapp');
+  fd.append('type', mime);
+  fd.append('file', fs.createReadStream(localPath), { contentType: mime, filename: path.basename(localPath) });
+  const V = process.env.META_GRAPH_VERSION || 'v18.0';
+  const r = await axios.post(`https://graph.facebook.com/${V}/${nid}/media`, fd, {
+    headers: { Authorization: 'Bearer ' + token, ...fd.getHeaders() },
+    maxBodyLength: Infinity, maxContentLength: Infinity
+  });
+  return r.data.id;
+}
 
 
 app.get('/api/contactos/:telefono', auth, (req, res) => {

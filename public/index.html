@@ -394,7 +394,8 @@ body{background:#111b21;height:100vh;height:100dvh;display:flex;align-items:cent
                 <button onclick="sincronizarPlantillas()" style="padding:8px 14px;background:#fff;color:#075e54;border:1px solid #075e54;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">🔄 Sincronizar con Meta</button>
               </div>
             </div>
-            <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+            <table style="width:100%;min-width:560px;border-collapse:collapse;font-size:13px">
               <thead><tr style="border-bottom:2px solid #eee">
                 <th style="padding:8px;text-align:left">Nombre</th>
                 <th style="padding:8px;text-align:left">Categoría</th>
@@ -403,6 +404,7 @@ body{background:#111b21;height:100vh;height:100dvh;display:flex;align-items:cent
               </tr></thead>
               <tbody id="np_tablaPlantillas"></tbody>
             </table>
+            </div>
           </div>
 
           <!-- RESPUESTAS RAPIDAS -->

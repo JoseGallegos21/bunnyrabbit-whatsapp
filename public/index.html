@@ -2200,7 +2200,12 @@ function renderMensajes(tel){
     }
     var t=fecha.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
     var cls=m.direccion==='saliente'?'saliente':'entrante';
-    var palomas=cls==='saliente'?'<svg width="14" height="10" viewBox="0 0 14 10" fill="none" style="vertical-align:middle"><path d="M1 5l3 3 5-7" stroke="#8696a0" stroke-width="1.5" stroke-linecap="round"/><path d="M5 5l3 3 5-7" stroke="#8696a0" stroke-width="1.5" stroke-linecap="round"/></svg>':'';
+    var palomas='';
+    if(cls==='saliente'){
+      if(m._fallido){ palomas='<span title="No se envió" style="color:#f15c6d;font-weight:700">⚠</span>'; }
+      else if(m._optimista){ palomas='<span title="Enviando…" style="color:#8696a0">🕐</span>'; }
+      else { palomas='<svg width="14" height="10" viewBox="0 0 14 10" fill="none" style="vertical-align:middle"><path d="M1 5l3 3 5-7" stroke="#8696a0" stroke-width="1.5" stroke-linecap="round"/><path d="M5 5l3 3 5-7" stroke="#8696a0" stroke-width="1.5" stroke-linecap="round"/></svg>'; }
+    }
     var esc=function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');};
     var contenido=m.mensaje||'';
     if(m.media_tipo && m.id){
@@ -2267,10 +2272,30 @@ function enviar(){
   var input=document.getElementById('msgInput');
   var msg=input.value.trim();
   if(!msg||!chatActivo)return;
+  var tel=chatActivo;
   input.value='';
   forzarScrollAbajo=true;
-  fetch('/api/enviar',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({telefono:chatActivo,mensaje:msg,numero_id:numActivo()||null})})
-  .then(function(){cargarMensajes();});
+  // Optimista: pintar el mensaje al instante (como WhatsApp). El envio real a Meta
+  // tarda ~1s; no bloqueamos la UI esperandolo. Al confirmar, cargarMensajes reconcilia.
+  var tmp={id:'tmp_'+Date.now(),contacto:tel,mensaje:msg,direccion:'saliente',timestamp:new Date().toISOString(),_optimista:true};
+  if(convTel===tel){ mensajesConv.push(tmp); } else { mensajes.push(tmp); }
+  renderMensajes(tel);
+  fetch('/api/enviar',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify({telefono:tel,mensaje:msg,numero_id:numActivo()||null})})
+  .then(function(r){return r.json().catch(function(){return {};});})
+  .then(function(d){
+    if(d&&d.error){ marcarEnvioFallido(tel,tmp.id,msg,d.error); return; }
+    cargarMensajes(); // reconcilia con lo persistido (reemplaza el temporal)
+  })
+  .catch(function(){ marcarEnvioFallido(tel,tmp.id,msg,'Sin conexión'); });
+}
+function marcarEnvioFallido(tel,tmpId,texto,motivo){
+  // Quitar el mensaje optimista (no se envió) y avisar sin que desaparezca en silencio.
+  mensajesConv=mensajesConv.filter(function(x){return x.id!==tmpId;});
+  mensajes=mensajes.filter(function(x){return x.id!==tmpId;});
+  if(chatActivo===tel) renderMensajes(tel);
+  var inp=document.getElementById('msgInput');
+  if(inp && !inp.value){ inp.value=texto; } // devolver el texto para reintentar
+  alert('No se pudo enviar el mensaje: '+(motivo||'error')+'\n\nTu texto se copió de nuevo al cuadro para reintentar.');
 }
 
 function abrirPerfil(tel){

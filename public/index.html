@@ -2659,12 +2659,19 @@ function abrirAgendarCita(tel){
       '<input type="text" id="ag_servicio" placeholder="Ej: Manicure" style="'+_agEstilo+'">'+
       '<label style="'+_agLabel+'">Notas</label>'+
       '<textarea id="ag_notas" rows="2" placeholder="Opcional" style="'+_agEstilo+';resize:vertical"></textarea>'+
+      '<div id="ag_conflicto" style="display:none;font-size:12px;color:#f0b429;background:#2a2200;border:1px solid #5c4a00;border-radius:8px;padding:8px 10px;margin-top:10px;line-height:1.4"></div>'+
       '<button id="ag_guardar" style="width:100%;margin-top:14px;padding:10px;background:#00a884;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">Agendar</button>'+
       '<p id="ag_msg" style="font-size:12px;text-align:center;margin:8px 0 0;min-height:16px"></p>';
 
     document.getElementById('ag_guardar').onclick = function(){
       guardarCitaChat(tel, ctx, modal);
     };
+    // Aviso de citas encimadas: revisar al cambiar técnica/fecha/hora
+    ['ag_tecnica','ag_fecha','ag_hora','ag_hora_fin'].forEach(function(id){
+      var el=document.getElementById(id);
+      if(el) el.addEventListener('change',function(){ agVerificarConflicto(ctx); });
+    });
+    agVerificarConflicto(ctx);
   })
   .catch(function(){
     var b = document.getElementById('ag_body');
@@ -2674,12 +2681,66 @@ function abrirAgendarCita(tel){
 
 function _agStyleSel(){ return _agEstilo + ';cursor:pointer'; }
 
+// ── Aviso de citas encimadas al agendar ──
+function _agMin(hhmm){ var m=String(hhmm||'').match(/(\d{1,2}):(\d{2})/); return m?(+m[1]*60+ +m[2]):null; }
+function _agNormTag(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]/g,''); }
+function _agEventoEsDeTecnica(summary, nombre){
+  var partes=String(summary||'').split('-'); if(partes.length<2) return false;
+  var tag=_agNormTag(partes[partes.length-1]); var primer=_agNormTag(String(nombre||'').split(/\s+/)[0]);
+  if(!tag||!primer) return false; return primer.indexOf(tag)===0 || tag.indexOf(primer)===0;
+}
+function _escAg(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function agVerificarConflicto(ctx){
+  var box=document.getElementById('ag_conflicto'); if(!box) return;
+  var fEl=document.getElementById('ag_fecha'), hEl=document.getElementById('ag_hora');
+  if(!fEl||!hEl) return;
+  var fecha=fEl.value, ini=_agMin(hEl.value);
+  var finV=document.getElementById('ag_hora_fin').value;
+  var fin=finV?_agMin(finV):(ini!=null?ini+60:null); // sin fin: asumimos 60 min
+  var tecSel=document.getElementById('ag_tecnica');
+  var tecId=tecSel.value, tecNombre=tecId?tecSel.options[tecSel.selectedIndex].textContent:'';
+  if(!fecha || ini==null){ box.style.display='none'; return; }
+  var hdr={headers:{Authorization:'Bearer '+token}};
+  var qs='fecha_inicio='+fecha+'&fecha_fin='+fecha;
+  Promise.all([
+    fetch('/api/citas?'+qs,hdr).then(function(r){return r.json();}).catch(function(){return [];}),
+    fetch('/api/google-calendar/eventos?'+qs,hdr).then(function(r){return r.json();}).catch(function(){return {eventos:[]};})
+  ]).then(function(arr){
+    var citas=Array.isArray(arr[0])?arr[0]:[];
+    var gcal=(arr[1]&&arr[1].eventos)?arr[1].eventos:[];
+    var choques=[];
+    citas.forEach(function(c){
+      if(tecId && String(c.tecnica_id||'')!==String(tecId)) return; // si eligió técnica, solo la suya
+      var cs=_agMin(c.hora_inicio); if(cs==null) return;
+      var ce=c.hora_fin?_agMin(c.hora_fin):cs+60;
+      if(ini<ce && cs<fin){ choques.push({hora:(c.hora_inicio||'').slice(0,5)+(c.hora_fin?('–'+c.hora_fin.slice(0,5)):''), quien:(c.contacto_nombre||'cita'), src:'sistema'}); }
+    });
+    if(tecId){ // en Google Calendar la cita se atribuye por el tag del título
+      gcal.forEach(function(e){
+        if(!(e.start&&e.start.dateTime)) return;
+        if(!_agEventoEsDeTecnica(e.summary, tecNombre)) return;
+        var gs=_calMinGcal(e.start.dateTime), ge=(e.end&&e.end.dateTime)?_calMinGcal(e.end.dateTime):gs+60;
+        if(ini<ge && gs<fin){ choques.push({hora:_calHoraGcal(e.start.dateTime), quien:(e.summary||'evento'), src:'google'}); }
+      });
+    }
+    if(!choques.length){ box.style.display='none'; box.innerHTML=''; return; }
+    box.style.display='block';
+    box.innerHTML='⚠️ <b>Se encima con '+choques.length+' cita(s)</b>'+(tecId?(' de '+_escAg(tecNombre)):' en la sucursal')+':'+
+      '<div style="margin-top:4px">'+choques.map(function(k){return '• '+_escAg(k.hora)+' — '+_escAg(k.quien)+(k.src==='google'?' <span style="color:#8696a0">(Google)</span>':'');}).join('<br>')+'</div>';
+  }).catch(function(){ box.style.display='none'; });
+}
+
 function guardarCitaChat(tel, ctx, modal){
   var msg = document.getElementById('ag_msg');
   var btn = document.getElementById('ag_guardar');
   var fecha = document.getElementById('ag_fecha').value;
   var hora = document.getElementById('ag_hora').value;
   if(!fecha || !hora){ msg.textContent='Fecha y hora son obligatorias'; msg.style.color='#f15c6d'; return; }
+  // Si el aviso de encimado está visible, pedir confirmación (no bloquear del todo)
+  var conf=document.getElementById('ag_conflicto');
+  if(conf && conf.style.display!=='none'){
+    if(!confirm('Ese horario se encima con otra cita.\n\n¿Agendar de todos modos?')) return;
+  }
 
   var datos = {
     contacto_id: ctx.contacto_id,

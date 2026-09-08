@@ -1346,6 +1346,41 @@ function volverAlMenu(){
   var lay=document.querySelector('.layout'); if(lay) lay.classList.remove('chat-open');
 }
 
+// ── Gesto: deslizar con el dedo hacia la derecha para regresar (como WhatsApp) ──
+function _swipeRegresar(){
+  // ¿Hay una sección (Plantillas/Agenda/etc.) abierta a pantalla completa? -> volver al menú
+  var secAct=document.querySelector('.main-section.active');
+  if(secAct && secAct.id!=='msec-chat'){ var lay=document.querySelector('.layout'); if(lay&&lay.classList.contains('chat-open')){ volverAlMenu(); return true; } }
+  // ¿Conversación abierta en móvil? -> volver a la lista de chats
+  var lay2=document.querySelector('.layout');
+  if(lay2 && lay2.classList.contains('chat-open') && chatActivo){ volverAListaChats(); return true; }
+  return false;
+}
+(function(){
+  var sx=0, sy=0, tracking=false;
+  function scrollableX(el){ while(el && el!==document.body && el.nodeType===1){ try{ var s=getComputedStyle(el); if((s.overflowX==='auto'||s.overflowX==='scroll') && el.scrollWidth>el.clientWidth+4) return true; }catch(e){} el=el.parentElement; } return false; }
+  document.addEventListener('touchstart',function(e){
+    tracking=false;
+    if(window.innerWidth>820) return;                 // solo en móvil
+    if(!e.touches || e.touches.length!==1) return;
+    var cm=document.getElementById('chatMenu');
+    if(cm && cm.style.display==='block') return;       // no interferir con menús flotantes
+    var t=e.touches[0]; sx=t.clientX; sy=t.clientY;
+    var fromEdge = sx<=28;                              // borde izquierdo: siempre permitido
+    // En una conversación (sin scroll horizontal) permitimos el gesto en la mitad izquierda
+    var secAct=document.querySelector('.main-section.active');
+    var enConversacion = (!secAct || secAct.id==='msec-chat') && chatActivo;
+    var permitido = fromEdge || (enConversacion && sx < window.innerWidth*0.6 && !scrollableX(t.target));
+    tracking = permitido;
+  }, {passive:true});
+  document.addEventListener('touchend',function(e){
+    if(!tracking) return; tracking=false;
+    var t=(e.changedTouches && e.changedTouches[0]); if(!t) return;
+    var dx=t.clientX-sx, dy=t.clientY-sy;
+    if(dx>60 && Math.abs(dy)<45){ _swipeRegresar(); }   // derecha, mayormente horizontal
+  }, {passive:true});
+})();
+
 // ==================== AGENDA / CALENDARIO (recepcionista) ====================
 // Vista de día que fusiona las citas del sistema (tabla local) con los eventos
 // del Google Calendar de la sucursal, para ver espacios ocupados y libres.
@@ -2261,10 +2296,12 @@ function abrirChat(tel){
     header.className='chat-header';
     header.innerHTML=
       '<button class="btn-atras" onclick="volverAListaChats()" title="Volver">&#8592;</button>'+
-      '<div class="chat-header-avatar" style="background:'+colorAvatar(tel)+'">'+inicialesDe(tel,p.nombre)+'</div>'+
-      '<div class="chat-header-info"><h3>'+(p.nombre||'+'+tel)+'</h3><p>+'+tel+
-        (p.anuncio_url?' · <a href="'+encodeURI(p.anuncio_url)+'" target="_blank" rel="noopener" style="color:#53bdeb;text-decoration:none" title="'+(p.anuncio_titulo||'Anuncio').replace(/"/g,"&quot;")+'">📢 Vino de un anuncio</a>':(p.origen==='formulario_ads'?' · <span style="color:#8696a0" title="Lead de anuncio; el link no se guardo (escribio antes de activar el registro)">📢 Vino de un anuncio</span>':''))+
-      '</p></div>'+
+      '<div id="chatHeaderTap" style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;cursor:pointer" title="Ver perfil">'+
+        '<div class="chat-header-avatar" style="background:'+colorAvatar(tel)+'">'+inicialesDe(tel,p.nombre)+'</div>'+
+        '<div class="chat-header-info"><h3>'+(p.nombre||'+'+tel)+'</h3><p>+'+tel+
+          (p.anuncio_url?' · <a href="'+encodeURI(p.anuncio_url)+'" target="_blank" rel="noopener" style="color:#53bdeb;text-decoration:none" title="'+(p.anuncio_titulo||'Anuncio').replace(/"/g,"&quot;")+'">📢 Vino de un anuncio</a>':(p.origen==='formulario_ads'?' · <span style="color:#8696a0" title="Lead de anuncio; el link no se guardo (escribio antes de activar el registro)">📢 Vino de un anuncio</span>':''))+
+        '</p></div>'+
+      '</div>'+
       '<button class="btn-perfil" id="btnAgendarCita" style="margin-right:8px" title="Agendar cita"><i class="bx bx-calendar-plus"></i> <span class="lbl">Agendar</span></button>'+
       '<button class="btn-perfil" id="btnAbrirPerfil">Perfil</button>';
     // Vista previa del anuncio (Click-to-WhatsApp): imagen + titulo + cuerpo + link
@@ -2307,6 +2344,9 @@ function abrirChat(tel){
       '<button id="btnEnviar" style="flex-shrink:0;background:#00a884;color:white;border:none;border-radius:50%;width:40px;height:40px;cursor:pointer;display:flex;align-items:center;justify-content:center"><i class="bx bx-send" style="font-size:16px"></i></button>';
     document.getElementById('btnAbrirPerfil').addEventListener('click',function(){abrirPerfil(tel);});
     document.getElementById('btnAgendarCita').addEventListener('click',function(){abrirAgendarCita(tel);});
+    // Tocar la foto/nombre abre el perfil (como WhatsApp). El link del anuncio sigue funcionando.
+    var hTap=document.getElementById('chatHeaderTap');
+    if(hTap) hTap.addEventListener('click',function(ev){ if(ev.target.closest('a'))return; abrirPerfil(tel); });
     iniciarAtajoRespuestas();
     document.getElementById('msgInput').addEventListener('keypress',function(e){if(e.key==='Enter')enviar();});
     document.getElementById('btnEnviar').addEventListener('click',function(){enviar();});

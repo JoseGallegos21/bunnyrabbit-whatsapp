@@ -32,7 +32,7 @@ body{background:#111b21;height:100vh;display:flex;align-items:center;justify-con
 .search-box input{width:100%;padding:7px 32px 7px 12px;border:none;border-radius:8px;background:#202c33;font-size:13px;color:#e9edef;box-sizing:border-box}
 .search-clear{position:absolute;right:5px;top:50%;transform:translateY(-50%);display:none;border:none;background:transparent;color:#8696a0;font-size:20px;line-height:1;cursor:pointer;padding:0 7px}
 .search-clear:hover{color:#e9edef}
-.chat-list{flex:1;overflow-y:auto}
+.chat-list{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
 .chat-item{padding:10px 14px;border-bottom:1px solid #2a3942;cursor:pointer;display:flex;align-items:center;gap:10px}
 .chat-item:hover{background:#182229}
 .chat-item.active{background:#2a3942}
@@ -657,6 +657,12 @@ function numActivo(){ return numeroSel || usuario.numero_id || ''; }
 var mensajesConv=[],convTel=null; // historial COMPLETO de la conversación abierta
 var nombresContactos={}; // telefono -> nombre del contacto (para la lista de chats)
 var filtroBusqueda=''; // texto del buscador de chats (persiste entre re-renders)
+// Control del re-pintado de la lista de chats (evita que el auto-refresh de 5s corte
+// el scroll o lo regrese arriba en el celular).
+var _chatListHtml='';        // ultimo HTML pintado (si no cambia, no re-pintamos)
+var _chatListScrolling=false;// true mientras el usuario scrollea/toca la lista
+var _chatListPend=false;     // hay un re-pintado pendiente que se aplazo por scroll
+var _chatScrollGuardOn=false;// listeners de scroll ya instalados
 var forzarScrollAbajo=false; // true = el proximo renderMensajes baja hasta el fondo (al abrir chat o enviar)
 var conversaciones=[]; // lista de conversaciones (una por contacto) para la barra lateral
 function cargarConversaciones(){
@@ -1963,15 +1969,47 @@ function renderChats(){
   var vacio = filtroBusqueda
     ? '<p style="padding:24px 16px;color:#8696a0;text-align:center">🔎 No se encontró ningún contacto que coincida con “'+filtroBusqueda.replace(/</g,'&lt;')+'”.</p>'
     : (filtroEtapa==='__archivados'?'<p style="padding:16px;color:#999;text-align:center">No hay chats archivados</p>':'<p style="padding:16px;color:#999;text-align:center">Sin conversaciones</p>');
-  document.getElementById('chatList').innerHTML=html||vacio;
-  document.querySelectorAll('.chat-item').forEach(function(el){
+  var finalHtml = html||vacio;
+  var cont=document.getElementById('chatList');
+  if(!cont) return;
+  _ensureChatScrollGuard();
+  // 1) Si el contenido es idéntico, no tocamos el DOM (el 99% de los refrescos de 5s).
+  if(finalHtml===_chatListHtml){ _chatListPend=false; return; }
+  // 2) Si estás scrolleando/tocando la lista, aplazamos el re-pintado hasta que sueltes.
+  if(_chatListScrolling){ _chatListPend=true; return; }
+  aplicarChatList(cont, finalHtml);
+}
+// Aplica el HTML a la lista conservando la posición del scroll y re-enlaza los eventos.
+function aplicarChatList(cont, finalHtml){
+  var sc=cont.scrollTop;
+  cont.innerHTML=finalHtml;
+  cont.scrollTop=sc; // conservar dónde estabas (no regresar arriba)
+  _chatListHtml=finalHtml;
+  _chatListPend=false;
+  cont.querySelectorAll('.chat-item').forEach(function(el){
     el.addEventListener('click',function(ev){ if(ev.target.closest('.chat-menu-btn'))return; abrirChat(this.dataset.tel); });
     // Clic derecho sobre un chat: abrir su menú de opciones en el cursor (sin el menú de Chrome)
     el.addEventListener('contextmenu',function(ev){ ev.preventDefault(); abrirMenuChat(this.dataset.tel,{clientX:ev.clientX,clientY:ev.clientY}); });
   });
-  document.querySelectorAll('.chat-menu-btn').forEach(function(b){
+  cont.querySelectorAll('.chat-menu-btn').forEach(function(b){
     b.addEventListener('click',function(ev){ ev.stopPropagation(); abrirMenuChat(this.dataset.tel, this); });
   });
+}
+// Instala (una vez) los listeners que detectan cuándo estás scrolleando la lista,
+// para no re-pintar en ese momento. Al terminar, si quedó un re-pintado pendiente, se aplica.
+function _ensureChatScrollGuard(){
+  if(_chatScrollGuardOn) return;
+  var cont=document.getElementById('chatList'); if(!cont) return;
+  _chatScrollGuardOn=true;
+  var t=null;
+  function marcar(){
+    _chatListScrolling=true;
+    clearTimeout(t);
+    t=setTimeout(function(){ _chatListScrolling=false; if(_chatListPend) renderChats(); }, 400);
+  }
+  cont.addEventListener('scroll', marcar, {passive:true});
+  cont.addEventListener('touchstart', marcar, {passive:true});
+  cont.addEventListener('touchmove', marcar, {passive:true});
 }
 
 // Menú contextual de un chat (fijar, favorito, no leído, archivar, vaciar, eliminar)

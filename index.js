@@ -146,7 +146,7 @@ db.serialize(() => {
       });
     });
   };
-  ensureColumns('usuarios', [['telefono', 'TEXT'], ['foto_url', 'TEXT']]);
+  ensureColumns('usuarios', [['telefono', 'TEXT'], ['foto_url', 'TEXT'], ['ultimo_visto', 'DATETIME']]);
   ensureColumns('plantillas', [
     ['idioma', "TEXT DEFAULT 'es'"],
     ['botones', 'TEXT'],  // JSON con los textos de los botones de respuesta rapida
@@ -342,10 +342,21 @@ function resolverNumeroEnvio(req, numeroIdBody) {
   });
 }
 
+// Última vez que se vio a cada usuario (para el estado en línea del panel admin).
+// Se actualiza aquí, pasivamente, en CADA petición autenticada — los demás roles NO
+// cambian en nada. Con freno de 30s por usuario para no escribir de más en SQLite.
+const _ultimoVistoCache = {};
+function _tocarUltimoVisto(id) {
+  if (!id) return;
+  const ahora = Date.now();
+  if (_ultimoVistoCache[id] && ahora - _ultimoVistoCache[id] < 30000) return;
+  _ultimoVistoCache[id] = ahora;
+  db.run('UPDATE usuarios SET ultimo_visto=CURRENT_TIMESTAMP WHERE id=?', [id], () => {});
+}
 const auth = (req, res, next) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'No autorizado' });
-  try { req.user = jwt.verify(token, process.env.JWT_SECRET); next(); } catch { res.status(401).json({ error: 'Token inválido' }); }
+  try { req.user = jwt.verify(token, process.env.JWT_SECRET); _tocarUltimoVisto(req.user.id); next(); } catch { res.status(401).json({ error: 'Token inválido' }); }
 };
 
 app.post('/api/upload', auth, upload.single('imagen'), (req, res) => {
@@ -1308,7 +1319,7 @@ app.post('/api/usuarios', auth, async (req, res) => {
 
 app.get('/api/usuarios', auth, (req, res) => {
   if (req.user.rol !== 'supervisor' && req.user.rol !== 'admin' && req.user.rol !== 'admin') return res.status(403).json({ error: 'Sin acceso' });
-  const query = req.user.rol === 'supervisor' ? "SELECT id, nombre, email, sucursal, numero_id, rol FROM usuarios WHERE rol != 'admin' AND sucursal = ?" : "SELECT id, nombre, email, sucursal, numero_id, rol FROM usuarios";
+  const query = req.user.rol === 'supervisor' ? "SELECT id, nombre, email, sucursal, numero_id, rol, ultimo_visto FROM usuarios WHERE rol != 'admin' AND sucursal = ?" : "SELECT id, nombre, email, sucursal, numero_id, rol, ultimo_visto FROM usuarios";
   const params = req.user.rol === 'supervisor' ? [req.user.sucursal] : [];
   db.all(query, params, (err, rows) => res.json(rows || []));
 });

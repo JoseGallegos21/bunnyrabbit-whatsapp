@@ -221,7 +221,8 @@ tr:last-child td{border-bottom:none}
           <option value="tecnica">Técnica</option>
         </select>
       </div>
-        <table><thead><tr><th>Nombre</th><th>Email</th><th>Sucursal</th><th>Phone ID</th><th>Rol</th><th>Acciones</th></tr></thead>
+        <div id="usuariosOnlineResumen" style="font-size:12px;color:#667781;margin:0 0 8px"></div>
+        <table><thead><tr><th>Estado</th><th>Nombre</th><th>Email</th><th>Sucursal</th><th>Phone ID</th><th>Rol</th><th>Acciones</th></tr></thead>
         <tbody id="tablaUsuarios"></tbody></table>
       </div>
     </div>
@@ -1272,20 +1273,43 @@ function cargarUsuarios(){
     renderTablaUsuarios(todosLosUsuarios);
   });
 }
+// Estado en línea: se considera "en línea" si tuvo actividad en los últimos ~2 min.
+function _uvDate(ts){ if(!ts)return null; var s=String(ts); var d=/[TZ]|[+-]\d\d:?\d\d$/.test(s)?new Date(s):new Date(s.replace(' ','T')+'Z'); return isNaN(d)?null:d; }
+function _enLinea(ts){ var d=_uvDate(ts); return d ? (Date.now()-d.getTime())<120000 : false; }
+function _haceCuanto(ts){
+  var d=_uvDate(ts); if(!d) return 'nunca';
+  var seg=Math.floor((Date.now()-d.getTime())/1000);
+  if(seg<60) return 'hace un momento';
+  var min=Math.floor(seg/60); if(min<60) return 'hace '+min+' min';
+  var hrs=Math.floor(min/60); if(hrs<24) return 'hace '+hrs+' h';
+  return d.toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit'});
+}
 function renderTablaUsuarios(lista){
   var filtro=document.getElementById('filtroRol')?document.getElementById('filtroRol').value:'';
   var filtrada=filtro?lista.filter(function(u){return u.rol===filtro;}):lista;
   var colores={admin:'#005c4b',supervisor:'#1a2e3d',recepcionista:'#2a3942',tecnica:'#2e1f3d'};
   var textColors={admin:'#00a884',supervisor:'#3d85c8',recepcionista:'#8696a0',tecnica:'#a855f7'};
+  var enLineaTotal=lista.filter(function(u){return _enLinea(u.ultimo_visto);}).length;
+  var resumen=document.getElementById('usuariosOnlineResumen');
+  if(resumen) resumen.innerHTML='<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#00d95f;margin-right:5px;vertical-align:middle"></span><b style="color:#2e7d32">'+enLineaTotal+'</b> en línea · '+lista.length+' en total <span style="color:#8696a0">(se actualiza solo)</span>';
   document.getElementById('tablaUsuarios').innerHTML=filtrada.map(function(u){
     var bg=colores[u.rol]||'#2a3942';
     var tc=textColors[u.rol]||'#e9edef';
-    return '<tr><td>'+h(u.nombre||'—')+'</td><td>'+h(u.email||'—')+'</td><td>'+h(u.sucursal||'—')+'</td><td style="font-size:11px;color:#667781">'+h(u.numero_id||'—')+'</td>'+
+    var on=_enLinea(u.ultimo_visto);
+    var estado='<span title="'+(on?'En línea':('Última vez: '+_haceCuanto(u.ultimo_visto)))+'" style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap">'+
+      '<span style="width:9px;height:9px;border-radius:50%;flex-shrink:0;background:'+(on?'#00d95f':'#8a949c')+(on?';box-shadow:0 0 0 3px rgba(0,217,95,.18)':'')+'"></span>'+
+      '<span style="font-size:11px;color:'+(on?'#2e7d32':'#8696a0')+'">'+(on?'En línea':_haceCuanto(u.ultimo_visto))+'</span></span>';
+    return '<tr><td>'+estado+'</td><td>'+h(u.nombre||'—')+'</td><td>'+h(u.email||'—')+'</td><td>'+h(u.sucursal||'—')+'</td><td style="font-size:11px;color:#667781">'+h(u.numero_id||'—')+'</td>'+
       '<td><span class="badge badge-'+u.rol+'" style="background:'+bg+';color:'+tc+';padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">'+u.rol+'</span></td>'+
       '<td><button class="btn btn-edit btn-sm" data-uid="'+u.id+'" data-un="'+h(u.nombre)+'" data-us="'+h(u.sucursal)+'" data-num="'+h(u.numero_id)+'" data-rol="'+u.rol+'" onclick="editarUsuarioData(this)">Editar</button> '+
       '<button class="btn btn-danger btn-sm" onclick="confirmarEliminar('+u.id+')">Eliminar</button></td></tr>';
-  }).join('')||'<tr><td colspan="6" style="text-align:center;color:#8696a0;padding:20px">Sin usuarios con este rol</td></tr>';
+  }).join('')||'<tr><td colspan="7" style="text-align:center;color:#8696a0;padding:20px">Sin usuarios con este rol</td></tr>';
 }
+// Refresca el estado en línea cada 30s SOLO mientras la pestaña Usuarios está visible.
+setInterval(function(){
+  var sec=document.getElementById('sec-usuarios');
+  if(sec && sec.classList.contains('active') && !document.hidden) cargarUsuarios();
+}, 30000);
 function confirmarEliminar(id){
   if(confirm('¿Eliminar este usuario? Esta acción no se puede deshacer.')){
     fetch('/api/usuarios/'+id,{method:'DELETE',headers:{Authorization:'Bearer '+token}})

@@ -1472,7 +1472,7 @@ function calCargar(){
     var gcal=(arr[1]&&arr[1].eventos)?arr[1].eventos:[];
     calEventos=[];
     citas.forEach(function(c){
-      calEventos.push({fecha:c.fecha, min:_calMinDesde(c.hora_inicio), horaTxt:(c.hora_inicio||'').slice(0,5)+(c.hora_fin?(' – '+c.hora_fin.slice(0,5)):''), titulo:(c.contacto_nombre||c.servicio||'Cita'), sub:[c.servicio,c.tecnica_nombre].filter(Boolean).join(' · '), src:'sistema', estado:c.estado, cita:c});
+      calEventos.push({fecha:c.fecha, min:_calMinDesde(c.hora_inicio), horaTxt:(c.hora_inicio||'').slice(0,5)+(c.hora_fin?(' – '+c.hora_fin.slice(0,5)):''), titulo:(c.nombre_asistente||c.contacto_nombre||c.servicio||'Cita'), sub:[c.servicio,c.tecnica_nombre].filter(Boolean).join(' · '), src:'sistema', estado:c.estado, cita:c});
     });
     gcal.forEach(function(e){
       var allDay=!(e.start&&e.start.dateTime), fecha, min, horaTxt, hIni='', hFin='';
@@ -1548,7 +1548,8 @@ function calEditar(id){
   if(!e) return;
   var c=e.cita, estilo='width:100%;padding:8px 10px;background:#2a3942;border:none;border-radius:6px;color:#e9edef;font-size:13px;box-sizing:border-box', lbl='display:block;color:#8696a0;font-size:12px;margin:10px 0 4px';
   document.getElementById('calEditBody').innerHTML=
-    '<div style="color:#e9edef;font-size:13px;background:#0b141a;border-radius:8px;padding:10px;margin-bottom:4px">Cliente: '+_calEsc(c.contacto_nombre||'—')+'</div>'+
+    '<div style="color:#e9edef;font-size:13px;background:#0b141a;border-radius:8px;padding:10px;margin-bottom:4px">Chat: '+_calEsc(c.contacto_nombre||'—')+'</div>'+
+    '<label style="'+lbl+'">A nombre de</label><input type="text" id="ce_asistente" value="'+_calEsc(c.nombre_asistente||c.contacto_nombre||'')+'" style="'+estilo+'">'+
     '<label style="'+lbl+'">Técnica</label><select id="ce_tec" style="'+estilo+'"><option value="">Sin asignar</option>'+calTecnicas.map(function(t){return '<option value="'+t.id+'"'+(String(c.tecnica_id||'')===String(t.id)?' selected':'')+'>'+_calEsc(t.nombre)+'</option>';}).join('')+'</select>'+
     '<div style="display:flex;gap:8px"><div style="flex:1"><label style="'+lbl+'">Fecha</label><input type="date" id="ce_fecha" value="'+_calEsc(c.fecha||'')+'" style="'+estilo+'"></div>'+
       '<div style="width:92px"><label style="'+lbl+'">Hora</label><input type="time" id="ce_ini" value="'+_calEsc((c.hora_inicio||'').slice(0,5))+'" style="'+estilo+'"></div>'+
@@ -1565,7 +1566,7 @@ function calEditar(id){
 function calCerrarEdit(){ document.getElementById('calEditModal').style.display='none'; }
 function calGuardarEdit(id){
   var msg=document.getElementById('ce_msg');
-  var datos={ contacto_id:document.getElementById('calEditModal').__cid||null, tecnica_id:document.getElementById('ce_tec').value||null, fecha:document.getElementById('ce_fecha').value, hora_inicio:document.getElementById('ce_ini').value, hora_fin:document.getElementById('ce_fin').value||null, servicio:document.getElementById('ce_serv').value||null, estado:document.getElementById('ce_estado').value, notas:document.getElementById('ce_notas').value||null };
+  var datos={ contacto_id:document.getElementById('calEditModal').__cid||null, tecnica_id:document.getElementById('ce_tec').value||null, fecha:document.getElementById('ce_fecha').value, hora_inicio:document.getElementById('ce_ini').value, hora_fin:document.getElementById('ce_fin').value||null, servicio:document.getElementById('ce_serv').value||null, estado:document.getElementById('ce_estado').value, notas:document.getElementById('ce_notas').value||null, nombre_asistente:(document.getElementById('ce_asistente')||{}).value||null };
   if(!datos.fecha||!datos.hora_inicio){ msg.textContent='Fecha y hora son obligatorias'; msg.style.color='#f15c6d'; return; }
   msg.textContent='Guardando…'; msg.style.color='#f0b429';
   fetch('/api/citas/'+id,{method:'PUT',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify(datos)})
@@ -3045,6 +3046,8 @@ function abrirAgendarCita(tel){
         '<div><span style="color:#8696a0">Cliente:</span> '+(ctx.contacto_nombre || ('+'+tel))+'</div>'+
         '<div style="margin-top:4px"><span style="color:#8696a0">Sucursal:</span> '+(ctx.sucursal || 'sin asignar')+'</div>'+
       '</div>'+
+      '<label style="'+_agLabel+'">A nombre de <span style="color:#667781">(la clienta o su acompañante)</span></label>'+
+      '<input type="text" id="ag_asistente" value="'+String(ctx.contacto_nombre||'').replace(/"/g,"&quot;")+'" placeholder="Nombre de quien asiste" style="'+_agEstilo+'">'+
       '<label style="'+_agLabel+'">Tecnica</label>'+
       '<select id="ag_tecnica" style="'+_agStyleSel()+'">'+
         '<option value="">Sin asignar</option>'+
@@ -3060,11 +3063,17 @@ function abrirAgendarCita(tel){
       '<label style="'+_agLabel+'">Notas</label>'+
       '<textarea id="ag_notas" rows="2" placeholder="Opcional" style="'+_agEstilo+';resize:vertical"></textarea>'+
       '<div id="ag_conflicto" style="display:none;font-size:12px;color:#f0b429;background:#2a2200;border:1px solid #5c4a00;border-radius:8px;padding:8px 10px;margin-top:10px;line-height:1.4"></div>'+
-      '<button id="ag_guardar" style="width:100%;margin-top:14px;padding:10px;background:#00a884;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">Agendar</button>'+
+      '<div style="display:flex;gap:8px;margin-top:14px">'+
+        '<button id="ag_guardar" style="flex:1;padding:10px;background:#00a884;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">Agendar</button>'+
+        '<button id="ag_guardar_mas" title="Guarda esta cita y deja el formulario listo para agendar otra (ej. la acompañante)" style="flex-shrink:0;padding:10px 12px;background:#2a3942;color:#e9edef;border:1px solid #3d4f58;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">＋ Otra más</button>'+
+      '</div>'+
       '<p id="ag_msg" style="font-size:12px;text-align:center;margin:8px 0 0;min-height:16px"></p>';
 
     document.getElementById('ag_guardar').onclick = function(){
-      guardarCitaChat(tel, ctx, modal);
+      guardarCitaChat(tel, ctx, modal, false);
+    };
+    document.getElementById('ag_guardar_mas').onclick = function(){
+      guardarCitaChat(tel, ctx, modal, true);
     };
     // Aviso de citas encimadas: revisar al cambiar técnica/fecha/hora
     ['ag_tecnica','ag_fecha','ag_hora','ag_hora_fin'].forEach(function(id){
@@ -3130,9 +3139,10 @@ function agVerificarConflicto(ctx){
   }).catch(function(){ box.style.display='none'; });
 }
 
-function guardarCitaChat(tel, ctx, modal){
+function guardarCitaChat(tel, ctx, modal, mantenerAbierto){
   var msg = document.getElementById('ag_msg');
   var btn = document.getElementById('ag_guardar');
+  var btnMas = document.getElementById('ag_guardar_mas');
   var fecha = document.getElementById('ag_fecha').value;
   var hora = document.getElementById('ag_hora').value;
   if(!fecha || !hora){ msg.textContent='Fecha y hora son obligatorias'; msg.style.color='#f15c6d'; return; }
@@ -3150,28 +3160,40 @@ function guardarCitaChat(tel, ctx, modal){
     hora_fin: document.getElementById('ag_hora_fin').value || null,
     servicio: document.getElementById('ag_servicio').value || null,
     notas: document.getElementById('ag_notas').value || null,
+    nombre_asistente: (document.getElementById('ag_asistente')||{}).value || null,
     numero_id: ctx.numero_id,
     sucursal: ctx.sucursal || null
   };
-  btn.disabled = true;
+  btn.disabled = true; if(btnMas) btnMas.disabled = true;
   msg.textContent = 'Agendando...'; msg.style.color='#f0b429';
 
   fetch('/api/citas', {method:'POST', headers:{'Content-Type':'application/json', Authorization:'Bearer '+token}, body:JSON.stringify(datos)})
   .then(function(r){ return r.json(); })
   .then(function(d){
     if(d.ok){
-      msg.textContent = 'Cita agendada'; msg.style.color='#00a884';
-      setTimeout(function(){ modal.remove(); }, 900);
       // Si la Agenda está abierta, refrescarla para que la cita aparezca al instante
       var secCal=document.getElementById('msec-calendario');
       if(secCal && secCal.classList.contains('active') && typeof calCargar==='function') calCargar();
+      if(mantenerAbierto){
+        // Deja el formulario listo para la siguiente persona (misma fecha/técnica),
+        // limpia nombre y servicio para el acompañante.
+        btn.disabled=false; if(btnMas) btnMas.disabled=false;
+        var a=document.getElementById('ag_asistente'); if(a){ a.value=''; a.focus(); }
+        var s=document.getElementById('ag_servicio'); if(s) s.value='';
+        var n=document.getElementById('ag_notas'); if(n) n.value='';
+        msg.textContent = '✓ Cita agendada. Agrega la siguiente…'; msg.style.color='#00a884';
+        agVerificarConflicto(ctx);
+      } else {
+        msg.textContent = 'Cita agendada'; msg.style.color='#00a884';
+        setTimeout(function(){ modal.remove(); }, 900);
+      }
     } else {
-      btn.disabled = false;
+      btn.disabled = false; if(btnMas) btnMas.disabled = false;
       msg.textContent = d.error || 'No se pudo agendar'; msg.style.color='#f15c6d';
     }
   })
   .catch(function(){
-    btn.disabled = false;
+    btn.disabled = false; if(btnMas) btnMas.disabled = false;
     msg.textContent = 'Error de conexion'; msg.style.color='#f15c6d';
   });
 }

@@ -147,6 +147,8 @@ db.serialize(() => {
     });
   };
   ensureColumns('usuarios', [['telefono', 'TEXT'], ['foto_url', 'TEXT'], ['ultimo_visto', 'DATETIME']]);
+  // nombre_asistente: para agendar a nombre de otra persona (ej. acompañante) desde el mismo chat.
+  ensureColumns('citas', [['nombre_asistente', 'TEXT']]);
   ensureColumns('plantillas', [
     ['idioma', "TEXT DEFAULT 'es'"],
     ['botones', 'TEXT'],  // JSON con los textos de los botones de respuesta rapida
@@ -2334,14 +2336,14 @@ app.get('/api/citas', auth, (req, res) => {
 
 // Crear cita
 app.post('/api/citas', auth, requireRole('admin', 'supervisor', 'recepcionista'), async (req, res) => {
-  const { contacto_id, tecnica_id, fecha, hora_inicio, hora_fin, servicio, notas, numero_id } = req.body;
+  const { contacto_id, tecnica_id, fecha, hora_inicio, hora_fin, servicio, notas, numero_id, nombre_asistente } = req.body;
   if (!fecha || !hora_inicio) return res.status(400).json({ error: 'Fecha y hora son requeridas' });
   // Si no la mandan, deducir la sucursal del numero de WhatsApp del chat
   const sucursal = req.body.sucursal || await resolverSucursal(numero_id, req.user.sucursal);
   db.run(
-    `INSERT INTO citas (contacto_id, tecnica_id, recepcionista_id, numero_id, sucursal, fecha, hora_inicio, hora_fin, servicio, notas, estado)
-     VALUES (?,?,?,?,?,?,?,?,?,?,'pendiente')`,
-    [contacto_id || null, tecnica_id || null, req.user.id, numero_id || null, sucursal, fecha, hora_inicio, hora_fin || null, servicio || null, notas || null],
+    `INSERT INTO citas (contacto_id, tecnica_id, recepcionista_id, numero_id, sucursal, fecha, hora_inicio, hora_fin, servicio, notas, nombre_asistente, estado)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,'pendiente')`,
+    [contacto_id || null, tecnica_id || null, req.user.id, numero_id || null, sucursal, fecha, hora_inicio, hora_fin || null, servicio || null, notas || null, (nombre_asistente || '').trim() || null],
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
       const citaId = this.lastID;
@@ -2394,10 +2396,10 @@ app.get('/api/agenda/contexto', auth, async (req, res) => {
 
 // Actualizar cita
 app.put('/api/citas/:id', auth, requireRole('admin', 'supervisor', 'recepcionista'), (req, res) => {
-  const { contacto_id, tecnica_id, fecha, hora_inicio, hora_fin, servicio, notas, estado } = req.body;
+  const { contacto_id, tecnica_id, fecha, hora_inicio, hora_fin, servicio, notas, estado, nombre_asistente } = req.body;
   db.run(
-    `UPDATE citas SET contacto_id=?, tecnica_id=?, fecha=?, hora_inicio=?, hora_fin=?, servicio=?, notas=?, estado=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-    [contacto_id || null, tecnica_id || null, fecha, hora_inicio, hora_fin || null, servicio || null, notas || null, estado || 'pendiente', req.params.id],
+    `UPDATE citas SET contacto_id=?, tecnica_id=?, fecha=?, hora_inicio=?, hora_fin=?, servicio=?, notas=?, nombre_asistente=?, estado=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+    [contacto_id || null, tecnica_id || null, fecha, hora_inicio, hora_fin || null, servicio || null, notas || null, (nombre_asistente || '').trim() || null, estado || 'pendiente', req.params.id],
     function(err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ ok: true });
@@ -2956,7 +2958,8 @@ async function notificarTecnicaCitaNueva(citaId) {
     }
 
     const fecha = new Date(cita.fecha + 'T12:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
-    const mensaje = `🌸 *Nueva cita agendada*\n\nHola ${cita.tecnica_nombre}, tienes una nueva cita:\n\n📅 *Fecha:* ${fecha}\n🕐 *Hora:* ${cita.hora_inicio?.slice(0,5)}${cita.hora_fin ? ' – ' + cita.hora_fin.slice(0,5) : ''}\n👤 *Clienta:* ${cita.contacto_nombre || 'Sin nombre'}\n✂️ *Servicio:* ${cita.servicio || 'Sin especificar'}${cita.notas ? '\n📝 *Notas:* ' + cita.notas : ''}\n\nAgendada por: ${cita.recepcionista_nombre || 'Sistema'}`;
+    const quien = cita.nombre_asistente || cita.contacto_nombre || 'Sin nombre';
+    const mensaje = `🌸 *Nueva cita agendada*\n\nHola ${cita.tecnica_nombre}, tienes una nueva cita:\n\n📅 *Fecha:* ${fecha}\n🕐 *Hora:* ${cita.hora_inicio?.slice(0,5)}${cita.hora_fin ? ' – ' + cita.hora_fin.slice(0,5) : ''}\n👤 *Clienta:* ${quien}\n✂️ *Servicio:* ${cita.servicio || 'Sin especificar'}${cita.notas ? '\n📝 *Notas:* ' + cita.notas : ''}\n\nAgendada por: ${cita.recepcionista_nombre || 'Sistema'}`;
 
     await enviarMensajeWhatsApp(sucursal.phone_number_id, sucursal.token, telefonoTecnica, mensaje);
     console.log(`[NOTIF] Mensaje enviado a técnica ${cita.tecnica_nombre} por cita ${citaId}`);

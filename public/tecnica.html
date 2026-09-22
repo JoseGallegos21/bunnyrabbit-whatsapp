@@ -353,7 +353,7 @@ async function cargarHoy() {
           <div class="hora-fin">${c.hora_fin ? '→ ' + c.hora_fin.slice(0,5) : ''}</div>
         </div>
         <div class="cita-info">
-          <div class="cita-clienta">${c.contacto_nombre || 'Sin clienta asignada'}</div>
+          <div class="cita-clienta">${c.nombre_asistente || c.contacto_nombre || 'Sin clienta asignada'}</div>
           ${c.telefono ? `<div class="cita-telefono">📱 ${c.telefono}</div>` : ''}
           <div class="cita-servicio">✂️ ${c.servicio || 'Sin especificar'}</div>
           ${c.notas ? `<div class="cita-notas">📝 ${c.notas}</div>` : ''}
@@ -518,7 +518,7 @@ async function cargarSemana() {
     const citasHtml = citasDia.map(c => `
       <div class="mini-cita ${c.estado}">
         <div class="mc-hora">${c.hora_inicio?.slice(0,5) || ''}</div>
-        <div class="mc-nombre">${c.contacto_nombre || 'Sin clienta'}</div>
+        <div class="mc-nombre">${c.nombre_asistente || c.contacto_nombre || 'Sin clienta'}</div>
       </div>
     `).join('');
 
@@ -563,7 +563,7 @@ function abrirDiaModal(fechaStr){
     .concat(citas.map(c => ({
       hora: c.hora_inicio ? c.hora_inicio.slice(0,5) : '',
       orden: c.hora_inicio || '',
-      nombre: c.contacto_nombre || 'Sin clienta',
+      nombre: c.nombre_asistente || c.contacto_nombre || 'Sin clienta',
       desc: c.servicio || ''
     })))
     .concat(gcal.map(e => {

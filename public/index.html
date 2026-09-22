@@ -3062,6 +3062,16 @@ function abrirAgendarCita(tel){
       '<input type="text" id="ag_servicio" placeholder="Ej: Manicure" style="'+_agEstilo+'">'+
       '<label style="'+_agLabel+'">Notas</label>'+
       '<textarea id="ag_notas" rows="2" placeholder="Opcional" style="'+_agEstilo+';resize:vertical"></textarea>'+
+      // Confirmación al cliente: vista previa (como la verá en WhatsApp) + toggle de envío
+      '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:14px 0 6px;color:#e9edef;font-size:13px">'+
+        '<input type="checkbox" id="ag_enviar_conf" checked style="width:16px;height:16px;accent-color:#00a884"> Enviar confirmación al cliente por WhatsApp'+
+      '</label>'+
+      '<div id="ag_preview_wrap" style="background:#0b141a;border:1px solid #2a3942;border-radius:10px;padding:10px">'+
+        '<div style="font-size:10px;color:#8696a0;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Vista previa · así lo verá el cliente</div>'+
+        '<div style="display:flex;justify-content:flex-end">'+
+          '<div id="ag_preview" style="background:#005c4b;color:#e9edef;border-radius:10px 10px 2px 10px;padding:8px 10px;font-size:12.5px;line-height:1.45;max-width:88%;white-space:pre-wrap;word-break:break-word"></div>'+
+        '</div>'+
+      '</div>'+
       '<div id="ag_conflicto" style="display:none;font-size:12px;color:#f0b429;background:#2a2200;border:1px solid #5c4a00;border-radius:8px;padding:8px 10px;margin-top:10px;line-height:1.4"></div>'+
       '<div style="display:flex;gap:8px;margin-top:14px">'+
         '<button id="ag_guardar" style="flex:1;padding:10px;background:#00a884;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600">Agendar</button>'+
@@ -3075,12 +3085,19 @@ function abrirAgendarCita(tel){
     document.getElementById('ag_guardar_mas').onclick = function(){
       guardarCitaChat(tel, ctx, modal, true);
     };
-    // Aviso de citas encimadas: revisar al cambiar técnica/fecha/hora
+    // Aviso de citas encimadas + vista previa de la confirmación al cliente
     ['ag_tecnica','ag_fecha','ag_hora','ag_hora_fin'].forEach(function(id){
       var el=document.getElementById(id);
-      if(el) el.addEventListener('change',function(){ agVerificarConflicto(ctx); });
+      if(el) el.addEventListener('change',function(){ agVerificarConflicto(ctx); agActualizarPreview(ctx); });
     });
+    ['ag_asistente','ag_servicio'].forEach(function(id){
+      var el=document.getElementById(id);
+      if(el) el.addEventListener('input',function(){ agActualizarPreview(ctx); });
+    });
+    var chkConf=document.getElementById('ag_enviar_conf');
+    if(chkConf) chkConf.addEventListener('change',function(){ document.getElementById('ag_preview_wrap').style.display=this.checked?'block':'none'; });
     agVerificarConflicto(ctx);
+    agActualizarPreview(ctx);
   })
   .catch(function(){
     var b = document.getElementById('ag_body');
@@ -3089,6 +3106,42 @@ function abrirAgendarCita(tel){
 }
 
 function _agStyleSel(){ return _agEstilo + ';cursor:pointer'; }
+
+// Arma el texto de confirmación de cita que se le manda al cliente (formato WhatsApp).
+function agTextoConfirmacion(ctx){
+  var nombre=((document.getElementById('ag_asistente')||{}).value||ctx.contacto_nombre||'').trim();
+  var fecha=(document.getElementById('ag_fecha')||{}).value||'';
+  var hora=((document.getElementById('ag_hora')||{}).value||'').slice(0,5);
+  var fin=((document.getElementById('ag_hora_fin')||{}).value||'').slice(0,5);
+  var servicio=((document.getElementById('ag_servicio')||{}).value||'').trim();
+  var tecSel=document.getElementById('ag_tecnica');
+  var tecnica=(tecSel && tecSel.value)?tecSel.options[tecSel.selectedIndex].textContent.trim():'';
+  var sucursal=(ctx.sucursal||'').trim();
+  var fechaTxt='';
+  if(fecha){ var p=fecha.split('-'); try{ fechaTxt=new Date(Date.UTC(+p[0],+p[1]-1,+p[2],12)).toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long',timeZone:'UTC'}); }catch(e){ fechaTxt=fecha; } }
+  var horaTxt=hora+(fin?(' – '+fin):'');
+  var L=[];
+  L.push('💜 *Confirmación de tu cita* ✨');
+  L.push('');
+  L.push('¡Hola'+(nombre?(' '+nombre):'')+'! Te confirmamos tu cita'+(sucursal?(' en *Caralinda '+sucursal+'*'):'')+':');
+  L.push('');
+  if(fechaTxt) L.push('📆 *Fecha:* '+fechaTxt);
+  if(horaTxt.trim()) L.push('🕐 *Hora:* '+horaTxt);
+  if(servicio) L.push('✂️ *Servicio:* '+servicio);
+  if(tecnica) L.push('👩‍🎨 *Con:* '+tecnica);
+  L.push('');
+  L.push('Por favor llega 5 minutos antes 🙏');
+  L.push('¡Te esperamos! 🌸');
+  return L.join('\n');
+}
+// Pinta la vista previa como burbuja de WhatsApp (convierte *negritas* y saltos de línea).
+function agActualizarPreview(ctx){
+  var box=document.getElementById('ag_preview'); if(!box) return;
+  var txt=agTextoConfirmacion(ctx);
+  var html=txt.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*([^*]+)\*/g,'<b>$1</b>').replace(/\n/g,'<br>');
+  box.innerHTML=html+'<span style="font-size:10px;color:#8fb9ae;margin-left:6px">✓✓</span>';
+}
 
 // ── Aviso de citas encimadas al agendar ──
 function _agMin(hhmm){ var m=String(hhmm||'').match(/(\d{1,2}):(\d{2})/); return m?(+m[1]*60+ +m[2]):null; }
@@ -3164,6 +3217,9 @@ function guardarCitaChat(tel, ctx, modal, mantenerAbierto){
     numero_id: ctx.numero_id,
     sucursal: ctx.sucursal || null
   };
+  // Confirmación al cliente: capturar el texto ANTES de limpiar el formulario
+  var enviarConf = (document.getElementById('ag_enviar_conf')||{}).checked;
+  var confTxt = enviarConf ? agTextoConfirmacion(ctx) : null;
   btn.disabled = true; if(btnMas) btnMas.disabled = true;
   msg.textContent = 'Agendando...'; msg.style.color='#f0b429';
 
@@ -3171,6 +3227,8 @@ function guardarCitaChat(tel, ctx, modal, mantenerAbierto){
   .then(function(r){ return r.json(); })
   .then(function(d){
     if(d.ok){
+      // Mandar la confirmación al chat del cliente (si se pidió)
+      if(confTxt && typeof enviarMensaje==='function') enviarMensaje(tel, confTxt);
       // Si la Agenda está abierta, refrescarla para que la cita aparezca al instante
       var secCal=document.getElementById('msec-calendario');
       if(secCal && secCal.classList.contains('active') && typeof calCargar==='function') calCargar();

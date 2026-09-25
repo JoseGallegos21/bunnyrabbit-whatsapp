@@ -71,6 +71,11 @@ db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS biblioteca_imagenes (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, url TEXT, subido_por INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
   db.run(`CREATE TABLE IF NOT EXISTS respuestas_rapidas (id INTEGER PRIMARY KEY AUTOINCREMENT, usuario_id INTEGER, titulo TEXT, contenido TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
   db.run(`CREATE TABLE IF NOT EXISTS facebook_capi_config (id INTEGER PRIMARY KEY AUTOINCREMENT, pixel_id TEXT, access_token TEXT, test_event_code TEXT, api_version TEXT DEFAULT 'v21.0', triggers TEXT DEFAULT '[]', activo INTEGER DEFAULT 1, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  // Atribucion de landing: el embed de tracking agrega al primer mensaje de WhatsApp un
+  // bloque '#ref lead_id=… fbp=… fbc=… utm_campaign=…'. Se guarda por telefono para que
+  // el Lead de Conversions API use el MISMO event_id que el Lead del navegador (dedup)
+  // y lleve fbp/fbc (mejor calidad de coincidencia en Meta).
+  db.run(`CREATE TABLE IF NOT EXISTS contactos_atribucion (id INTEGER PRIMARY KEY AUTOINCREMENT, telefono TEXT UNIQUE, lead_id TEXT, fbp TEXT, fbc TEXT, utm_source TEXT, utm_medium TEXT, utm_campaign TEXT, utm_content TEXT, utm_term TEXT, numero_id TEXT, capi_lead_enviado INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
   db.run(`CREATE TABLE IF NOT EXISTS facebook_capi_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, contacto_nombre TEXT, contacto_telefono TEXT, evento_tipo TEXT, etapa TEXT, event_id TEXT, status_code INTEGER, respuesta TEXT, numero_id TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
   db.run(`CREATE TABLE IF NOT EXISTS google_calendar_config (id INTEGER PRIMARY KEY AUTOINCREMENT, sucursal TEXT UNIQUE, calendar_id TEXT, access_token TEXT, refresh_token TEXT, activo INTEGER DEFAULT 1)`);
   // CPL: hoja de Google (una por sucursal) con las compras/citas que se cruzan al CRM.
@@ -1000,7 +1005,40 @@ app.get('/webhook', (req, res) => {
 // Detecta mensajes autogenerados por anuncios con formulario (Meta los redacta por el lead).
 // Señal principal: `referral` (Meta lo incluye cuando el chat nace de un anuncio).
 // Respaldo: el texto de plantilla que Meta usa al enviarlos.
+// Lee el bloque '#ref k=v k=v…' que agrega la landing al mensaje de WhatsApp.
+function parseRefBlock(texto) {
+  const m = /#ref\s+([^\n]+)/i.exec(texto || '');
+  if (!m) return null;
+  const out = {};
+  for (const par of m[1].trim().split(/\s+/)) {
+    const i = par.indexOf('=');
+    if (i <= 0) continue;
+    const k = par.slice(0, i).toLowerCase(), v = par.slice(i + 1).trim();
+    if (/^(lead_id|fbp|fbc|utm_source|utm_medium|utm_campaign|utm_content|utm_term)$/.test(k) && v && v !== '-') out[k] = v.slice(0, 200);
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+// Guarda la atribucion del contacto (solo la primera vez) y, si trae lead_id, manda el
+// Lead por CAPI con ese mismo event_id para que Meta lo deduplique con el del navegador.
+function guardarAtribucionYLead(telefono, numero_id, ref, nombre) {
+  db.run(`INSERT INTO contactos_atribucion (telefono, lead_id, fbp, fbc, utm_source, utm_medium, utm_campaign, utm_content, utm_term, numero_id)
+          VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(telefono) DO NOTHING`,
+    [telefono, ref.lead_id || null, ref.fbp || null, ref.fbc || null, ref.utm_source || null, ref.utm_medium || null, ref.utm_campaign || null, ref.utm_content || null, ref.utm_term || null, numero_id],
+    function (err) {
+      if (err) return console.error('[ATRIB] error guardando:', err.message);
+      if (!this.changes || !ref.lead_id) return; // ya existia o no hay lead_id: no duplicar el Lead
+      sendCapiEvent('Lead', { nombre: nombre || null, telefono, etapa: 'Nuevo', numero_id, event_id: ref.lead_id, fbp: ref.fbp, fbc: ref.fbc })
+        .then(r => {
+          if (r && r.ok) db.run('UPDATE contactos_atribucion SET capi_lead_enviado=1 WHERE telefono=?', [telefono]);
+          console.log('[ATRIB] Lead CAPI', telefono, JSON.stringify(r));
+        })
+        .catch(e => console.error('[ATRIB] Lead CAPI error:', e.message));
+    });
+}
+
 function origenDelMensaje(msg, texto) {
+  if (/#ref\s+/i.test(texto || '')) return 'landing';
   if (msg.referral) return 'formulario_ads';
   if (/Complet[eé] el formulario|I filled out your form/i.test(texto || '')) return 'formulario_ads';
   return null;
@@ -1202,6 +1240,9 @@ app.post('/webhook', verificarFirmaMeta, (req, res) => {
           db.run("UPDATE contactos SET etapa='Nuevo', etapa_desde=CURRENT_TIMESTAMP WHERE telefono=? AND etapa='Perdido'", [telefono]);
           // Guardar el nombre de perfil solo si el contacto aun no tiene nombre (no pisa uno manual).
           if (perfiles[telefono]) db.run("UPDATE contactos SET nombre=? WHERE telefono=? AND (nombre IS NULL OR nombre='')", [perfiles[telefono], telefono]);
+          // Atribucion de landing (#ref lead_id/fbp/fbc/utm) -> guardar + Lead CAPI deduplicado
+          const refBlock = parseRefBlock(texto);
+          if (refBlock) guardarAtribucionYLead(telefono, numero_id, refBlock, perfiles[telefono]);
           // Anuncio de origen: si el chat nace de un anuncio (Click-to-WhatsApp), Meta
           // manda `referral` con el link y el titular. Lo guardamos como primer contacto
           // publicitario (no lo pisamos si ya tenia uno).
@@ -2057,20 +2098,29 @@ async function sendCapiEvent(eventName, contacto) {
       }
     });
 
-    const eventId = 'ev_' + Math.random().toString(36).substring(2, 9);
+    // Atribucion guardada del contacto (fbp/fbc/lead_id del bloque #ref de la landing)
+    const atrib = (contacto.fbp || contacto.fbc) ? contacto : await new Promise((resolve) => {
+      db.get('SELECT lead_id, fbp, fbc FROM contactos_atribucion WHERE telefono=?', [contacto.telefono], (e, row) => resolve(row || {}));
+    });
+    // event_id: el de la landing (lead_id) para deduplicar con el Lead del navegador; si no, uno nuevo
+    const eventId = contacto.event_id || (eventName === 'Lead' && atrib.lead_id) || ('ev_' + Math.random().toString(36).substring(2, 9));
+    const userData = {
+      ph: [hashData(contacto.telefono)],
+      fn: [hashData(contacto.nombre ? contacto.nombre.split(' ')[0] : null)],
+      ln: [hashData(contacto.nombre && contacto.nombre.split(' ')[1] ? contacto.nombre.split(' ')[1] : null)]
+    };
+    if (atrib.fbp) userData.fbp = atrib.fbp;
+    if (atrib.fbc) userData.fbc = atrib.fbc;
     const payload = {
       data: [{
         event_name: eventName,
         event_time: Math.floor(Date.now() / 1000),
         event_id: eventId,
         action_source: 'website',
-        user_data: {
-          ph: [hashData(contacto.telefono)],
-          fn: [hashData(contacto.nombre ? contacto.nombre.split(' ')[0] : null)],
-          ln: [hashData(contacto.nombre && contacto.nombre.split(' ')[1] ? contacto.nombre.split(' ')[1] : null)]
-        }
+        user_data: userData
       }]
     };
+    if (contacto.event_source_url) payload.data[0].event_source_url = contacto.event_source_url;
 
     if (config.test_event_code) {
       payload.test_event_code = config.test_event_code;

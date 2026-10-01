@@ -83,6 +83,45 @@ db.serialize(() => {
   // puede (lo que genera una alerta para el gerente). Una fila por tecnica y dia.
   db.run(`CREATE TABLE IF NOT EXISTS confirmaciones_dia (id INTEGER PRIMARY KEY AUTOINCREMENT, usuario_id INTEGER, usuario_nombre TEXT, sucursal TEXT, fecha TEXT, estado TEXT, motivo TEXT, visto_gerente INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(usuario_id, fecha))`);
 
+  // ===== SISTEMA DE CORTES (caja + nomina) =====
+  // servicios: el registro de cada servicio realizado (reemplaza el Google Form).
+  // Guarda el desglose de como pago la clienta y calcula la comision de la tecnica.
+  db.run(`CREATE TABLE IF NOT EXISTS servicios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sucursal TEXT, numero_id TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+    tecnica_id INTEGER, tecnica_nombre TEXT,
+    cliente TEXT, contacto_id INTEGER, telefono TEXT,
+    tipo_servicio TEXT, servicio TEXT, precio REAL DEFAULT 0,
+    pago_efectivo REAL DEFAULT 0, pago_tarjeta REAL DEFAULT 0, pago_transfer REAL DEFAULT 0, pago_anticipo REAL DEFAULT 0,
+    af_tarjeta REAL DEFAULT 0, af_transfer REAL DEFAULT 0,
+    propina_tarjeta REAL DEFAULT 0, propina_transfer REAL DEFAULT 0,
+    pigmento TEXT, cartuchos TEXT, observaciones TEXT,
+    comision REAL DEFAULT 0, comision_tasa REAL DEFAULT 0,
+    anulado INTEGER DEFAULT 0, creado_por INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  // egresos: gastos para el corte de caja (efectivo/transferencia).
+  db.run(`CREATE TABLE IF NOT EXISTS corte_egresos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, sucursal TEXT, numero_id TEXT, fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+    concepto TEXT, cantidad REAL DEFAULT 0, tipo TEXT DEFAULT 'Efectivo',
+    creado_por INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  // tasas de comision por tipo de servicio (sucursal NULL = aplica a todas).
+  db.run(`CREATE TABLE IF NOT EXISTS corte_tasas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, sucursal TEXT, tipo_servicio TEXT, tasa REAL DEFAULT 0, UNIQUE(sucursal, tipo_servicio))`);
+  // tabla de bonos: venta semanal de la sucursal -> bono, por grupo.
+  db.run(`CREATE TABLE IF NOT EXISTS corte_bonos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, grupo INTEGER DEFAULT 1, venta_min REAL, venta_max REAL, bono REAL)`);
+  // a que grupo de bonos pertenece cada sucursal.
+  db.run(`CREATE TABLE IF NOT EXISTS corte_sucursal_grupo (sucursal TEXT PRIMARY KEY, grupo INTEGER DEFAULT 1)`);
+  // ajustes de nomina por colaborador y periodo (retardos, multas, propinas, bonos, pre-pago, sueldo).
+  db.run(`CREATE TABLE IF NOT EXISTS corte_ajustes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, sucursal TEXT, colaborador_id INTEGER, colaborador_nombre TEXT,
+    periodo_inicio TEXT, periodo_fin TEXT,
+    retardos REAL DEFAULT 0, multas REAL DEFAULT 0, propinas REAL DEFAULT 0,
+    bono_semanal REAL DEFAULT 0, bono_mensual REAL DEFAULT 0, pre_pago REAL DEFAULT 0, sueldo REAL DEFAULT 0,
+    notas TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(colaborador_id, periodo_inicio, periodo_fin))`);
+  setTimeout(seedCorteDefaults, 1500);
+
   // Tarifas de Meta por pais y categoria (USD por mensaje entregado).
   // Editables: Meta actualiza su tarifario y dejarlas fijas seria garantizar numeros viejos.
   db.run(`CREATE TABLE IF NOT EXISTS tarifas_meta (id INTEGER PRIMARY KEY AUTOINCREMENT, pais TEXT, categoria TEXT, precio_usd REAL, actualizado DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(pais, categoria))`);
@@ -195,6 +234,11 @@ db.serialize(() => {
     ['mensaje_wamid', 'TEXT']   // id del mensaje que se espera, para detectar "no entregado"
   ]);
   ensureColumns('etiquetas', [['usuario_id', 'INTEGER']]);
+  // Corte/nomina: sueldo base del colaborador y como se le paga.
+  ensureColumns('usuarios', [
+    ['sueldo_base', 'REAL DEFAULT 0'],          // sueldo fijo por periodo (ej. recepcionista)
+    ['tipo_pago', "TEXT DEFAULT 'comision'"]     // comision | sueldo | mixto
+  ]);
   ensureColumns('numeros', [
     ['waba_id', 'TEXT'],
     ['pixel_id', 'TEXT'], ['capi_token', 'TEXT'], ['capi_version', "TEXT DEFAULT 'v21.0'"],
@@ -215,6 +259,37 @@ db.serialize(() => {
   // para que no aparezca eternamente "en progreso".
   db.run("UPDATE difusiones SET estado='interrumpida' WHERE estado='enviando'");
 });
+
+// ==================== SISTEMA DE CORTES (helpers) ====================
+// Siembra las tasas de comision y la tabla de bonos (de la hoja "Sistema Cara
+// San Rafael 2.0") solo si estan vacias. Todo editable luego desde Admin.
+function seedCorteDefaults() {
+  db.get('SELECT COUNT(*) n FROM corte_tasas', (e, r) => {
+    if (!e && r && r.n === 0) {
+      [['Micropigmentación', 0.255], ['Pestañas', 0.2975]].forEach(t =>
+        db.run('INSERT OR IGNORE INTO corte_tasas (sucursal, tipo_servicio, tasa) VALUES (NULL,?,?)', t));
+      console.log('[CORTE] tasas de comision sembradas');
+    }
+  });
+  db.get('SELECT COUNT(*) n FROM corte_bonos', (e, r) => {
+    if (!e && r && r.n === 0) {
+      const g1 = [[30000,35000,1000],[35000,40000,1250],[40000,45000,2000],[45000,50000,2250],[50000,55000,3000],[55000,60000,3250],[60000,65000,4000],[65000,70000,4250],[70000,75000,5000]];
+      const g2 = [[25000,30000,1000],[30000,35000,1250],[35000,40000,2000]];
+      g1.forEach(b => db.run('INSERT INTO corte_bonos (grupo,venta_min,venta_max,bono) VALUES (1,?,?,?)', b));
+      g2.forEach(b => db.run('INSERT INTO corte_bonos (grupo,venta_min,venta_max,bono) VALUES (2,?,?,?)', b));
+      console.log('[CORTE] tabla de bonos sembrada');
+    }
+  });
+  db.run("INSERT OR IGNORE INTO corte_sucursal_grupo (sucursal, grupo) VALUES ('Caralinda San Rafael', 1)");
+}
+
+// Tasa de comision para un tipo de servicio (prefiere la de la sucursal, luego la global).
+function tasaComision(tipoServicio, sucursal) {
+  return new Promise(resolve => {
+    db.get("SELECT tasa FROM corte_tasas WHERE tipo_servicio=? AND (sucursal=? OR sucursal IS NULL) ORDER BY (sucursal IS NULL) LIMIT 1",
+      [tipoServicio || '', sucursal || null], (e, r) => resolve(r ? Number(r.tasa) : 0));
+  });
+}
 
 // ==================== COSTOS DE META ====================
 // Modelo por mensaje desde el 1-jul-2025:
@@ -2023,6 +2098,105 @@ app.get('/api/reportes/gasto', auth, requireRole('admin', 'supervisor'), async (
       tipo_cambio: tc || null
     });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ==================== SISTEMA DE CORTES (endpoints) ====================
+function nz(v) { const n = Number(v); return isNaN(n) ? 0 : n; }
+
+// Registrar un servicio realizado (fuente del corte). La comision se calcula sola.
+app.post('/api/servicios', auth, requireRole('tecnica', 'recepcionista', 'admin', 'supervisor'), async (req, res) => {
+  try {
+    const b = req.body || {};
+    let tecnica_id, tecnica_nombre;
+    if (req.user.rol === 'tecnica') { tecnica_id = req.user.id; tecnica_nombre = req.user.nombre; }
+    else {
+      tecnica_id = b.tecnica_id || null; tecnica_nombre = b.tecnica_nombre || null;
+      if (tecnica_id && !tecnica_nombre) { const u = await new Promise(r => db.get('SELECT nombre FROM usuarios WHERE id=?', [tecnica_id], (e, x) => r(x))); tecnica_nombre = u && u.nombre; }
+    }
+    const numero_id = (req.user.rol === 'tecnica' || req.user.rol === 'recepcionista') ? req.user.numero_id : (b.numero_id || req.user.numero_id || null);
+    let sucursal = b.sucursal || req.user.sucursal || null;
+    if (!sucursal && numero_id) { const n = await new Promise(r => db.get('SELECT sucursal FROM numeros WHERE phone_number_id=?', [numero_id], (e, x) => r(x))); sucursal = n && n.sucursal; }
+    if (!b.servicio && !b.tipo_servicio) return res.status(400).json({ error: 'Falta el servicio' });
+    const precio = nz(b.precio);
+    const tasa = await tasaComision(b.tipo_servicio, sucursal);
+    const comision = Math.round(precio * tasa * 100) / 100;
+    const campos = {
+      sucursal, numero_id, tecnica_id, tecnica_nombre,
+      cliente: b.cliente || null, contacto_id: b.contacto_id || null, telefono: b.telefono || null,
+      tipo_servicio: b.tipo_servicio || null, servicio: b.servicio || null, precio,
+      pago_efectivo: nz(b.pago_efectivo), pago_tarjeta: nz(b.pago_tarjeta), pago_transfer: nz(b.pago_transfer), pago_anticipo: nz(b.pago_anticipo),
+      af_tarjeta: nz(b.af_tarjeta), af_transfer: nz(b.af_transfer),
+      propina_tarjeta: nz(b.propina_tarjeta), propina_transfer: nz(b.propina_transfer),
+      pigmento: b.pigmento || null, cartuchos: b.cartuchos || null, observaciones: b.observaciones || null,
+      comision, comision_tasa: tasa, creado_por: req.user.id
+    };
+    const cols = Object.keys(campos);
+    const sql = `INSERT INTO servicios (${cols.join(',')}${b.fecha ? ', fecha' : ''}) VALUES (${cols.map(() => '?').join(',')}${b.fecha ? ', ?' : ''})`;
+    const vals = cols.map(c => campos[c]); if (b.fecha) vals.push(b.fecha);
+    const id = await new Promise((resolve, reject) => db.run(sql, vals, function (e) { e ? reject(e) : resolve(this.lastID); }));
+    res.json({ ok: true, id, comision, tasa });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Listar servicios (scope por rol: tecnica=los suyos, recepcionista=su numero, admin/supervisor=filtros)
+app.get('/api/servicios', auth, (req, res) => {
+  const { desde, hasta, tecnica_id, numero_id } = req.query;
+  const w = ['anulado=0']; const p = [];
+  if (req.user.rol === 'tecnica') { w.push('tecnica_id=?'); p.push(req.user.id); }
+  else if (req.user.rol === 'recepcionista') { w.push('numero_id=?'); p.push(req.user.numero_id); }
+  else { if (numero_id) { w.push('numero_id=?'); p.push(numero_id); } if (tecnica_id) { w.push('tecnica_id=?'); p.push(tecnica_id); } }
+  if (desde) { w.push('date(fecha)>=date(?)'); p.push(desde); }
+  if (hasta) { w.push('date(fecha)<=date(?)'); p.push(hasta); }
+  db.all(`SELECT * FROM servicios WHERE ${w.join(' AND ')} ORDER BY fecha DESC LIMIT 1000`, p, (e, rows) =>
+    e ? res.status(500).json({ error: e.message }) : res.json({ ok: true, servicios: rows || [] }));
+});
+
+// Anular un servicio (la tecnica solo puede anular los suyos)
+app.post('/api/servicios/:id/anular', auth, requireRole('tecnica', 'recepcionista', 'admin', 'supervisor'), (req, res) => {
+  const extra = req.user.rol === 'tecnica' ? ' AND tecnica_id=' + Number(req.user.id) : '';
+  db.run('UPDATE servicios SET anulado=1, updated_at=CURRENT_TIMESTAMP WHERE id=?' + extra, [req.params.id],
+    function (e) { e ? res.status(500).json({ error: e.message }) : res.json({ ok: true, anulados: this.changes }); });
+});
+
+// Mi corte (tecnica): sus servicios del periodo + comisiones, propinas, sueldo, bonos y subtotal a cobrar.
+app.get('/api/corte/mi-corte', auth, requireRole('tecnica', 'recepcionista', 'admin', 'supervisor'), async (req, res) => {
+  try {
+    const tid = (req.user.rol === 'tecnica') ? req.user.id : (req.query.tecnica_id || req.user.id);
+    const { desde, hasta } = req.query;
+    const w = ['anulado=0', 'tecnica_id=?']; const p = [tid];
+    if (desde) { w.push('date(fecha)>=date(?)'); p.push(desde); }
+    if (hasta) { w.push('date(fecha)<=date(?)'); p.push(hasta); }
+    const servicios = await new Promise(r => db.all(`SELECT * FROM servicios WHERE ${w.join(' AND ')} ORDER BY fecha`, p, (e, x) => r(x || [])));
+    const vendido = servicios.reduce((a, s) => a + nz(s.precio), 0);
+    const comisiones = servicios.reduce((a, s) => a + nz(s.comision), 0);
+    const propinas = servicios.reduce((a, s) => a + nz(s.propina_tarjeta) + nz(s.propina_transfer), 0);
+    const u = await new Promise(r => db.get('SELECT nombre, sueldo_base, tipo_pago FROM usuarios WHERE id=?', [tid], (e, x) => r(x || {})));
+    const sueldo = nz(u.sueldo_base);
+    const aj = await new Promise(r => db.get('SELECT * FROM corte_ajustes WHERE colaborador_id=? AND periodo_inicio=? AND periodo_fin=?', [tid, desde || '', hasta || ''], (e, x) => r(x || {})));
+    const bono_semanal = nz(aj.bono_semanal), bono_mensual = nz(aj.bono_mensual);
+    const retardos = nz(aj.retardos), multas = nz(aj.multas), pre_pago = nz(aj.pre_pago), propinasAj = nz(aj.propinas);
+    const totalPropinas = propinas + propinasAj;
+    const subtotal = comisiones + sueldo + totalPropinas + bono_semanal + bono_mensual - retardos - multas - pre_pago;
+    res.json({ ok: true, colaborador: u.nombre, desde, hasta, num_servicios: servicios.length, vendido, comisiones, propinas: totalPropinas, sueldo, bono_semanal, bono_mensual, retardos, multas, pre_pago, subtotal, servicios });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Egresos (gastos) para el corte de caja
+app.post('/api/corte/egresos', auth, requireRole('recepcionista', 'admin', 'supervisor'), (req, res) => {
+  const b = req.body || {};
+  const numero_id = (req.user.rol === 'recepcionista') ? req.user.numero_id : (b.numero_id || req.user.numero_id || null);
+  db.run('INSERT INTO corte_egresos (sucursal,numero_id,concepto,cantidad,tipo,creado_por,fecha) VALUES (?,?,?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP))',
+    [b.sucursal || req.user.sucursal || null, numero_id, b.concepto || null, nz(b.cantidad), b.tipo || 'Efectivo', req.user.id, b.fecha || null],
+    function (e) { e ? res.status(500).json({ error: e.message }) : res.json({ ok: true, id: this.lastID }); });
+});
+app.get('/api/corte/egresos', auth, requireRole('recepcionista', 'admin', 'supervisor'), (req, res) => {
+  const w = []; const p = [];
+  if (req.user.rol === 'recepcionista') { w.push('numero_id=?'); p.push(req.user.numero_id); }
+  else if (req.query.numero_id) { w.push('numero_id=?'); p.push(req.query.numero_id); }
+  if (req.query.desde) { w.push('date(fecha)>=date(?)'); p.push(req.query.desde); }
+  if (req.query.hasta) { w.push('date(fecha)<=date(?)'); p.push(req.query.hasta); }
+  db.all('SELECT * FROM corte_egresos' + (w.length ? ' WHERE ' + w.join(' AND ') : '') + ' ORDER BY fecha DESC LIMIT 500', p,
+    (e, rows) => e ? res.status(500).json({ error: e.message }) : res.json({ ok: true, egresos: rows || [] }));
 });
 
 // app.listen moved to end

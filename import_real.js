@@ -74,9 +74,9 @@ async function token() {
   for (let i = 0; i < pag.length; i++) {
     const r = pag[i]; const f = fecha(r[0]); if (!enRango(f)) continue;
     const nom = String(r[1] || '').trim(); const u = mapa[nom.toLowerCase()]; const tipo = String(r[3] || '').trim(); const cant = n(r[2]);
-    if (/^pagado$/i.test(tipo)) {
+    if (/^(pagado|comisi[oó]n)$/i.test(tipo)) {   // 'Comisión' tambien es dinero entregado (confirmado por el usuario)
       await run('INSERT INTO corte_pagos (sucursal, numero_id, fecha, colaborador_id, colaborador_nombre, cantidad, tipo, metodo, creado_por, sheet_estado, sheet_range) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-        [SUC, NUM, f.slice(0, 10) + ' 12:00:00', u ? u.id : null, u ? u.nombre : nom, cant, 'Pagado', 'Efectivo', -1, 'ok', 'Comisiones Externas!A' + (i + 2)]);
+        [SUC, NUM, f.slice(0, 10) + ' 12:00:00', u ? u.id : null, u ? u.nombre : nom, cant, /^pagado$/i.test(tipo) ? 'Pagado' : 'Comisión', 'Efectivo', -1, 'ok', 'Comisiones Externas!A' + (i + 2)]);
       np++;
     } else if (u && /^(sueldo|bono semanal|bono mensual)$/i.test(tipo)) {
       const c = conceptos[u.id] = conceptos[u.id] || { u, sueldo: 0, bono_semanal: 0, bono_mensual: 0 };

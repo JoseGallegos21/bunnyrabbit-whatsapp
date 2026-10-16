@@ -2335,7 +2335,7 @@ app.get('/api/corte/semana', auth, requireRole('recepcionista', 'admin', 'superv
     const rango = [numero_id, desde, hasta];
     const servicios = await q('SELECT * FROM servicios WHERE anulado=0 AND numero_id=? AND date(fecha) BETWEEN date(?) AND date(?) ORDER BY fecha', rango);
     const egresos = await q('SELECT * FROM corte_egresos WHERE numero_id=? AND COALESCE(anulado,0)=0 AND date(fecha) BETWEEN date(?) AND date(?) ORDER BY fecha', rango);
-    const pagos = await q("SELECT * FROM corte_pagos WHERE numero_id=? AND COALESCE(anulado,0)=0 AND COALESCE(tipo,'Pagado')='Pagado' AND date(fecha) BETWEEN date(?) AND date(?) ORDER BY fecha", rango)   // como el Excel: solo el tipo 'Pagado' es dinero entregado;
+    const pagos = await q("SELECT * FROM corte_pagos WHERE numero_id=? AND COALESCE(anulado,0)=0 AND COALESCE(tipo,'Pagado') IN ('Pagado','Comisión') AND date(fecha) BETWEEN date(?) AND date(?) ORDER BY fecha", rango)   // como el Excel: 'Pagado' y 'Comisión' son dinero entregado; 'Sueldo'/'Bono' son conceptos;
     const fijos = (await g('SELECT * FROM corte_fijos WHERE numero_id=? AND periodo_inicio=? AND periodo_fin=?', rango)) || { materia_prima: 0, impulso: 0, renta: 0, corporativo: 0 };
     const tbRaw = parseFloat(await configGet('corte_tasa_banco'));
     const tasa_banco = isNaN(tbRaw) ? 0.025 : tbRaw;
@@ -2401,7 +2401,7 @@ app.get('/api/corte/semana', auth, requireRole('recepcionista', 'admin', 'superv
     t.pagado = sum(nomina, n => n.pagado);
     t.pendiente = r2(t.total_nomina - t.pagado);
     t.fijos = r2(nz(fijos.materia_prima) + nz(fijos.impulso) + nz(fijos.renta) + nz(fijos.corporativo));
-    t.comision_banco = r2(t.tarjeta * tasa_banco);   // solo sobre los servicios pagados con tarjeta (no propinas ni anticipos a futuro)
+    t.comision_banco = r2((t.tarjeta + t.af_tarjeta + t.propina_tarjeta) * tasa_banco);   // igual que el Excel: todo lo cobrado con tarjeta (servicios + anticipos a futuro + propinas)
     t.propinas_nomina = sum(nomina, n => n.propinas);   // se le pagan a la tecnica: el Excel las resta de la utilidad
     t.utilidad = r2(t.total_semana - t.comisiones - t.sueldos - t.bonos - t.propinas_nomina - t.gastos - t.fijos - t.comision_banco);
     t.pagos_efectivo = sum(pagos.filter(p => (p.metodo || 'Efectivo') === 'Efectivo'), p => p.cantidad);

@@ -1600,7 +1600,7 @@ function cxsCargar(){
         '<span>Impulso</span>'+fi('cxfImp',f.impulso)+
         '<span>Renta</span>'+fi('cxfRen',f.renta)+
         '<span>Corporativo</span>'+fi('cxfCor',f.corporativo)+
-        '<span>Comisión bancaria (% de servicios con tarjeta)</span><input class="cx-num" id="cxfBanco" type="number" step="0.1" value="'+(Math.round(d.tasa_banco*1000)/10)+'" style="width:100px">'+
+        '<span>Comisión bancaria (% de lo cobrado con tarjeta)</span><input class="cx-num" id="cxfBanco" type="number" step="0.1" value="'+(Math.round(d.tasa_banco*1000)/10)+'" style="width:100px">'+
       '</div>'+
       '<button class="cx-btn" onclick="cxsGuardarFijos()" style="margin-bottom:12px">Guardar costos</button>'+
       cxLin('Total semana',t.total_semana)+cxLin('− Comisiones',-t.comisiones)+cxLin('− Sueldos',-t.sueldos)+cxLin('− Bonos',-t.bonos)+

@@ -136,6 +136,9 @@ db.serialize(() => {
     id INTEGER PRIMARY KEY AUTOINCREMENT, numero_id TEXT, periodo_inicio TEXT, periodo_fin TEXT,
     materia_prima REAL DEFAULT 0, impulso REAL DEFAULT 0, renta REAL DEFAULT 0, corporativo REAL DEFAULT 0,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(numero_id, periodo_inicio, periodo_fin))`);
+  // hoja de Excel (Google Sheets) del corte por numero/sucursal: la app escribe ahi servicios, egresos y pagos.
+  db.run(`CREATE TABLE IF NOT EXISTS corte_sheet_config (
+    numero_id TEXT PRIMARY KEY, sucursal TEXT, sheet_id TEXT, activo INTEGER DEFAULT 1, ultima_sync DATETIME, ultimo_error TEXT)`);
   setTimeout(seedCorteDefaults, 1500);
 
   // Tarifas de Meta por pais y categoria (USD por mensaje entregado).
@@ -257,6 +260,12 @@ db.serialize(() => {
   ]);
   // servicios creados desde el palomeo de la tecnica quedan ligados a la cita (event_id)
   ensureColumns('servicios', [['event_id', 'TEXT']]);
+  // Sincronizacion con el Excel del corte: estado por registro (pendiente | enviando | ok | error | omitido)
+  const colsSync = [['sheet_estado', "TEXT DEFAULT 'pendiente'"], ['sheet_range', 'TEXT'], ['sheet_error', 'TEXT']];
+  ensureColumns('servicios', colsSync);
+  ensureColumns('corte_egresos', [['anulado', 'INTEGER DEFAULT 0'], ...colsSync]);
+  ensureColumns('corte_pagos', [['anulado', 'INTEGER DEFAULT 0'], ...colsSync]);
+  ensureColumns('usuarios', [['nombre_corte', 'TEXT']]);   // nombre del colaborador tal como aparece en el Excel del corte
   ensureColumns('numeros', [
     ['waba_id', 'TEXT'],
     ['pixel_id', 'TEXT'], ['capi_token', 'TEXT'], ['capi_version', "TEXT DEFAULT 'v21.0'"],
@@ -2154,6 +2163,7 @@ app.post('/api/servicios', auth, requireRole('tecnica', 'recepcionista', 'admin'
     const vals = cols.map(c => campos[c]);
     const id = await new Promise((resolve, reject) => db.run(sql, vals, function (e) { e ? reject(e) : resolve(this.lastID); }));
     res.json({ ok: true, id, comision, tasa });
+    programarSyncCorte();
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -2173,8 +2183,8 @@ app.get('/api/servicios', auth, (req, res) => {
 // Anular un servicio (la tecnica solo puede anular los suyos)
 app.post('/api/servicios/:id/anular', auth, requireRole('tecnica', 'recepcionista', 'admin', 'supervisor'), (req, res) => {
   const extra = req.user.rol === 'tecnica' ? ' AND tecnica_id=' + Number(req.user.id) : '';
-  db.run('UPDATE servicios SET anulado=1, updated_at=CURRENT_TIMESTAMP WHERE id=?' + extra, [req.params.id],
-    function (e) { e ? res.status(500).json({ error: e.message }) : res.json({ ok: true, anulados: this.changes }); });
+  db.run("UPDATE servicios SET anulado=1, sheet_estado='pendiente', updated_at=CURRENT_TIMESTAMP WHERE id=?" + extra, [req.params.id],
+    function (e) { e ? res.status(500).json({ error: e.message }) : (res.json({ ok: true, anulados: this.changes }), programarSyncCorte()); });
 });
 
 // Mi corte (tecnica): sus servicios del periodo + comisiones, propinas, sueldo, bonos y subtotal a cobrar.
@@ -2207,10 +2217,10 @@ app.post('/api/corte/egresos', auth, requireRole('recepcionista', 'admin', 'supe
   const fechaEg = b.fecha ? (String(b.fecha).length === 10 ? b.fecha + ' ' + ahoraMX().slice(11) : b.fecha) : ahoraMX();
   db.run('INSERT INTO corte_egresos (sucursal,numero_id,concepto,cantidad,tipo,creado_por,fecha) VALUES (?,?,?,?,?,?,?)',
     [b.sucursal || req.user.sucursal || null, numero_id, b.concepto || null, nz(b.cantidad), b.tipo || 'Efectivo', req.user.id, fechaEg],
-    function (e) { e ? res.status(500).json({ error: e.message }) : res.json({ ok: true, id: this.lastID }); });
+    function (e) { e ? res.status(500).json({ error: e.message }) : (res.json({ ok: true, id: this.lastID }), programarSyncCorte()); });
 });
 app.get('/api/corte/egresos', auth, requireRole('recepcionista', 'admin', 'supervisor'), (req, res) => {
-  const w = []; const p = [];
+  const w = ['COALESCE(anulado,0)=0']; const p = [];
   if (req.user.rol === 'recepcionista') { w.push('numero_id=?'); p.push(req.user.numero_id); }
   else if (req.query.numero_id) { w.push('numero_id=?'); p.push(req.query.numero_id); }
   if (req.query.desde) { w.push('date(fecha)>=date(?)'); p.push(req.query.desde); }
@@ -2220,8 +2230,8 @@ app.get('/api/corte/egresos', auth, requireRole('recepcionista', 'admin', 'super
 });
 app.post('/api/corte/egresos/:id/borrar', auth, requireRole('recepcionista', 'admin', 'supervisor'), (req, res) => {
   const soloSuyo = req.user.rol === 'recepcionista';
-  db.run('DELETE FROM corte_egresos WHERE id=?' + (soloSuyo ? ' AND numero_id=?' : ''), soloSuyo ? [req.params.id, req.user.numero_id] : [req.params.id],
-    function (e) { e ? res.status(500).json({ error: e.message }) : res.json({ ok: true, borrados: this.changes }); });
+  db.run("UPDATE corte_egresos SET anulado=1, sheet_estado='pendiente' WHERE id=?" + (soloSuyo ? ' AND numero_id=?' : ''), soloSuyo ? [req.params.id, req.user.numero_id] : [req.params.id],
+    function (e) { e ? res.status(500).json({ error: e.message }) : (res.json({ ok: true, borrados: this.changes }), programarSyncCorte()); });
 });
 
 // Fecha/hora local de Mexico (UTC-6, sin horario de verano desde 2022) 'YYYY-MM-DD HH:MM:SS'.
@@ -2239,7 +2249,7 @@ async function numeroCorte(req) {
 // Corte de caja de un dia: servicios palomeados por las tecnicas + egresos.
 async function calcularCorteDia(numero_id, fecha) {
   const servicios = await new Promise(r => db.all('SELECT * FROM servicios WHERE anulado=0 AND numero_id=? AND date(fecha)=date(?) ORDER BY fecha', [numero_id, fecha], (e, x) => r(x || [])));
-  const egresos = await new Promise(r => db.all('SELECT * FROM corte_egresos WHERE numero_id=? AND date(fecha)=date(?) ORDER BY fecha', [numero_id, fecha], (e, x) => r(x || [])));
+  const egresos = await new Promise(r => db.all('SELECT * FROM corte_egresos WHERE numero_id=? AND COALESCE(anulado,0)=0 AND date(fecha)=date(?) ORDER BY fecha', [numero_id, fecha], (e, x) => r(x || [])));
   const r2 = n => Math.round(n * 100) / 100;
   const sum = (arr, f) => r2(arr.reduce((a, x) => a + nz(f(x)), 0));
   const t = {
@@ -2318,8 +2328,8 @@ app.get('/api/corte/semana', auth, requireRole('recepcionista', 'admin', 'superv
     const sum = (arr, f) => r2(arr.reduce((a, x) => a + nz(f(x)), 0));
     const rango = [numero_id, desde, hasta];
     const servicios = await q('SELECT * FROM servicios WHERE anulado=0 AND numero_id=? AND date(fecha) BETWEEN date(?) AND date(?) ORDER BY fecha', rango);
-    const egresos = await q('SELECT * FROM corte_egresos WHERE numero_id=? AND date(fecha) BETWEEN date(?) AND date(?) ORDER BY fecha', rango);
-    const pagos = await q('SELECT * FROM corte_pagos WHERE numero_id=? AND date(fecha) BETWEEN date(?) AND date(?) ORDER BY fecha', rango);
+    const egresos = await q('SELECT * FROM corte_egresos WHERE numero_id=? AND COALESCE(anulado,0)=0 AND date(fecha) BETWEEN date(?) AND date(?) ORDER BY fecha', rango);
+    const pagos = await q('SELECT * FROM corte_pagos WHERE numero_id=? AND COALESCE(anulado,0)=0 AND date(fecha) BETWEEN date(?) AND date(?) ORDER BY fecha', rango);
     const fijos = (await g('SELECT * FROM corte_fijos WHERE numero_id=? AND periodo_inicio=? AND periodo_fin=?', rango)) || { materia_prima: 0, impulso: 0, renta: 0, corporativo: 0 };
     const tbRaw = parseFloat(await configGet('corte_tasa_banco'));
     const tasa_banco = isNaN(tbRaw) ? 0.025 : tbRaw;
@@ -2355,7 +2365,7 @@ app.get('/api/corte/semana', auth, requireRole('recepcionista', 'admin', 'superv
     const nomina = [...cols.values()].map(u => {
       const sv = servicios.filter(s => s.tecnica_id === u.id);
       const aj = ajMap.get(u.id);
-      const bonoAuto = u.rol === 'recepcionista' ? bono_sucursal : 0;
+      const bonoAuto = 0;   // el bono se captura a mano (decision del usuario); bono_sucursal solo se muestra como sugerencia
       const n = {
         colaborador_id: u.id, nombre: u.nombre, rol: u.rol, servicios: sv.length, vendido: sum(sv, s => s.precio),
         comisiones: sum(sv, s => s.comision),
@@ -2380,7 +2390,7 @@ app.get('/api/corte/semana', auth, requireRole('recepcionista', 'admin', 'superv
     t.pagado = sum(nomina, n => n.pagado);
     t.pendiente = r2(t.total_nomina - t.pagado);
     t.fijos = r2(nz(fijos.materia_prima) + nz(fijos.impulso) + nz(fijos.renta) + nz(fijos.corporativo));
-    t.comision_banco = r2((t.tarjeta + t.af_tarjeta + t.propina_tarjeta) * tasa_banco);   // lo que pasa por la terminal
+    t.comision_banco = r2(t.tarjeta * tasa_banco);   // solo sobre los servicios pagados con tarjeta (no propinas ni anticipos a futuro)
     t.utilidad = r2(t.total_semana - t.comisiones - t.sueldos - t.bonos - t.gastos - t.fijos - t.comision_banco);
     t.pagos_efectivo = sum(pagos.filter(p => (p.metodo || 'Efectivo') === 'Efectivo'), p => p.cantidad);
     t.sobrante_efectivo = r2(t.efectivo - t.gastos_efectivo - t.pagos_efectivo);
@@ -2451,13 +2461,13 @@ app.post('/api/corte/pagos', auth, requireRole('recepcionista', 'admin', 'superv
     const fecha = b.fecha ? (String(b.fecha).length === 10 ? b.fecha + ' ' + ahoraMX().slice(11) : b.fecha) : ahoraMX();
     db.run('INSERT INTO corte_pagos (sucursal, numero_id, fecha, colaborador_id, colaborador_nombre, cantidad, tipo, metodo, notas, creado_por) VALUES (?,?,?,?,?,?,?,?,?,?)',
       [sucursal, numero_id, fecha, u.id, u.nombre, nz(b.cantidad), b.tipo || 'Pagado', b.metodo || 'Efectivo', b.notas || null, req.user.id],
-      function (e) { e ? res.status(500).json({ error: e.message }) : res.json({ ok: true, id: this.lastID }); });
+      function (e) { e ? res.status(500).json({ error: e.message }) : (res.json({ ok: true, id: this.lastID }), programarSyncCorte()); });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 app.post('/api/corte/pagos/:id/borrar', auth, requireRole('recepcionista', 'admin', 'supervisor'), (req, res) => {
   const soloSuyo = req.user.rol === 'recepcionista';
-  db.run('DELETE FROM corte_pagos WHERE id=?' + (soloSuyo ? ' AND numero_id=?' : ''), soloSuyo ? [req.params.id, req.user.numero_id] : [req.params.id],
-    function (e) { e ? res.status(500).json({ error: e.message }) : res.json({ ok: true, borrados: this.changes }); });
+  db.run("UPDATE corte_pagos SET anulado=1, sheet_estado='pendiente' WHERE id=?" + (soloSuyo ? ' AND numero_id=?' : ''), soloSuyo ? [req.params.id, req.user.numero_id] : [req.params.id],
+    function (e) { e ? res.status(500).json({ error: e.message }) : (res.json({ ok: true, borrados: this.changes }), programarSyncCorte()); });
 });
 
 // app.listen moved to end
@@ -3027,6 +3037,169 @@ async function googleSheetsToken() {
     return d.access_token;
   } catch (e) { console.error('[CPL] error token sheets:', e.message); return null; }
 }
+
+// ==================== CORTE -> EXCEL (Google Sheets) ====================
+// Cada servicio palomeado, egreso y pago a colaboradores se escribe en la hoja del corte
+// de la sucursal ("Respuestas de formulario 1", "Egresos", "Comisiones Externas") con el
+// mismo formato que usaba el Google Form, asi las formulas del Excel siguen funcionando.
+// Cada fila lleva una marca BR-S<id> / BR-E<id> / BR-P<id> en una columna sin uso (S o E)
+// para encontrarla aunque se muevan filas: corregir o anular actualiza la misma fila
+// (anular la deja en ceros con la leyenda ANULADO). Si Google falla, queda pendiente y
+// se reintenta cada 5 minutos.
+let _sheetsRW = { token: null, exp: 0 };
+async function googleSheetsRWToken() {
+  if (_sheetsRW.token && Date.now() < _sheetsRW.exp) return _sheetsRW.token;
+  const cr = _gcalSACreds();
+  if (!cr.email || !cr.key) return null;
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const assertion = jwt.sign({ iss: cr.email, scope: 'https://www.googleapis.com/auth/spreadsheets', aud: 'https://oauth2.googleapis.com/token', iat: now, exp: now + 3600 }, cr.key.replace(/\\n/g, '\n'), { algorithm: 'RS256' });
+    const d = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }) }).then(r => r.json());
+    if (!d.access_token) { console.error('[CORTE→EXCEL] token:', JSON.stringify(d).slice(0, 200)); return null; }
+    _sheetsRW = { token: d.access_token, exp: Date.now() + ((d.expires_in || 3600) - 60) * 1000 };
+    return d.access_token;
+  } catch (e) { console.error('[CORTE→EXCEL] error token:', e.message); return null; }
+}
+// 'YYYY-MM-DD HH:MM:SS' -> '16/10/2026 13:05:00' (o solo la fecha). pad = dia/mes con cero.
+function _fechaHoja(f, conHora, pad) {
+  const [d, t] = String(f || '').split(' ');
+  const [y, m, dd] = (d || '').split('-');
+  if (!y || !m || !dd) return '';
+  const fecha = pad ? `${dd}/${m}/${y}` : `${+dd}/${+m}/${y}`;
+  return conHora ? `${fecha} ${(t || '00:00:00').slice(0, 8)}` : fecha;
+}
+// Texto seguro para USER_ENTERED: que un nombre como "=algo" no se vuelva formula.
+// Monto como '$1350.5' para que Sheets (es_MX) lo guarde como numero con formato de moneda, igual que las filas existentes.
+function _monedaHoja(v) { return '$' + (Math.round(nz(v) * 100) / 100); }
+function _txtHoja(v) { const s = String(v == null ? '' : v); return /^[=+\-@]/.test(s) ? "'" + s : s; }
+async function _sheetsReq(token, method, url, body) {
+  const r = await fetch(url, { method, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
+  return j;
+}
+const _dbAll = (sql, p) => new Promise(r => db.all(sql, p || [], (e, x) => r(x || [])));
+const _dbRun = (sql, p) => new Promise(r => db.run(sql, p || [], () => r()));
+
+// Lee la hoja: ultima fila ocupada (cualquier celda no vacia) y en que fila esta cada marca BR-.
+async function _leerHojaCorte(token, sheetId, hoja, ultimaCol, marcaCol) {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent("'" + hoja + "'!A1:" + ultimaCol)}?valueRenderOption=UNFORMATTED_VALUE`;
+  const rows = (await _sheetsReq(token, 'GET', url)).values || [];
+  const mi = marcaCol.charCodeAt(0) - 65;
+  let ultima = 1; const marcas = {};
+  rows.forEach((row, i) => {
+    if (row.some(c => String(c == null ? '' : c).trim() !== '')) ultima = i + 1;
+    const mk = row[mi]; if (mk && /^BR-[SEP]\d+$/.test(String(mk))) marcas[String(mk)] = i + 1;
+  });
+  return { ultima, marcas };
+}
+
+const CORTE_HOJAS = {
+  servicios: {
+    tabla: 'servicios', hoja: 'Respuestas de formulario 1', ultimaCol: 'S', pref: 'BR-S',
+    sql: `SELECT s.*, u.nombre_corte FROM servicios s LEFT JOIN usuarios u ON u.id=s.tecnica_id
+          WHERE s.numero_id=? AND COALESCE(s.sheet_estado,'pendiente') IN ('pendiente','error') ORDER BY s.id LIMIT 200`,
+    fila: s => {
+      const an = !!s.anulado, z = v => an ? 0 : nz(v);
+      return [_fechaHoja(s.fecha, true), _txtHoja(s.telefono), _txtHoja(s.tipo_servicio), _txtHoja(s.cliente), _txtHoja(s.pigmento), _txtHoja(s.cartuchos),
+        _txtHoja(s.nombre_corte || s.tecnica_nombre), _txtHoja((an ? 'ANULADO - ' : '') + (s.servicio || '')),
+        z(s.precio), z(s.pago_anticipo), z(s.pago_transfer), z(s.pago_tarjeta), z(s.pago_efectivo), z(s.af_transfer), z(s.af_tarjeta),
+        z(s.propina_tarjeta), z(s.propina_transfer), _txtHoja(an ? 'Anulado en BunnyRabbit' : s.observaciones), 'BR-S' + s.id];
+    }
+  },
+  egresos: {
+    tabla: 'corte_egresos', hoja: 'Egresos', ultimaCol: 'E', pref: 'BR-E',
+    sql: `SELECT * FROM corte_egresos WHERE numero_id=? AND COALESCE(sheet_estado,'pendiente') IN ('pendiente','error') ORDER BY id LIMIT 200`,
+    fila: e => [_fechaHoja(e.fecha, false, true), _txtHoja((e.anulado ? 'ANULADO - ' : '') + (e.concepto || '')), _monedaHoja(e.anulado ? 0 : e.cantidad), _txtHoja(e.tipo || 'Efectivo'), 'BR-E' + e.id]
+  },
+  pagos: {
+    tabla: 'corte_pagos', hoja: 'Comisiones Externas', ultimaCol: 'E', pref: 'BR-P',
+    sql: `SELECT p.*, u.nombre_corte FROM corte_pagos p LEFT JOIN usuarios u ON u.id=p.colaborador_id
+          WHERE p.numero_id=? AND COALESCE(p.sheet_estado,'pendiente') IN ('pendiente','error') ORDER BY p.id LIMIT 200`,
+    fila: p => [_fechaHoja(p.fecha, false), _txtHoja(p.nombre_corte || p.colaborador_nombre), _monedaHoja(p.anulado ? 0 : p.cantidad), _txtHoja((p.anulado ? 'ANULADO - ' : '') + (p.tipo || '')), 'BR-P' + p.id]
+  }
+};
+
+async function _syncHojaCorte(token, cfg, D) {
+  const pend = await _dbAll(D.sql, [cfg.numero_id]);
+  if (!pend.length) return 0;
+  const ids = pend.map(x => x.id);
+  // 'enviando': si alguien corrige el registro mientras se escribe, vuelve a 'pendiente' y no se pierde el cambio
+  await _dbRun(`UPDATE ${D.tabla} SET sheet_estado='enviando' WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
+  try {
+    const { ultima, marcas } = await _leerHojaCorte(token, cfg.sheet_id, D.hoja, D.ultimaCol, D.ultimaCol);
+    let siguiente = ultima + 1;
+    const data = [], resultado = [];
+    for (const it of pend) {
+      const enHoja = marcas[D.pref + it.id];
+      if (it.anulado && !enHoja) { resultado.push([it.id, null, 'omitido']); continue; }   // anulado que nunca llego al Excel
+      const fila = enHoja || siguiente++;
+      data.push({ range: `'${D.hoja}'!A${fila}:${D.ultimaCol}${fila}`, values: [D.fila(it)] });
+      resultado.push([it.id, `${D.hoja}!A${fila}`, 'ok']);
+    }
+    if (data.length) await _sheetsReq(token, 'POST', `https://sheets.googleapis.com/v4/spreadsheets/${cfg.sheet_id}/values:batchUpdate`, { valueInputOption: 'USER_ENTERED', data });
+    for (const [id, rango, est] of resultado)
+      await _dbRun(`UPDATE ${D.tabla} SET sheet_estado=?, sheet_range=COALESCE(?, sheet_range), sheet_error=NULL WHERE id=? AND sheet_estado='enviando'`, [est, rango, id]);
+    return data.length;
+  } catch (e) {
+    await _dbRun(`UPDATE ${D.tabla} SET sheet_estado='error', sheet_error=? WHERE id IN (${ids.map(() => '?').join(',')}) AND sheet_estado='enviando'`, [e.message.slice(0, 300), ...ids]);
+    throw e;
+  }
+}
+
+let _syncCorteCorriendo = false, _syncCorteTimer = null;
+function programarSyncCorte(ms) {
+  clearTimeout(_syncCorteTimer);
+  _syncCorteTimer = setTimeout(() => sincronizarCorteExcel().catch(e => console.error('[CORTE→EXCEL]', e.message)), ms || 3000);
+}
+async function sincronizarCorteExcel() {
+  if (_syncCorteCorriendo) { programarSyncCorte(5000); return; }
+  _syncCorteCorriendo = true;
+  try {
+    const cfgs = await _dbAll("SELECT * FROM corte_sheet_config WHERE activo=1 AND sheet_id IS NOT NULL AND sheet_id!=''");
+    if (!cfgs.length) return;
+    const token = await googleSheetsRWToken();
+    if (!token) return;
+    for (const cfg of cfgs) {
+      // Cada pestaña por separado: si una falla (p. ej. rango protegido) las demas se siguen escribiendo
+      let n = 0; const errores = [];
+      for (const D of Object.values(CORTE_HOJAS)) {
+        try { n += await _syncHojaCorte(token, cfg, D); }
+        catch (e) { errores.push(`${D.hoja}: ${e.message}`); console.error('[CORTE→EXCEL]', cfg.sucursal || cfg.numero_id, D.hoja, e.message); }
+      }
+      await _dbRun('UPDATE corte_sheet_config SET ultima_sync=CURRENT_TIMESTAMP, ultimo_error=? WHERE numero_id=?', [errores.length ? errores.join(' | ').slice(0, 300) : null, cfg.numero_id]);
+      if (n) console.log(`[CORTE→EXCEL] ${cfg.sucursal || cfg.numero_id}: ${n} fila(s) escritas`);
+    }
+  } finally { _syncCorteCorriendo = false; }
+}
+setInterval(() => sincronizarCorteExcel().catch(e => console.error('[CORTE→EXCEL]', e.message)), 5 * 60 * 1000);
+setTimeout(() => programarSyncCorte(1000), 20000);
+
+// Estado de la sincronizacion con el Excel (para mostrarlo en el corte)
+app.get('/api/corte/excel-estado', auth, requireRole('recepcionista', 'admin', 'supervisor'), async (req, res) => {
+  try {
+    const { numero_id } = await numeroCorte(req);
+    const cfg = await new Promise(r => db.get('SELECT numero_id, sucursal, activo, ultima_sync, ultimo_error, (sheet_id IS NOT NULL AND sheet_id!=\'\') configurada FROM corte_sheet_config WHERE numero_id=?', [numero_id], (e, x) => r(x || null)));
+    const cuenta = async (tabla) => (await _dbAll(`SELECT COALESCE(sheet_estado,'pendiente') est, COUNT(*) n FROM ${tabla} WHERE numero_id=? GROUP BY est`, [numero_id]));
+    const est = { pendiente: 0, error: 0, ok: 0 };
+    for (const t of ['servicios', 'corte_egresos', 'corte_pagos'])
+      (await cuenta(t)).forEach(r => { const k = (r.est === 'enviando') ? 'pendiente' : r.est; if (est[k] !== undefined) est[k] += r.n; });
+    res.json({ ok: true, configurada: !!(cfg && cfg.configurada && cfg.activo), ultima_sync: cfg && cfg.ultima_sync, ultimo_error: cfg && cfg.ultimo_error, ...est });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Configurar la hoja del corte de un numero (admin/supervisor). Acepta el link o el ID de la hoja.
+app.post('/api/corte/excel-config', auth, requireRole('admin', 'supervisor'), async (req, res) => {
+  const b = req.body || {};
+  const m = String(b.sheet || '').match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  const sheetId = m ? m[1] : String(b.sheet || '').trim();
+  if (!b.numero_id || !/^[a-zA-Z0-9_-]{20,}$/.test(sheetId)) return res.status(400).json({ error: 'Falta el número o la hoja no es válida' });
+  const n = await new Promise(r => db.get('SELECT sucursal FROM numeros WHERE phone_number_id=?', [b.numero_id], (e, x) => r(x)));
+  db.run(`INSERT INTO corte_sheet_config (numero_id, sucursal, sheet_id, activo) VALUES (?,?,?,?)
+          ON CONFLICT(numero_id) DO UPDATE SET sheet_id=excluded.sheet_id, sucursal=excluded.sucursal, activo=excluded.activo`,
+    [b.numero_id, n && n.sucursal, sheetId, b.activo === false ? 0 : 1],
+    e => { if (e) return res.status(500).json({ error: e.message }); res.json({ ok: true, sheet_id: sheetId }); programarSyncCorte(1000); });
+});
 function _cplFecha(s) {
   const m = String(s || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
   if (!m) return null;
@@ -3218,7 +3391,7 @@ async function upsertServicioPalomeo(eventId, b, req, ctx) {
     await new Promise((resolve, reject) => db.run(
       `UPDATE servicios SET sucursal=?, numero_id=?, tecnica_id=?, tecnica_nombre=?, cliente=?, servicio=?, tipo_servicio=?,
          precio=?, pago_efectivo=?, pago_tarjeta=?, pago_transfer=?, pago_anticipo=?, propina_tarjeta=?, propina_transfer=?,
-         observaciones=?, comision=?, comision_tasa=?, anulado=0, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+         observaciones=?, comision=?, comision_tasa=?, anulado=0, sheet_estado='pendiente', updated_at=CURRENT_TIMESTAMP WHERE id=?`,
       [...vals, existente.id], e => e ? reject(e) : resolve()));
     return { id: existente.id, comision, tasa, actualizado: true };
   }
@@ -3239,7 +3412,7 @@ app.post('/api/asistencias', auth, requireRole('tecnica', 'recepcionista', 'admi
     ? req.user.sucursal : (req.body.sucursal || null);
   // Estado vacio = des-marcar (borrar la fila) + anular el servicio ligado (sale del corte)
   if (!estado) {
-    db.run('UPDATE servicios SET anulado=1, updated_at=CURRENT_TIMESTAMP WHERE event_id = ?', [event_id]);
+    db.run("UPDATE servicios SET anulado=1, sheet_estado='pendiente', updated_at=CURRENT_TIMESTAMP WHERE event_id = ?", [event_id], () => programarSyncCorte());
     return db.run('DELETE FROM asistencias WHERE event_id = ?', [event_id],
       err => err ? res.status(500).json({ error: err.message }) : res.json({ ok: true, estado: null }));
   }
@@ -3255,7 +3428,7 @@ app.post('/api/asistencias', auth, requireRole('tecnica', 'recepcionista', 'admi
       if (err) return res.status(500).json({ error: err.message });
       // "No vino": anular cualquier servicio ligado a esta cita (sale del corte)
       if (estado === 'no_asistio') {
-        db.run('UPDATE servicios SET anulado=1, updated_at=CURRENT_TIMESTAMP WHERE event_id=?', [event_id]);
+        db.run("UPDATE servicios SET anulado=1, sheet_estado='pendiente', updated_at=CURRENT_TIMESTAMP WHERE event_id=?", [event_id], () => programarSyncCorte());
         return res.json({ ok: true, estado });
       }
       // "Vino" con cobro: crear/actualizar el servicio del corte
@@ -3264,6 +3437,7 @@ app.post('/api/asistencias', auth, requireRole('tecnica', 'recepcionista', 'admi
         if (nz(req.body.precio) > 0) svc = await upsertServicioPalomeo(event_id, req.body, req, { sucursal, cliente, servicio, hora, fecha, tecnicaId });
       } catch (e) { console.error('[CORTE palomeo]', e.message); }
       res.json({ ok: true, estado, servicio: svc });
+      if (svc) programarSyncCorte();
       // "Vino" -> cruzar por nombre, disparar Purchase y mover a Cerrado
       procesarVinoCapi({ cliente, sucursal }, req.user.rol).catch(e => console.error('[VINO]', e.message));
     }

@@ -674,6 +674,7 @@ body{background:#111b21;height:100vh;height:100dvh;display:flex;align-items:cent
               </span>
             </div>
             <div id="cxAyuda" style="font-size:12px;color:#667781;margin-top:8px">Se arma solo con las citas que las técnicas palomean como “Vino” (con su cobro). Tú registras los egresos y cierras la caja.</div>
+            <div id="cxExcel" style="font-size:12px;margin-top:6px"></div>
           </div>
 
           <!-- ===== VISTA DIA ===== -->
@@ -720,7 +721,7 @@ body{background:#111b21;height:100vh;height:100dvh;display:flex;align-items:cent
             <div class="cx-card">
               <div class="cx-h">Nómina por colaborador</div>
               <div class="cx-wrap" id="cxsNomina"></div>
-              <div style="font-size:11px;color:#8696a0;margin-top:8px">Subtotal = comisiones + sueldo + propinas + bonos − retardos − multas − pre-pago. Edita una fila y pulsa Guardar. El bono semanal de la recepcionista se calcula solo con la tabla de bonos de la sucursal.</div>
+              <div style="font-size:11px;color:#8696a0;margin-top:8px">Subtotal = comisiones + sueldo + propinas + bonos − retardos − multas − pre-pago. Edita una fila y pulsa Guardar. Los bonos se capturan a mano.</div>
             </div>
             <div class="cx-row2">
               <div class="cx-card"><div class="cx-h">Efectivo y tarjeta por día</div><div class="cx-wrap" id="cxsDias"></div></div>
@@ -1575,6 +1576,7 @@ function cxIn(id,v,i){ return '<input class="cx-num" id="'+id+'" type="number" i
 function cxsCargar(){
   document.getElementById('cxTitulo').textContent='Semana del '+cxFmtCorta(cxsDesde)+' al '+cxFmtCorta(cxsHasta)+' '+cxsHasta.slice(0,4);
   document.getElementById('cxDesde').value=cxsDesde; document.getElementById('cxHasta').value=cxsHasta;
+  cxExcelEstado();
   cxApi('/api/corte/semana?desde='+cxsDesde+'&hasta='+cxsHasta+cxNumQ()).then(function(d){
     if(!d||!d.ok){ cxsData=null; document.getElementById('cxsKpis').innerHTML='<div class="cx-card" style="grid-column:1/-1;color:#c62828">'+cxEsc((d&&d.error)||'No se pudo cargar el corte semanal')+'</div>'; return; }
     cxsData=d; var t=d.totales, f=d.fijos;
@@ -1589,7 +1591,7 @@ function cxsCargar(){
       cxLin('Sueldos',t.sueldos)+cxLin('Total gastos',t.gastos)+cxLin('Total bonos',t.bonos)+cxLin('Total comisiones',t.comisiones)+
       cxLin('Ant. futuro transferencia',t.af_transfer)+cxLin('Ant. futuro tarjeta',t.af_tarjeta)+
       cxLin('Propinas tarjeta',t.propina_tarjeta)+cxLin('Propinas transferencia',t.propina_transfer)+
-      '<div style="font-size:11px;color:#8696a0;margin-top:8px">Bono de la sucursal esta semana: <b>'+cxMoney(d.bono_sucursal)+'</b> (grupo '+d.grupo+', según la venta).</div>';
+      '<div style="font-size:11px;color:#8696a0;margin-top:8px">Según la tabla de bonos, esta venta correspondería a <b>'+cxMoney(d.bono_sucursal)+'</b> (grupo '+d.grupo+'). El bono se captura a mano en la nómina.</div>';
     var fi=function(id,v){ return '<input class="cx-num" id="'+id+'" type="number" inputmode="decimal" value="'+(Number(v)||0)+'" style="width:100px">'; };
     document.getElementById('cxsUtil').innerHTML=
       '<div style="display:grid;grid-template-columns:1fr auto;gap:6px 10px;align-items:center;font-size:13px;margin-bottom:10px">'+
@@ -1597,7 +1599,7 @@ function cxsCargar(){
         '<span>Impulso</span>'+fi('cxfImp',f.impulso)+
         '<span>Renta</span>'+fi('cxfRen',f.renta)+
         '<span>Corporativo</span>'+fi('cxfCor',f.corporativo)+
-        '<span>Comisión bancaria (% de tarjeta)</span><input class="cx-num" id="cxfBanco" type="number" step="0.1" value="'+(Math.round(d.tasa_banco*1000)/10)+'" style="width:100px">'+
+        '<span>Comisión bancaria (% de servicios con tarjeta)</span><input class="cx-num" id="cxfBanco" type="number" step="0.1" value="'+(Math.round(d.tasa_banco*1000)/10)+'" style="width:100px">'+
       '</div>'+
       '<button class="cx-btn" onclick="cxsGuardarFijos()" style="margin-bottom:12px">Guardar costos</button>'+
       cxLin('Total semana',t.total_semana)+cxLin('− Comisiones',-t.comisiones)+cxLin('− Sueldos',-t.sueldos)+cxLin('− Bonos',-t.bonos)+
@@ -1678,10 +1680,22 @@ function cxsGuardarFijos(){
 
 function corteIrFecha(){ var v=document.getElementById('cxFecha').value; if(v){ cxFecha=v; corteCargar(); } }
 
+function cxExcelEstado(){
+  cxApi('/api/corte/excel-estado?x=1'+cxNumQ()).then(function(e){
+    var el=document.getElementById('cxExcel'); if(!el) return;
+    if(!e||!e.ok){ el.innerHTML=''; return; }
+    if(!e.configurada){ el.innerHTML='<span style="color:#8696a0">📗 Excel del corte: sin conectar</span>'; return; }
+    var hora = e.ultima_sync ? new Date(String(e.ultima_sync).replace(' ','T')+'Z').toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}) : '—';
+    if(e.error>0){ var prot=/protected/i.test(e.ultimo_error||''); el.innerHTML='<span style="color:#c62828">📗 Excel: ⚠ '+e.error+' registro(s) sin escribir — '+(prot?'la hoja tiene protegida la columna de fecha; la dueña debe permitir editar a la cuenta de servicio':'se reintenta solo cada 5 min'+(e.ultimo_error?' ('+cxEsc(String(e.ultimo_error).slice(0,90))+')':''))+'</span>'; }
+    else if(e.pendiente>0) el.innerHTML='<span style="color:#b25e00">📗 Excel: ⏳ '+e.pendiente+' cambio(s) por enviar…</span>';
+    else el.innerHTML='<span style="color:#2e7d32">📗 Excel: ✓ al día · última sincronización '+hora+'</span>';
+  });
+}
 function corteCargar(){
   var p=cxFecha.split('-').map(Number);
   var tt=new Date(p[0],p[1]-1,p[2]).toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long',year:'numeric'}); document.getElementById('cxTitulo').textContent=tt.charAt(0).toUpperCase()+tt.slice(1);
   document.getElementById('cxFecha').value=cxFecha;
+  cxExcelEstado();
   cxApi('/api/corte/dia?fecha='+cxFecha+cxNumQ()).then(function(d){
     if(!d||!d.ok){ cxData=null; document.getElementById('cxKpis').innerHTML='<div class="cx-card" style="grid-column:1/-1;color:#c62828">'+cxEsc((d&&d.error)||'No se pudo cargar el corte')+'</div>'; return; }
     cxData=d; var t=d.totales;

@@ -120,6 +120,13 @@ db.serialize(() => {
     bono_semanal REAL DEFAULT 0, bono_mensual REAL DEFAULT 0, pre_pago REAL DEFAULT 0, sueldo REAL DEFAULT 0,
     notas TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(colaborador_id, periodo_inicio, periodo_fin))`);
+  // cierre del corte de caja por dia y numero (lo hace la recepcionista).
+  db.run(`CREATE TABLE IF NOT EXISTS corte_cierres (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, sucursal TEXT, numero_id TEXT, fecha TEXT,
+    total_vendido REAL DEFAULT 0, efectivo_esperado REAL DEFAULT 0, efectivo_contado REAL DEFAULT 0, diferencia REAL DEFAULT 0,
+    tarjeta REAL DEFAULT 0, transferencias REAL DEFAULT 0, egresos REAL DEFAULT 0, notas TEXT,
+    cerrado_por INTEGER, cerrado_por_nombre TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(numero_id, fecha))`);
   setTimeout(seedCorteDefaults, 1500);
 
   // Tarifas de Meta por pais y categoria (USD por mensaje entregado).
@@ -2132,9 +2139,10 @@ app.post('/api/servicios', auth, requireRole('tecnica', 'recepcionista', 'admin'
       pigmento: b.pigmento || null, cartuchos: b.cartuchos || null, observaciones: b.observaciones || null,
       comision, comision_tasa: tasa, creado_por: req.user.id
     };
+    campos.fecha = b.fecha || ahoraMX();
     const cols = Object.keys(campos);
-    const sql = `INSERT INTO servicios (${cols.join(',')}${b.fecha ? ', fecha' : ''}) VALUES (${cols.map(() => '?').join(',')}${b.fecha ? ', ?' : ''})`;
-    const vals = cols.map(c => campos[c]); if (b.fecha) vals.push(b.fecha);
+    const sql = `INSERT INTO servicios (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`;
+    const vals = cols.map(c => campos[c]);
     const id = await new Promise((resolve, reject) => db.run(sql, vals, function (e) { e ? reject(e) : resolve(this.lastID); }));
     res.json({ ok: true, id, comision, tasa });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -2187,8 +2195,9 @@ app.get('/api/corte/mi-corte', auth, requireRole('tecnica', 'recepcionista', 'ad
 app.post('/api/corte/egresos', auth, requireRole('recepcionista', 'admin', 'supervisor'), (req, res) => {
   const b = req.body || {};
   const numero_id = (req.user.rol === 'recepcionista') ? req.user.numero_id : (b.numero_id || req.user.numero_id || null);
-  db.run('INSERT INTO corte_egresos (sucursal,numero_id,concepto,cantidad,tipo,creado_por,fecha) VALUES (?,?,?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP))',
-    [b.sucursal || req.user.sucursal || null, numero_id, b.concepto || null, nz(b.cantidad), b.tipo || 'Efectivo', req.user.id, b.fecha || null],
+  const fechaEg = b.fecha ? (String(b.fecha).length === 10 ? b.fecha + ' ' + ahoraMX().slice(11) : b.fecha) : ahoraMX();
+  db.run('INSERT INTO corte_egresos (sucursal,numero_id,concepto,cantidad,tipo,creado_por,fecha) VALUES (?,?,?,?,?,?,?)',
+    [b.sucursal || req.user.sucursal || null, numero_id, b.concepto || null, nz(b.cantidad), b.tipo || 'Efectivo', req.user.id, fechaEg],
     function (e) { e ? res.status(500).json({ error: e.message }) : res.json({ ok: true, id: this.lastID }); });
 });
 app.get('/api/corte/egresos', auth, requireRole('recepcionista', 'admin', 'supervisor'), (req, res) => {
@@ -2199,6 +2208,88 @@ app.get('/api/corte/egresos', auth, requireRole('recepcionista', 'admin', 'super
   if (req.query.hasta) { w.push('date(fecha)<=date(?)'); p.push(req.query.hasta); }
   db.all('SELECT * FROM corte_egresos' + (w.length ? ' WHERE ' + w.join(' AND ') : '') + ' ORDER BY fecha DESC LIMIT 500', p,
     (e, rows) => e ? res.status(500).json({ error: e.message }) : res.json({ ok: true, egresos: rows || [] }));
+});
+app.post('/api/corte/egresos/:id/borrar', auth, requireRole('recepcionista', 'admin', 'supervisor'), (req, res) => {
+  const soloSuyo = req.user.rol === 'recepcionista';
+  db.run('DELETE FROM corte_egresos WHERE id=?' + (soloSuyo ? ' AND numero_id=?' : ''), soloSuyo ? [req.params.id, req.user.numero_id] : [req.params.id],
+    function (e) { e ? res.status(500).json({ error: e.message }) : res.json({ ok: true, borrados: this.changes }); });
+});
+
+// Fecha/hora local de Mexico (UTC-6, sin horario de verano desde 2022) 'YYYY-MM-DD HH:MM:SS'.
+// CURRENT_TIMESTAMP de SQLite es UTC: en la noche ya seria "manana" y el corte del dia se desfasaria.
+function ahoraMX() { return new Date(Date.now() - 6 * 3600 * 1000).toISOString().replace('T', ' ').slice(0, 19); }
+function hoyMX() { return ahoraMX().slice(0, 10); }
+
+// Numero (y sucursal) sobre el que opera el corte: recepcionista = el suyo; admin/supervisor = ?numero_id
+async function numeroCorte(req) {
+  const numero_id = req.user.rol === 'recepcionista' ? req.user.numero_id : (req.query.numero_id || (req.body && req.body.numero_id) || req.user.numero_id || null);
+  const n = numero_id ? await new Promise(r => db.get('SELECT sucursal FROM numeros WHERE phone_number_id=?', [numero_id], (e, x) => r(x))) : null;
+  return { numero_id, sucursal: (n && n.sucursal) || req.user.sucursal || null };
+}
+
+// Corte de caja de un dia: servicios palomeados por las tecnicas + egresos.
+async function calcularCorteDia(numero_id, fecha) {
+  const servicios = await new Promise(r => db.all('SELECT * FROM servicios WHERE anulado=0 AND numero_id=? AND date(fecha)=date(?) ORDER BY fecha', [numero_id, fecha], (e, x) => r(x || [])));
+  const egresos = await new Promise(r => db.all('SELECT * FROM corte_egresos WHERE numero_id=? AND date(fecha)=date(?) ORDER BY fecha', [numero_id, fecha], (e, x) => r(x || [])));
+  const r2 = n => Math.round(n * 100) / 100;
+  const sum = (arr, f) => r2(arr.reduce((a, x) => a + nz(f(x)), 0));
+  const t = {
+    total_vendido: sum(servicios, s => s.precio),
+    servicio_efectivo: sum(servicios, s => s.pago_efectivo),
+    servicio_tarjeta: sum(servicios, s => s.pago_tarjeta),
+    servicio_transfer: sum(servicios, s => s.pago_transfer),
+    anticipos_aplicados: sum(servicios, s => s.pago_anticipo),
+    af_tarjeta: sum(servicios, s => s.af_tarjeta),
+    af_transfer: sum(servicios, s => s.af_transfer),
+    propina_tarjeta: sum(servicios, s => s.propina_tarjeta),
+    propina_transfer: sum(servicios, s => s.propina_transfer),
+    egresos_efectivo: sum(egresos.filter(e => (e.tipo || 'Efectivo') === 'Efectivo'), e => e.cantidad),
+    egresos_transfer: sum(egresos.filter(e => e.tipo === 'Transferencia'), e => e.cantidad),
+    comisiones: sum(servicios, s => s.comision)
+  };
+  t.egresos_total = r2(t.egresos_efectivo + t.egresos_transfer);
+  t.efectivo_neto = r2(t.servicio_efectivo - t.egresos_efectivo);                    // lo que debe haber en caja
+  t.tarjeta_neto = r2(t.servicio_tarjeta + t.propina_tarjeta + t.af_tarjeta);         // lo que marca la terminal
+  t.transfer_neto = r2(t.servicio_transfer + t.propina_transfer + t.af_transfer - t.egresos_transfer);
+  const porT = {};
+  servicios.forEach(s => {
+    const k = s.tecnica_id || 0;
+    porT[k] = porT[k] || { tecnica_id: s.tecnica_id, tecnica: s.tecnica_nombre || 'Sin técnica', servicios: 0, vendido: 0, comision: 0, propinas: 0 };
+    porT[k].servicios++; porT[k].vendido = r2(porT[k].vendido + nz(s.precio)); porT[k].comision = r2(porT[k].comision + nz(s.comision));
+    porT[k].propinas = r2(porT[k].propinas + nz(s.propina_tarjeta) + nz(s.propina_transfer));
+  });
+  return { servicios, egresos, totales: t, por_tecnica: Object.values(porT) };
+}
+
+app.get('/api/corte/dia', auth, requireRole('recepcionista', 'admin', 'supervisor'), async (req, res) => {
+  try {
+    const { numero_id, sucursal } = await numeroCorte(req);
+    if (!numero_id) return res.status(400).json({ error: 'Selecciona un número/sucursal' });
+    const fecha = req.query.fecha || hoyMX();
+    const c = await calcularCorteDia(numero_id, fecha);
+    const cierre = await new Promise(r => db.get('SELECT * FROM corte_cierres WHERE numero_id=? AND fecha=?', [numero_id, fecha], (e, x) => r(x || null)));
+    res.json({ ok: true, fecha, numero_id, sucursal, ...c, cierre });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Cerrar el corte del dia: la recepcionista cuenta el efectivo fisico y se guarda la diferencia.
+// Se puede volver a cerrar (sobrescribe) si hubo correcciones despues.
+app.post('/api/corte/cerrar', auth, requireRole('recepcionista', 'admin', 'supervisor'), async (req, res) => {
+  try {
+    const { numero_id, sucursal } = await numeroCorte(req);
+    if (!numero_id) return res.status(400).json({ error: 'Selecciona un número/sucursal' });
+    const fecha = req.body.fecha || hoyMX();
+    const { totales: t } = await calcularCorteDia(numero_id, fecha);
+    const contado = nz(req.body.efectivo_contado);
+    const diferencia = Math.round((contado - t.efectivo_neto) * 100) / 100;
+    db.run(`INSERT INTO corte_cierres (sucursal, numero_id, fecha, total_vendido, efectivo_esperado, efectivo_contado, diferencia, tarjeta, transferencias, egresos, notas, cerrado_por, cerrado_por_nombre)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(numero_id, fecha) DO UPDATE SET total_vendido=excluded.total_vendido, efectivo_esperado=excluded.efectivo_esperado,
+              efectivo_contado=excluded.efectivo_contado, diferencia=excluded.diferencia, tarjeta=excluded.tarjeta, transferencias=excluded.transferencias,
+              egresos=excluded.egresos, notas=excluded.notas, cerrado_por=excluded.cerrado_por, cerrado_por_nombre=excluded.cerrado_por_nombre, updated_at=CURRENT_TIMESTAMP`,
+      [sucursal, numero_id, fecha, t.total_vendido, t.efectivo_neto, contado, diferencia, t.tarjeta_neto, t.transfer_neto, t.egresos_total, req.body.notas || null, req.user.id, req.user.nombre || null],
+      e => e ? res.status(500).json({ error: e.message }) : res.json({ ok: true, fecha, efectivo_esperado: t.efectivo_neto, efectivo_contado: contado, diferencia }));
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // app.listen moved to end
@@ -2967,8 +3058,9 @@ async function upsertServicioPalomeo(eventId, b, req, ctx) {
     `INSERT INTO servicios (sucursal, numero_id, tecnica_id, tecnica_nombre, cliente, servicio, tipo_servicio,
        precio, pago_efectivo, pago_tarjeta, pago_transfer, pago_anticipo, propina_tarjeta, propina_transfer,
        observaciones, comision, comision_tasa, event_id, creado_por, fecha)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP))`,
-    [...vals, eventId, req.user.id, ctx.fecha || null], function (e) { e ? reject(e) : resolve(this.lastID); }));
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [...vals, eventId, req.user.id, ctx.fecha ? (String(ctx.fecha).length === 10 ? ctx.fecha + ' ' + ahoraMX().slice(11) : ctx.fecha) : ahoraMX()],
+    function (e) { e ? reject(e) : resolve(this.lastID); }));
   return { id, comision, tasa, creado: true };
 }
 

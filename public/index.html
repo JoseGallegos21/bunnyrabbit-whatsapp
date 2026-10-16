@@ -115,7 +115,7 @@ body{background:#111b21;height:100vh;height:100dvh;display:flex;align-items:cent
 /* Ocultar barras de scroll (siguen siendo arrastrables/scrolleables) */
 ::-webkit-scrollbar{width:0;height:0;background:transparent}
 *{scrollbar-width:none;-ms-overflow-style:none}
-.main-tabs{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;background:#111b21;border-bottom:1px solid #2a3942;padding:8px}
+.main-tabs{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;background:#111b21;border-bottom:1px solid #2a3942;padding:8px}
 .mtab span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .mtab{display:flex;flex-direction:column;align-items:center;gap:4px;padding:8px 2px;border-radius:10px;cursor:pointer;color:#8696a0;font-size:10.5px;font-weight:500;text-align:center;line-height:1.1}
 .mtab i{font-size:18px}
@@ -151,6 +151,28 @@ body{background:#111b21;height:100vh;height:100dvh;display:flex;align-items:cent
 /* ===== Calendario (Agenda recepcionista) ===== */
 .cal-nav{border:1px solid #ddd;background:#f8f9fa;border-radius:8px;width:34px;height:34px;cursor:pointer;font-size:16px;color:#333}
 .cal-hoy{border:1px solid #075e54;background:#e8f5f0;color:#075e54;border-radius:8px;padding:0 14px;height:34px;cursor:pointer;font-size:13px;font-weight:600}
+/* Corte de caja (recepcionista) */
+.cx-card{background:#fff;border-radius:12px;padding:14px 16px;box-shadow:0 1px 3px rgba(0,0,0,0.08);margin-bottom:14px}
+.cx-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}
+.cx-kpi{background:#fff;border-radius:12px;padding:14px;box-shadow:0 1px 3px rgba(0,0,0,0.08);border-top:3px solid #ddd}
+.cx-kpi .l{font-size:12px;color:#667781}.cx-kpi .v{font-size:22px;font-weight:700;color:#111;margin-top:4px;font-variant-numeric:tabular-nums}
+.cx-kpi .s{font-size:11px;color:#8696a0;margin-top:3px}
+.cx-kpi.efe{border-top-color:#2e7d32}.cx-kpi.tar{border-top-color:#1565c0}.cx-kpi.tra{border-top-color:#6a1b9a}.cx-kpi.tot{border-top-color:#075e54}
+.cx-h{font-size:15px;font-weight:600;color:#111;margin:0 0 10px}
+.cx-tabla{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+.cx-tabla th{text-align:left;font-size:11px;color:#667781;font-weight:600;text-transform:uppercase;letter-spacing:.03em;padding:6px 8px;border-bottom:1px solid #eee}
+.cx-tabla td{padding:8px;border-bottom:1px solid #f2f2f2;color:#222}
+.cx-tabla td.n,.cx-tabla th.n{text-align:right}
+.cx-wrap{overflow-x:auto}
+.cx-row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.cx-linea{display:flex;justify-content:space-between;padding:6px 0;font-size:13px;color:#333;border-bottom:1px dashed #eee;font-variant-numeric:tabular-nums}
+.cx-linea.tot{font-weight:700;color:#111;border-bottom:none;border-top:2px solid #111;margin-top:4px;padding-top:8px}
+.cx-in{padding:8px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;box-sizing:border-box}
+.cx-btn{background:#075e54;color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:600;cursor:pointer}
+.cx-btn:disabled{opacity:.6;cursor:default}
+.cx-chip{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
+.cx-chip.ab{background:#fff4e5;color:#b25e00}.cx-chip.ce{background:#e8f5e9;color:#2e7d32}
+@media(max-width:820px){.cx-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.cx-row2{grid-template-columns:1fr}}
 .cal-vistas{display:inline-flex;border:1px solid #ddd;border-radius:8px;overflow:hidden}
 .cal-vistas button{border:none;background:#fff;color:#555;padding:7px 14px;cursor:pointer;font-size:13px;border-right:1px solid #eee}
 .cal-vistas button:last-child{border-right:none}
@@ -275,6 +297,7 @@ body{background:#111b21;height:100vh;height:100dvh;display:flex;align-items:cent
         <div class="mtab" data-k="contactos" onclick="switchMainTab('contactos',this)"><i class="ti ti-users" aria-hidden="true"></i><span>Contactos</span></div>
         <div class="mtab" data-k="etiquetas" onclick="switchMainTab('etiquetas',this)"><i class="ti ti-tag" aria-hidden="true"></i><span>Etiquetas</span></div>
         <div class="mtab" data-k="calendario" onclick="switchMainTab('calendario',this)"><i class="ti ti-calendar" aria-hidden="true"></i><span>Agenda</span></div>
+        <div class="mtab" data-k="corte" onclick="switchMainTab('corte',this)"><i class="ti ti-cash" aria-hidden="true"></i><span>Corte</span></div>
       </div>
       <div id="numeroSelWrap" style="display:none;padding:8px 14px 2px">
         <select id="numeroSelChat" onchange="cambiarNumeroChat()" style="width:100%;padding:8px;border:1px solid #2a3942;background:#202c33;color:#e9edef;border-radius:8px;font-size:13px"></select>
@@ -629,6 +652,53 @@ body{background:#111b21;height:100vh;height:100dvh;display:flex;align-items:cent
             <div id="listaEtiquetas" style="display:flex;flex-wrap:wrap;gap:8px">
               <p style="color:#999;font-size:13px">Cargando...</p>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CORTE DE CAJA (recepcionista): se arma con lo que las técnicas palomean como "Vino" -->
+      <div class="main-section" id="msec-corte" style="flex:1;flex-direction:column;overflow-y:auto;background:#f0f2f5">
+        <div style="max-width:1120px;margin:0 auto;width:100%;padding:16px;box-sizing:border-box">
+          <div class="cx-card">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <button onclick="corteMover(-1)" title="Día anterior" class="cal-nav">‹</button>
+              <button onclick="corteMover(1)" title="Día siguiente" class="cal-nav">›</button>
+              <button onclick="corteHoyR()" class="cal-hoy">Hoy</button>
+              <h2 id="cxTitulo" style="margin:0;font-size:18px;color:#111;flex:1;min-width:150px">—</h2>
+              <span id="cxEstado"></span>
+              <input type="date" id="cxFecha" onchange="corteIrFecha()" class="cx-in">
+            </div>
+            <div style="font-size:12px;color:#667781;margin-top:8px">Se arma solo con las citas que las técnicas palomean como “Vino” (con su cobro). Tú registras los egresos y cierras la caja.</div>
+          </div>
+          <div class="cx-kpis" id="cxKpis"></div>
+          <div class="cx-row2">
+            <div class="cx-card"><div class="cx-h">Ingresos del día</div><div id="cxIngresos"></div></div>
+            <div class="cx-card"><div class="cx-h">Cuadre de caja</div><div id="cxCuadre"></div></div>
+          </div>
+          <div class="cx-card"><div class="cx-h">Servicios del día</div><div class="cx-wrap" id="cxServicios"></div></div>
+          <div class="cx-row2">
+            <div class="cx-card"><div class="cx-h">Por técnica</div><div class="cx-wrap" id="cxPorTecnica"></div></div>
+            <div class="cx-card">
+              <div class="cx-h">Egresos del día</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+                <input id="cxEgConcepto" class="cx-in" placeholder="Concepto (ej. basura)" style="flex:2;min-width:140px">
+                <input id="cxEgCantidad" class="cx-in" type="number" inputmode="decimal" placeholder="$" style="width:90px">
+                <select id="cxEgTipo" class="cx-in"><option>Efectivo</option><option>Transferencia</option></select>
+                <button class="cx-btn" onclick="corteAgregarEgreso()">Agregar</button>
+              </div>
+              <div id="cxEgresos"></div>
+            </div>
+          </div>
+          <div class="cx-card">
+            <div class="cx-h">Cerrar corte</div>
+            <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end">
+              <div><div style="font-size:12px;color:#667781;margin-bottom:4px">Efectivo que debe haber</div><div id="cxEsperado" style="font-size:20px;font-weight:700;font-variant-numeric:tabular-nums">—</div></div>
+              <div><div style="font-size:12px;color:#667781;margin-bottom:4px">Efectivo contado en caja</div><input id="cxContado" class="cx-in" type="number" inputmode="decimal" placeholder="0.00" oninput="corteDifLive()" style="width:150px"></div>
+              <div><div style="font-size:12px;color:#667781;margin-bottom:4px">Diferencia</div><div id="cxDif" style="font-size:20px;font-weight:700;font-variant-numeric:tabular-nums">—</div></div>
+              <input id="cxNotas" class="cx-in" placeholder="Notas (opcional)" style="flex:1;min-width:180px">
+              <button class="cx-btn" id="cxBtnCerrar" onclick="corteCerrar()">Cerrar corte</button>
+            </div>
+            <div id="cxCierreInfo" style="font-size:12px;margin-top:10px;color:#667781"></div>
           </div>
         </div>
       </div>
@@ -1344,6 +1414,7 @@ function switchMainTab(tab, btn){
   if(tab==='contactos') cargarContactos();
   if(tab==='etiquetas') cargarEtiquetasPanel();
   if(tab==='calendario') calInit();
+  if(tab==='corte') corteInit();
   // Escritorio: ocultar el panel de chat vacio cuando hay otra seccion activa, para
   // que la seccion ocupe todo el ancho (evita la columna oscura al lado).
   var layDesk=document.querySelector('.layout');
@@ -1424,6 +1495,106 @@ function _calAddMes(base,n){ var p=base.split('-'); var d=new Date(Date.UTC(+p[0
 function _calLunes(base){ var p=base.split('-'); var d=new Date(Date.UTC(+p[0],+p[1]-1,+p[2])); var dow=(d.getUTCDay()+6)%7; d.setUTCDate(d.getUTCDate()-dow); return d.toISOString().split('T')[0]; }
 
 var calVista='dia', calFechaVal='', calBusqueda='', calEventos=[], calTecnicas=[];
+
+// ===== CORTE DE CAJA (recepcionista) =====
+// Se arma con los servicios que las tecnicas palomean como "Vino" (con su cobro).
+var cxFecha=null, cxData=null;
+function cxYmd(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function cxMoney(n){ var x=Number(n||0); return (x<0?'-':'')+'$'+Math.abs(x).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function cxEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+function cxApi(path,opts){ opts=opts||{}; opts.headers=Object.assign({'Authorization':'Bearer '+token,'Content-Type':'application/json'},opts.headers||{}); return fetch(path,opts).then(function(r){return r.json();}); }
+function cxNumQ(){ var n=numActivo(); return n?('&numero_id='+encodeURIComponent(n)):''; }
+function cxKpi(cls,l,v,s){ return '<div class="cx-kpi '+cls+'"><div class="l">'+l+'</div><div class="v">'+cxMoney(v)+'</div><div class="s">'+s+'</div></div>'; }
+function cxLin(l,v,tot){ return '<div class="cx-linea'+(tot?' tot':'')+'"><span>'+l+'</span><span>'+cxMoney(v)+'</span></div>'; }
+function cxCero(v){ return v ? cxMoney(v) : '<span style="color:#ccc">—</span>'; }
+function cxPrim(n){ return String(n||'—').split(/\s+/)[0]; }
+
+function corteInit(){ if(!cxFecha) cxFecha=cxYmd(new Date()); corteCargar(); }
+function corteMover(d){ var p=cxFecha.split('-').map(Number); cxFecha=cxYmd(new Date(p[0],p[1]-1,p[2]+d)); corteCargar(); }
+function corteHoyR(){ cxFecha=cxYmd(new Date()); corteCargar(); }
+function corteIrFecha(){ var v=document.getElementById('cxFecha').value; if(v){ cxFecha=v; corteCargar(); } }
+
+function corteCargar(){
+  var p=cxFecha.split('-').map(Number);
+  var tt=new Date(p[0],p[1]-1,p[2]).toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'long',year:'numeric'}); document.getElementById('cxTitulo').textContent=tt.charAt(0).toUpperCase()+tt.slice(1);
+  document.getElementById('cxFecha').value=cxFecha;
+  cxApi('/api/corte/dia?fecha='+cxFecha+cxNumQ()).then(function(d){
+    if(!d||!d.ok){ cxData=null; document.getElementById('cxKpis').innerHTML='<div class="cx-card" style="grid-column:1/-1;color:#c62828">'+cxEsc((d&&d.error)||'No se pudo cargar el corte')+'</div>'; return; }
+    cxData=d; var t=d.totales;
+    document.getElementById('cxEstado').innerHTML = d.cierre ? '<span class="cx-chip ce">✓ Cerrado</span>' : '<span class="cx-chip ab">Abierto</span>';
+    document.getElementById('cxKpis').innerHTML=
+      cxKpi('tot','Total vendido',t.total_vendido, d.servicios.length+' servicio(s)')+
+      cxKpi('efe','Efectivo en caja',t.efectivo_neto,'servicios − egresos en efectivo')+
+      cxKpi('tar','Tarjeta (terminal)',t.tarjeta_neto,'incluye propinas con tarjeta')+
+      cxKpi('tra','Transferencias',t.transfer_neto,'incluye propinas por transferencia');
+    document.getElementById('cxIngresos').innerHTML=
+      cxLin('Servicio en efectivo',t.servicio_efectivo)+cxLin('Servicio con tarjeta',t.servicio_tarjeta)+cxLin('Servicio por transferencia',t.servicio_transfer)+
+      cxLin('Anticipos aplicados (pagados antes)',t.anticipos_aplicados)+cxLin('Propinas con tarjeta',t.propina_tarjeta)+cxLin('Propinas por transferencia',t.propina_transfer)+
+      ((t.af_tarjeta||t.af_transfer)? cxLin('Anticipos a futuro (tarjeta)',t.af_tarjeta)+cxLin('Anticipos a futuro (transferencia)',t.af_transfer) : '')+
+      cxLin('Total vendido',t.total_vendido,true);
+    document.getElementById('cxCuadre').innerHTML=
+      cxLin('Efectivo de servicios',t.servicio_efectivo)+cxLin('− Egresos en efectivo',-t.egresos_efectivo)+cxLin('= Efectivo que debe haber',t.efectivo_neto,true)+
+      '<div style="height:12px"></div>'+cxLin('Terminal (tarjeta)',t.tarjeta_neto)+cxLin('Transferencias netas',t.transfer_neto)+cxLin('Comisiones de técnicas del día',t.comisiones);
+    var sv=d.servicios;
+    document.getElementById('cxServicios').innerHTML = sv.length ?
+      '<table class="cx-tabla"><thead><tr><th>Hora</th><th>Técnica</th><th>Clienta</th><th>Servicio</th><th class="n">Precio</th><th class="n">Efectivo</th><th class="n">Tarjeta</th><th class="n">Transfer</th><th class="n">Anticipo</th><th class="n">Propina</th></tr></thead><tbody>'+
+      sv.map(function(s){ return '<tr><td>'+cxEsc((s.fecha||'').slice(11,16))+'</td><td>'+cxEsc(cxPrim(s.tecnica_nombre))+'</td><td>'+cxEsc(s.cliente||'—')+'</td><td>'+cxEsc(s.servicio||s.tipo_servicio||'')+'</td><td class="n">'+cxMoney(s.precio)+'</td><td class="n">'+cxCero(s.pago_efectivo)+'</td><td class="n">'+cxCero(s.pago_tarjeta)+'</td><td class="n">'+cxCero(s.pago_transfer)+'</td><td class="n">'+cxCero(s.pago_anticipo)+'</td><td class="n">'+cxCero((s.propina_tarjeta||0)+(s.propina_transfer||0))+'</td></tr>'; }).join('')+
+      '</tbody></table>' : '<p style="color:#999;font-size:13px;margin:0">Aún no hay servicios palomeados este día.</p>';
+    var pt=d.por_tecnica;
+    document.getElementById('cxPorTecnica').innerHTML = pt.length ?
+      '<table class="cx-tabla"><thead><tr><th>Técnica</th><th class="n">Serv.</th><th class="n">Vendido</th><th class="n">Comisión</th><th class="n">Propinas</th></tr></thead><tbody>'+
+      pt.map(function(x){ return '<tr><td>'+cxEsc(String(x.tecnica||'').split(/\s+/).slice(0,2).join(' '))+'</td><td class="n">'+x.servicios+'</td><td class="n">'+cxMoney(x.vendido)+'</td><td class="n">'+cxMoney(x.comision)+'</td><td class="n">'+cxMoney(x.propinas)+'</td></tr>'; }).join('')+
+      '</tbody></table>' : '<p style="color:#999;font-size:13px;margin:0">—</p>';
+    var eg=d.egresos;
+    document.getElementById('cxEgresos').innerHTML = eg.length ?
+      eg.map(function(e){ return '<div class="cx-linea"><span>'+cxEsc(e.concepto||'—')+' <span style="color:#8696a0;font-size:11px">· '+cxEsc(e.tipo||'Efectivo')+'</span></span><span>'+cxMoney(e.cantidad)+' <button onclick="corteBorrarEgreso('+e.id+')" title="Borrar" style="border:none;background:none;color:#c62828;cursor:pointer;font-size:14px">✕</button></span></div>'; }).join('')+
+      cxLin('Total egresos',t.egresos_total,true) : '<p style="color:#999;font-size:13px;margin:0">Sin egresos registrados.</p>';
+    document.getElementById('cxEsperado').textContent=cxMoney(t.efectivo_neto);
+    var c=d.cierre;
+    document.getElementById('cxContado').value = c ? c.efectivo_contado : '';
+    document.getElementById('cxNotas').value = c ? (c.notas||'') : '';
+    document.getElementById('cxBtnCerrar').textContent = c ? 'Volver a cerrar' : 'Cerrar corte';
+    var info='';
+    if(c){
+      info='Cerrado por <b>'+cxEsc(c.cerrado_por_nombre||'—')+'</b> · contó '+cxMoney(c.efectivo_contado)+' (diferencia '+cxMoney(c.diferencia)+')';
+      if(Math.abs((c.efectivo_esperado||0)-t.efectivo_neto)>0.009) info+=' · <span style="color:#b25e00">⚠ Hubo cambios después del cierre (el esperado era '+cxMoney(c.efectivo_esperado)+'). Vuelve a cerrar.</span>';
+    }
+    document.getElementById('cxCierreInfo').innerHTML=info;
+    corteDifLive();
+  });
+}
+function corteDifLive(){
+  var el=document.getElementById('cxDif'); if(!el) return;
+  var v=document.getElementById('cxContado').value;
+  if(!cxData||v===''){ el.textContent='—'; el.style.color='#111'; return; }
+  var dif=Math.round((parseFloat(v)-cxData.totales.efectivo_neto)*100)/100;
+  el.textContent=(dif>0?'+':'')+cxMoney(dif);
+  el.style.color = Math.abs(dif)<0.01 ? '#2e7d32' : (dif<0?'#c62828':'#b25e00');
+}
+function corteAgregarEgreso(){
+  var c=document.getElementById('cxEgConcepto').value.trim(), q=parseFloat(document.getElementById('cxEgCantidad').value)||0, tp=document.getElementById('cxEgTipo').value;
+  if(!c||q<=0){ alert('Pon el concepto y la cantidad'); return; }
+  cxApi('/api/corte/egresos',{method:'POST',body:JSON.stringify({concepto:c,cantidad:q,tipo:tp,fecha:cxFecha,numero_id:numActivo()||undefined})}).then(function(r){
+    if(r&&r.ok){ document.getElementById('cxEgConcepto').value=''; document.getElementById('cxEgCantidad').value=''; corteCargar(); }
+    else alert((r&&r.error)||'No se pudo guardar el egreso');
+  });
+}
+function corteBorrarEgreso(id){
+  if(!confirm('¿Borrar este egreso?')) return;
+  cxApi('/api/corte/egresos/'+id+'/borrar',{method:'POST'}).then(function(){ corteCargar(); });
+}
+function corteCerrar(){
+  if(!cxData) return;
+  var v=document.getElementById('cxContado').value;
+  if(v===''){ alert('Escribe cuánto efectivo contaste en caja'); return; }
+  var dif=Math.round((parseFloat(v)-cxData.totales.efectivo_neto)*100)/100;
+  if(Math.abs(dif)>=0.01 && !confirm('Hay una diferencia de '+(dif>0?'+':'')+cxMoney(dif)+'. ¿Cerrar el corte así?')) return;
+  var b=document.getElementById('cxBtnCerrar'); b.disabled=true;
+  cxApi('/api/corte/cerrar',{method:'POST',body:JSON.stringify({fecha:cxFecha,efectivo_contado:parseFloat(v),notas:document.getElementById('cxNotas').value.trim()||null,numero_id:numActivo()||undefined})}).then(function(r){
+    b.disabled=false;
+    if(r&&r.ok) corteCargar(); else alert((r&&r.error)||'No se pudo cerrar el corte');
+  });
+}
 
 function calInit(){
   var inp=document.getElementById('calFecha');

@@ -533,7 +533,9 @@ async function cargarGoogleCalendar(fi, ff) {
     const fin = e.end?.dateTime ? new Date(e.end.dateTime).toLocaleTimeString('es-MX', {hour:'2-digit',minute:'2-digit'}) : '';
     const fecha = (e.start?.dateTime || '').split('T')[0] || fi;
     const est = mapa[e.id] || '';
-    window._gcalHoy[e.id] = { cliente: e.summary || '', servicio: '', hora: inicio, fecha };
+    // Nombre limpio de la clienta: sin la etiqueta de la tecnica del final ("Andrea Ruiz-Naim" -> "Andrea Ruiz"), como en el Excel
+    const clienteLimpio = tagTecnico(e.summary) ? String(e.summary).replace(/-[^-]*$/, '').trim() : (e.summary || '');
+    window._gcalHoy[e.id] = { cliente: clienteLimpio, servicio: '', hora: inicio, fecha };
     return `
       <div class="gcal-evento asis-${est}">
         <div class="gcal-hora">${inicio}${fin ? ' – ' + fin : ''}</div>

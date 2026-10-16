@@ -308,13 +308,19 @@ function seedCorteDefaults() {
     }
   });
   db.run("INSERT OR IGNORE INTO corte_sucursal_grupo (sucursal, grupo) VALUES ('Caralinda San Rafael', 1)");
+  // Productos que no pagan comision (como en el Excel: la pomada sale con $0)
+  db.run("INSERT INTO corte_tasas (sucursal, tipo_servicio, tasa) SELECT NULL, 'servicio:pomada', 0 WHERE NOT EXISTS (SELECT 1 FROM corte_tasas WHERE tipo_servicio='servicio:pomada')");
 }
 
-// Tasa de comision para un tipo de servicio (prefiere la de la sucursal, luego la global).
-function tasaComision(tipoServicio, sucursal) {
+function _normServicio(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim(); }
+// Tasa de comision: primero una regla para ese servicio en especifico ("servicio:pomada"),
+// si no, la del tipo de servicio; prefiere la de la sucursal sobre la global.
+function tasaComision(tipoServicio, sucursal, servicio) {
+  const claveServ = servicio ? 'servicio:' + _normServicio(servicio) : '';
   return new Promise(resolve => {
-    db.get("SELECT tasa FROM corte_tasas WHERE tipo_servicio=? AND (sucursal=? OR sucursal IS NULL) ORDER BY (sucursal IS NULL) LIMIT 1",
-      [tipoServicio || '', sucursal || null], (e, r) => resolve(r ? Number(r.tasa) : 0));
+    db.get(`SELECT tasa FROM corte_tasas WHERE tipo_servicio IN (?, ?) AND (sucursal=? OR sucursal IS NULL)
+            ORDER BY (tipo_servicio=?) DESC, (sucursal IS NULL) LIMIT 1`,
+      [claveServ, tipoServicio || '', sucursal || null, claveServ], (e, r) => resolve(r ? Number(r.tasa) : 0));
   });
 }
 
@@ -2145,8 +2151,8 @@ app.post('/api/servicios', auth, requireRole('tecnica', 'recepcionista', 'admin'
     if (!sucursal && numero_id) { const n = await new Promise(r => db.get('SELECT sucursal FROM numeros WHERE phone_number_id=?', [numero_id], (e, x) => r(x))); sucursal = n && n.sucursal; }
     if (!b.servicio && !b.tipo_servicio) return res.status(400).json({ error: 'Falta el servicio' });
     const precio = nz(b.precio);
-    const tasa = await tasaComision(b.tipo_servicio, sucursal);
-    const comision = Math.round(precio * tasa * 100) / 100;
+    const tasa = await tasaComision(b.tipo_servicio, sucursal, b.servicio);
+    const comision = Math.round(precio * tasa * 10000) / 10000;   // sin redondear a centavos por fila: los totales se redondean al sumar (como el Excel)
     const campos = {
       sucursal, numero_id, tecnica_id, tecnica_nombre,
       cliente: b.cliente || null, contacto_id: b.contacto_id || null, telefono: b.telefono || null,
@@ -2329,7 +2335,7 @@ app.get('/api/corte/semana', auth, requireRole('recepcionista', 'admin', 'superv
     const rango = [numero_id, desde, hasta];
     const servicios = await q('SELECT * FROM servicios WHERE anulado=0 AND numero_id=? AND date(fecha) BETWEEN date(?) AND date(?) ORDER BY fecha', rango);
     const egresos = await q('SELECT * FROM corte_egresos WHERE numero_id=? AND COALESCE(anulado,0)=0 AND date(fecha) BETWEEN date(?) AND date(?) ORDER BY fecha', rango);
-    const pagos = await q('SELECT * FROM corte_pagos WHERE numero_id=? AND COALESCE(anulado,0)=0 AND date(fecha) BETWEEN date(?) AND date(?) ORDER BY fecha', rango);
+    const pagos = await q("SELECT * FROM corte_pagos WHERE numero_id=? AND COALESCE(anulado,0)=0 AND COALESCE(tipo,'Pagado')='Pagado' AND date(fecha) BETWEEN date(?) AND date(?) ORDER BY fecha", rango)   // como el Excel: solo el tipo 'Pagado' es dinero entregado;
     const fijos = (await g('SELECT * FROM corte_fijos WHERE numero_id=? AND periodo_inicio=? AND periodo_fin=?', rango)) || { materia_prima: 0, impulso: 0, renta: 0, corporativo: 0 };
     const tbRaw = parseFloat(await configGet('corte_tasa_banco'));
     const tasa_banco = isNaN(tbRaw) ? 0.025 : tbRaw;
@@ -2358,12 +2364,16 @@ app.get('/api/corte/semana', auth, requireRole('recepcionista', 'admin', 'superv
     // Colaboradores: usuarios de la sucursal (tecnicas y recepcionistas) + quien tenga servicios en el periodo
     const usuarios = await q("SELECT id, nombre, rol, sueldo_base FROM usuarios WHERE (numero_id=? OR sucursal=?) AND rol IN ('tecnica','recepcionista')", [numero_id, sucursal]);
     const cols = new Map(usuarios.map(u => [u.id, u]));
-    servicios.forEach(s => { if (s.tecnica_id && !cols.has(s.tecnica_id)) cols.set(s.tecnica_id, { id: s.tecnica_id, nombre: s.tecnica_nombre, rol: 'tecnica', sueldo_base: 0 }); });
+    servicios.forEach(s => {
+      if (s.tecnica_id && !cols.has(s.tecnica_id)) cols.set(s.tecnica_id, { id: s.tecnica_id, nombre: s.tecnica_nombre, rol: 'tecnica', sueldo_base: 0 });
+      // colaborador sin usuario en la app (p. ej. importado del Excel): se muestra por nombre, solo lectura
+      if (!s.tecnica_id && s.tecnica_nombre && !cols.has('n:' + s.tecnica_nombre)) cols.set('n:' + s.tecnica_nombre, { id: null, nombre: s.tecnica_nombre, rol: 'tecnica', sueldo_base: 0, sin_usuario: true });
+    });
     const ajustes = await q('SELECT * FROM corte_ajustes WHERE periodo_inicio=? AND periodo_fin=?', [desde, hasta]);
     const ajMap = new Map(ajustes.map(a => [a.colaborador_id, a]));
 
     const nomina = [...cols.values()].map(u => {
-      const sv = servicios.filter(s => s.tecnica_id === u.id);
+      const sv = u.sin_usuario ? servicios.filter(s => !s.tecnica_id && s.tecnica_nombre === u.nombre) : servicios.filter(s => s.tecnica_id === u.id);
       const aj = ajMap.get(u.id);
       const bonoAuto = 0;   // el bono se captura a mano (decision del usuario); bono_sucursal solo se muestra como sugerencia
       const n = {
@@ -2379,7 +2389,8 @@ app.get('/api/corte/semana', auth, requireRole('recepcionista', 'admin', 'superv
       };
       n.propinas = r2(n.propinas_servicios + n.propinas_extra);
       n.subtotal = r2(n.comisiones + n.sueldo + n.propinas + n.bono_semanal + n.bono_mensual - n.retardos - n.multas - n.pre_pago);
-      n.pagado = sum(pagos.filter(p => p.colaborador_id === u.id), p => p.cantidad);
+      n.sin_usuario = !!u.sin_usuario;
+      n.pagado = sum(pagos.filter(p => u.sin_usuario ? (!p.colaborador_id && String(p.colaborador_nombre || '').trim().toLowerCase() === String(u.nombre).trim().toLowerCase()) : p.colaborador_id === u.id), p => p.cantidad);
       n.pendiente = r2(n.subtotal - n.pagado);
       return n;
     }).sort((a, b) => (b.subtotal - a.subtotal) || String(a.nombre).localeCompare(String(b.nombre)));
@@ -2391,7 +2402,8 @@ app.get('/api/corte/semana', auth, requireRole('recepcionista', 'admin', 'superv
     t.pendiente = r2(t.total_nomina - t.pagado);
     t.fijos = r2(nz(fijos.materia_prima) + nz(fijos.impulso) + nz(fijos.renta) + nz(fijos.corporativo));
     t.comision_banco = r2(t.tarjeta * tasa_banco);   // solo sobre los servicios pagados con tarjeta (no propinas ni anticipos a futuro)
-    t.utilidad = r2(t.total_semana - t.comisiones - t.sueldos - t.bonos - t.gastos - t.fijos - t.comision_banco);
+    t.propinas_nomina = sum(nomina, n => n.propinas);   // se le pagan a la tecnica: el Excel las resta de la utilidad
+    t.utilidad = r2(t.total_semana - t.comisiones - t.sueldos - t.bonos - t.propinas_nomina - t.gastos - t.fijos - t.comision_banco);
     t.pagos_efectivo = sum(pagos.filter(p => (p.metodo || 'Efectivo') === 'Efectivo'), p => p.cantidad);
     t.sobrante_efectivo = r2(t.efectivo - t.gastos_efectivo - t.pagos_efectivo);
 
@@ -2460,7 +2472,7 @@ app.post('/api/corte/pagos', auth, requireRole('recepcionista', 'admin', 'superv
     if (nz(b.cantidad) <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
     const fecha = b.fecha ? (String(b.fecha).length === 10 ? b.fecha + ' ' + ahoraMX().slice(11) : b.fecha) : ahoraMX();
     db.run('INSERT INTO corte_pagos (sucursal, numero_id, fecha, colaborador_id, colaborador_nombre, cantidad, tipo, metodo, notas, creado_por) VALUES (?,?,?,?,?,?,?,?,?,?)',
-      [sucursal, numero_id, fecha, u.id, u.nombre, nz(b.cantidad), b.tipo || 'Pagado', b.metodo || 'Efectivo', b.notas || null, req.user.id],
+      [sucursal, numero_id, fecha, u.id, u.nombre, nz(b.cantidad), 'Pagado', b.metodo || 'Efectivo', b.notas || null, req.user.id],
       function (e) { e ? res.status(500).json({ error: e.message }) : (res.json({ ok: true, id: this.lastID }), programarSyncCorte()); });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -3376,9 +3388,9 @@ async function procesarVinoCapi(asis, rol) {
 // palomea "Vino" y captura el cobro. La comision se calcula sola. Un servicio por
 // cita (event_id): si re-palomea, se actualiza en vez de duplicar.
 async function upsertServicioPalomeo(eventId, b, req, ctx) {
-  const tasa = await tasaComision(b.tipo_servicio, ctx.sucursal);
+  const tasa = await tasaComision(b.tipo_servicio, ctx.sucursal, b.servicio || ctx.servicio);
   const precio = nz(b.precio);
-  const comision = Math.round(precio * tasa * 100) / 100;
+  const comision = Math.round(precio * tasa * 10000) / 10000;
   const numero_id = req.user.numero_id || null;
   const tecnicaNombre = req.user.rol === 'tecnica' ? req.user.nombre : (b.tecnica_nombre || null);
   const cliente = ctx.cliente || b.cliente || null;

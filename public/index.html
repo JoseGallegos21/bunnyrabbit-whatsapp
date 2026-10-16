@@ -173,6 +173,7 @@ body{background:#111b21;height:100vh;height:100dvh;display:flex;align-items:cent
 .cx-chip{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
 .cx-chip.ab{background:#fff4e5;color:#b25e00}.cx-chip.ce{background:#e8f5e9;color:#2e7d32}
 .cx-seg{display:inline-flex;border:1px solid #075e54;border-radius:8px;overflow:hidden}.cx-seg button{border:none;background:#fff;color:#075e54;padding:0 14px;height:34px;font-size:13px;font-weight:600;cursor:pointer}.cx-seg button.on{background:#075e54;color:#fff}.cx-num{width:78px;padding:5px 6px;border:1px solid #ddd;border-radius:6px;font-size:12px;text-align:right;font-variant-numeric:tabular-nums}.cx-num:focus{outline:none;border-color:#075e54}.cx-mini{border:1px solid #075e54;background:#fff;color:#075e54;border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer}.cx-mini.pay{background:#075e54;color:#fff}
+.cx-exp td{background:#f6faf8}.cx-expbox{padding:6px 2px}.cx-expgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}.cx-campo{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#667781}.cx-campo .cx-num{width:100%;box-sizing:border-box}
 @media(max-width:820px){.cx-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.cx-row2{grid-template-columns:1fr}}
 .cal-vistas{display:inline-flex;border:1px solid #ddd;border-radius:8px;overflow:hidden}
 .cal-vistas button{border:none;background:#fff;color:#555;padding:7px 14px;cursor:pointer;font-size:13px;border-right:1px solid #eee}
@@ -721,7 +722,7 @@ body{background:#111b21;height:100vh;height:100dvh;display:flex;align-items:cent
             <div class="cx-card">
               <div class="cx-h">Nómina por colaborador</div>
               <div class="cx-wrap" id="cxsNomina"></div>
-              <div style="font-size:11px;color:#8696a0;margin-top:8px">Subtotal = comisiones + sueldo + propinas + bonos − retardos − multas − pre-pago. Edita una fila y pulsa Guardar. Los bonos se capturan a mano.</div>
+              <div style="font-size:11px;color:#8696a0;margin-top:8px">Subtotal = comisiones + sueldo + propinas + bonos − descuentos (retardos, multas y pre-pago). “💵 Pagar” registra lo que le entregas a cada colaborador; “Ajustar” cambia sueldo, bonos y descuentos.</div>
             </div>
             <div class="cx-row2">
               <div class="cx-card"><div class="cx-h">Efectivo y tarjeta por día</div><div class="cx-wrap" id="cxsDias"></div></div>
@@ -1603,27 +1604,41 @@ function cxsCargar(){
       '</div>'+
       '<button class="cx-btn" onclick="cxsGuardarFijos()" style="margin-bottom:12px">Guardar costos</button>'+
       cxLin('Total semana',t.total_semana)+cxLin('− Comisiones',-t.comisiones)+cxLin('− Sueldos',-t.sueldos)+cxLin('− Bonos',-t.bonos)+
-      cxLin('− Gastos',-t.gastos)+cxLin('− Gastos fijos',-t.fijos)+cxLin('− Comisión bancaria ('+(Math.round(d.tasa_banco*1000)/10)+'%)',-t.comision_banco)+
+      cxLin('− Propinas (se pagan a la técnica)',-t.propinas_nomina)+cxLin('− Gastos',-t.gastos)+cxLin('− Gastos fijos',-t.fijos)+cxLin('− Comisión bancaria ('+(Math.round(d.tasa_banco*1000)/10)+'%)',-t.comision_banco)+
       cxLin('= Utilidad',t.utilidad,true);
     var nom=d.nomina;
+    var cxCampo=function(lbl,id,v,i){ return '<label class="cx-campo"><span>'+lbl+'</span>'+cxIn(id,v,i)+'</label>'; };
+    var totProp=0, totSue=0, totBon=0, totDesc=0;
     document.getElementById('cxsNomina').innerHTML = nom.length ?
-      '<table class="cx-tabla"><thead><tr><th>Colaborador</th><th class="n">Serv.</th><th class="n">Comisiones</th><th class="n">Propinas</th><th class="n">Sueldo</th><th class="n">Prop. extra</th><th class="n">Bono sem.</th><th class="n">Bono mens.</th><th class="n">Retardos</th><th class="n">Multas</th><th class="n">Pre-pago</th><th class="n">Subtotal</th><th class="n">Pagado</th><th class="n">Pendiente</th><th></th></tr></thead><tbody>'+
+      '<table class="cx-tabla"><thead><tr><th>Colaborador</th><th class="n">Serv.</th><th class="n">Comisiones</th><th class="n">Propinas</th><th class="n">Sueldo</th><th class="n">Bonos</th><th class="n">Descuentos</th><th class="n">Subtotal</th><th class="n">Pagado</th><th class="n">Pendiente</th><th class="n">Acciones</th></tr></thead><tbody>'+
       nom.map(function(n,i){
-        return '<tr id="cxsRow'+i+'"><td><b>'+cxEsc(String(n.nombre||'').split(/\s+/).slice(0,2).join(' '))+'</b><div style="font-size:11px;color:#8696a0">'+cxEsc(n.rol)+(n.guardado?' · guardado':'')+'</div></td>'+
-          '<td class="n">'+n.servicios+'</td><td class="n">'+cxMoney(n.comisiones)+'</td><td class="n">'+cxMoney(n.propinas_servicios)+'</td>'+
-          '<td class="n">'+cxIn('cxsSue'+i,n.sueldo,i)+'</td><td class="n">'+cxIn('cxsPro'+i,n.propinas_extra,i)+'</td>'+
-          '<td class="n">'+cxIn('cxsBs'+i,n.bono_semanal,i)+'</td><td class="n">'+cxIn('cxsBm'+i,n.bono_mensual,i)+'</td>'+
-          '<td class="n">'+cxIn('cxsRet'+i,n.retardos,i)+'</td><td class="n">'+cxIn('cxsMul'+i,n.multas,i)+'</td><td class="n">'+cxIn('cxsPre'+i,n.pre_pago,i)+'</td>'+
-          '<td class="n"><b id="cxsSub'+i+'">'+cxMoney(n.subtotal)+'</b></td><td class="n">'+cxMoney(n.pagado)+'</td><td class="n" id="cxsPen'+i+'" style="color:'+(n.pendiente>0.009?'#b25e00':'#2e7d32')+';font-weight:600">'+cxMoney(n.pendiente)+'</td>'+
-          '<td style="white-space:nowrap"><button class="cx-mini" onclick="cxsGuardarAjuste('+i+')">Guardar</button> <button class="cx-mini pay" onclick="cxsTogglePago('+i+')">Pagar</button></td></tr>'+
-          '<tr id="cxsPay'+i+'" style="display:none;background:#f8faf9"><td colspan="15"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:4px 0">'+
-            '<span style="font-size:12px;color:#667781">Registrar pago a '+cxEsc(String(n.nombre||'').split(/\s+/)[0])+':</span>'+
-            '<input class="cx-in" id="cxsPayCant'+i+'" type="number" inputmode="decimal" value="'+Math.max(0,n.pendiente)+'" style="width:110px">'+
-            '<select class="cx-in" id="cxsPayTipo'+i+'"><option>Comisión</option><option>Sueldo</option><option>Bono Semanal</option><option>Bono Mensual</option><option>Propinas</option><option>Pagado</option></select>'+
-            '<select class="cx-in" id="cxsPayMet'+i+'"><option>Efectivo</option><option>Transferencia</option></select>'+
-            '<button class="cx-btn" onclick="cxsPagar('+i+')">Registrar pago</button></div></td></tr>';
+        var bonos=n.bono_semanal+n.bono_mensual, desc=n.retardos+n.multas+n.pre_pago;
+        totProp+=n.propinas; totSue+=n.sueldo; totBon+=bonos; totDesc+=desc;
+        var liquidado = n.subtotal>0.009 && n.pendiente<=0.009;
+        var nombre=cxEsc(String(n.nombre||'').split(/\s+/).slice(0,2).join(' ')), primer=cxEsc(String(n.nombre||'').split(/\s+/)[0]);
+        var pend = liquidado ? '<span class="cx-chip ce">✓ Pagado</span>' : (n.subtotal<=0.009 ? '<span style="color:#ccc">—</span>' : '<b style="color:#b25e00">'+cxMoney(n.pendiente)+'</b>');
+        var tipoDef = n.rol==='recepcionista' ? 'Sueldo' : 'Comisión';
+        var tipos=['Comisión','Sueldo','Bono Semanal','Bono Mensual','Propinas','Pagado'].map(function(t){ return '<option'+(t===tipoDef?' selected':'')+'>'+t+'</option>'; }).join('');
+        var btnPagar = (liquidado||n.subtotal<=0.009||n.sin_usuario) ? '' : '<button class="cx-mini pay" onclick="cxsToggle(&quot;Pay&quot;,'+i+')">💵 Pagar</button> ';
+        return '<tr><td><b>'+nombre+'</b><div style="font-size:11px;color:#8696a0">'+cxEsc(n.rol)+(n.guardado?' · ajustado':'')+'</div></td>'+
+          '<td class="n">'+n.servicios+'</td><td class="n">'+cxMoney(n.comisiones)+'</td><td class="n">'+cxCero(n.propinas)+'</td>'+
+          '<td class="n">'+cxCero(n.sueldo)+'</td><td class="n">'+cxCero(bonos)+'</td><td class="n">'+(desc>0.009?'<span style="color:#c62828">-'+cxMoney(desc)+'</span>':cxCero(0))+'</td>'+
+          '<td class="n"><b>'+cxMoney(n.subtotal)+'</b></td><td class="n">'+cxCero(n.pagado)+'</td><td class="n">'+pend+'</td>'+
+          '<td class="n" style="white-space:nowrap">'+(n.sin_usuario?'<span style="font-size:11px;color:#8696a0">sin usuario en la app</span>':btnPagar+'<button class="cx-mini" onclick="cxsToggle(&quot;Aj&quot;,'+i+')">Ajustar</button>')+'</td></tr>'+
+          '<tr id="cxsPay'+i+'" class="cx-exp" style="display:none"><td colspan="11"><div class="cx-expbox">'+
+            '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
+              '<span style="font-size:13px">Pago a <b>'+primer+'</b> · pendiente <b>'+cxMoney(n.pendiente)+'</b></span>'+
+              '<input class="cx-in" id="cxsPayCant'+i+'" type="number" inputmode="decimal" value="'+Math.max(0,n.pendiente)+'" style="width:120px">'+
+              '<select class="cx-in" id="cxsPayMet'+i+'"><option>Efectivo</option><option>Transferencia</option></select>'+
+              '<button class="cx-btn" onclick="cxsPagar('+i+')">Registrar pago</button>'+
+            '</div><div style="font-size:11px;color:#8696a0;margin-top:6px">Puedes pagar una parte: lo que falte queda pendiente. Se anota en “Comisiones Externas” del Excel como <b>Pagado</b>.</div>'+
+          '</div></td></tr>'+
+          '<tr id="cxsAj'+i+'" class="cx-exp" style="display:none"><td colspan="11"><div class="cx-expbox">'+
+            '<div class="cx-expgrid">'+cxCampo('Sueldo','cxsSue'+i,n.sueldo,i)+cxCampo('Propina extra','cxsPro'+i,n.propinas_extra,i)+cxCampo('Bono semanal','cxsBs'+i,n.bono_semanal,i)+cxCampo('Bono mensual','cxsBm'+i,n.bono_mensual,i)+cxCampo('Retardos','cxsRet'+i,n.retardos,i)+cxCampo('Multas','cxsMul'+i,n.multas,i)+cxCampo('Pre-pago','cxsPre'+i,n.pre_pago,i)+'</div>'+
+            '<div style="display:flex;align-items:center;gap:12px;margin-top:10px;flex-wrap:wrap"><span style="font-size:13px">Subtotal: <b id="cxsSub'+i+'">'+cxMoney(n.subtotal)+'</b> · pendiente: <b id="cxsPen'+i+'">'+cxMoney(n.pendiente)+'</b></span><button class="cx-btn" onclick="cxsGuardarAjuste('+i+')">Guardar ajustes</button></div>'+
+          '</div></td></tr>';
       }).join('')+
-      '<tr><td><b>Total</b></td><td></td><td class="n"><b>'+cxMoney(t.comisiones)+'</b></td><td colspan="8"></td><td class="n"><b>'+cxMoney(t.total_nomina)+'</b></td><td class="n"><b>'+cxMoney(t.pagado)+'</b></td><td class="n"><b>'+cxMoney(t.pendiente)+'</b></td><td></td></tr>'+
+      '<tr><td><b>Total</b></td><td></td><td class="n"><b>'+cxMoney(t.comisiones)+'</b></td><td class="n"><b>'+cxMoney(totProp)+'</b></td><td class="n"><b>'+cxMoney(totSue)+'</b></td><td class="n"><b>'+cxMoney(totBon)+'</b></td><td class="n"><b>'+(totDesc>0.009?'-'+cxMoney(totDesc):cxMoney(0))+'</b></td><td class="n"><b>'+cxMoney(t.total_nomina)+'</b></td><td class="n"><b>'+cxMoney(t.pagado)+'</b></td><td class="n"><b>'+cxMoney(t.pendiente)+'</b></td><td></td></tr>'+
       '</tbody></table>' : '<p style="color:#999;font-size:13px;margin:0">Sin colaboradores en este periodo.</p>';
     var pd=d.por_dia;
     document.getElementById('cxsDias').innerHTML='<table class="cx-tabla"><thead><tr><th>Día</th><th class="n">Vendido</th><th class="n">Efectivo</th><th class="n">Tarjeta</th><th class="n">Transfer</th></tr></thead><tbody>'+
@@ -1660,12 +1675,18 @@ function cxsGuardarAjuste(i){
     sueldo:cxsVal('cxsSue'+i),propinas:cxsVal('cxsPro'+i),bono_semanal:cxsVal('cxsBs'+i),bono_mensual:cxsVal('cxsBm'+i),retardos:cxsVal('cxsRet'+i),multas:cxsVal('cxsMul'+i),pre_pago:cxsVal('cxsPre'+i)})})
   .then(function(r){ if(r&&r.ok) cxsCargar(); else alert((r&&r.error)||'No se pudo guardar'); });
 }
-function cxsTogglePago(i){ var r=document.getElementById('cxsPay'+i); r.style.display = r.style.display==='none' ? '' : 'none'; }
+function cxsToggle(tipo,i){
+  var otro = tipo==='Pay' ? 'Aj' : 'Pay';
+  var r=document.getElementById('cxs'+tipo+i), o=document.getElementById('cxs'+otro+i);
+  if(o) o.style.display='none';
+  r.style.display = r.style.display==='none' ? '' : 'none';
+  if(tipo==='Pay' && r.style.display===''){ var c=document.getElementById('cxsPayCant'+i); if(c){ c.focus(); c.select(); } }
+}
 function cxsPagar(i){
   var n=cxsData.nomina[i], cant=cxsVal('cxsPayCant'+i);
   if(cant<=0){ alert('Pon la cantidad pagada'); return; }
   var fecha = (cxYmd(new Date())>=cxsDesde && cxYmd(new Date())<=cxsHasta) ? cxYmd(new Date()) : cxsHasta;
-  cxApi('/api/corte/pagos',{method:'POST',body:JSON.stringify({colaborador_id:n.colaborador_id,cantidad:cant,tipo:document.getElementById('cxsPayTipo'+i).value,metodo:document.getElementById('cxsPayMet'+i).value,fecha:fecha,numero_id:numActivo()||undefined})})
+  cxApi('/api/corte/pagos',{method:'POST',body:JSON.stringify({colaborador_id:n.colaborador_id,cantidad:cant,tipo:'Pagado',metodo:document.getElementById('cxsPayMet'+i).value,fecha:fecha,numero_id:numActivo()||undefined})})
   .then(function(r){ if(r&&r.ok) cxsCargar(); else alert((r&&r.error)||'No se pudo registrar el pago'); });
 }
 function cxsBorrarPago(id){

@@ -172,6 +172,7 @@ body{background:#111b21;height:100vh;height:100dvh;display:flex;align-items:cent
 .cx-btn:disabled{opacity:.6;cursor:default}
 .cx-chip{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
 .cx-chip.ab{background:#fff4e5;color:#b25e00}.cx-chip.ce{background:#e8f5e9;color:#2e7d32}
+.cx-seg{display:inline-flex;border:1px solid #075e54;border-radius:8px;overflow:hidden}.cx-seg button{border:none;background:#fff;color:#075e54;padding:0 14px;height:34px;font-size:13px;font-weight:600;cursor:pointer}.cx-seg button.on{background:#075e54;color:#fff}.cx-num{width:78px;padding:5px 6px;border:1px solid #ddd;border-radius:6px;font-size:12px;text-align:right;font-variant-numeric:tabular-nums}.cx-num:focus{outline:none;border-color:#075e54}.cx-mini{border:1px solid #075e54;background:#fff;color:#075e54;border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer}.cx-mini.pay{background:#075e54;color:#fff}
 @media(max-width:820px){.cx-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.cx-row2{grid-template-columns:1fr}}
 .cal-vistas{display:inline-flex;border:1px solid #ddd;border-radius:8px;overflow:hidden}
 .cal-vistas button{border:none;background:#fff;color:#555;padding:7px 14px;cursor:pointer;font-size:13px;border-right:1px solid #eee}
@@ -658,47 +659,75 @@ body{background:#111b21;height:100vh;height:100dvh;display:flex;align-items:cent
 
       <!-- CORTE DE CAJA (recepcionista): se arma con lo que las técnicas palomean como "Vino" -->
       <div class="main-section" id="msec-corte" style="flex:1;flex-direction:column;overflow-y:auto;background:#f0f2f5">
-        <div style="max-width:1120px;margin:0 auto;width:100%;padding:16px;box-sizing:border-box">
+        <div style="max-width:1180px;margin:0 auto;width:100%;padding:16px;box-sizing:border-box">
           <div class="cx-card">
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-              <button onclick="corteMover(-1)" title="Día anterior" class="cal-nav">‹</button>
-              <button onclick="corteMover(1)" title="Día siguiente" class="cal-nav">›</button>
+              <div class="cx-seg"><button id="cxModoDia" class="on" onclick="corteModo('dia')">Día</button><button id="cxModoSem" onclick="corteModo('semana')">Semana</button></div>
+              <button onclick="corteMover(-1)" title="Anterior" class="cal-nav">‹</button>
+              <button onclick="corteMover(1)" title="Siguiente" class="cal-nav">›</button>
               <button onclick="corteHoyR()" class="cal-hoy">Hoy</button>
               <h2 id="cxTitulo" style="margin:0;font-size:18px;color:#111;flex:1;min-width:150px">—</h2>
               <span id="cxEstado"></span>
               <input type="date" id="cxFecha" onchange="corteIrFecha()" class="cx-in">
+              <span id="cxRango" style="display:none;align-items:center;gap:6px;font-size:13px;color:#667781">
+                <input type="date" id="cxDesde" class="cx-in" onchange="corteRango()"> a <input type="date" id="cxHasta" class="cx-in" onchange="corteRango()">
+              </span>
             </div>
-            <div style="font-size:12px;color:#667781;margin-top:8px">Se arma solo con las citas que las técnicas palomean como “Vino” (con su cobro). Tú registras los egresos y cierras la caja.</div>
+            <div id="cxAyuda" style="font-size:12px;color:#667781;margin-top:8px">Se arma solo con las citas que las técnicas palomean como “Vino” (con su cobro). Tú registras los egresos y cierras la caja.</div>
           </div>
-          <div class="cx-kpis" id="cxKpis"></div>
-          <div class="cx-row2">
-            <div class="cx-card"><div class="cx-h">Ingresos del día</div><div id="cxIngresos"></div></div>
-            <div class="cx-card"><div class="cx-h">Cuadre de caja</div><div id="cxCuadre"></div></div>
-          </div>
-          <div class="cx-card"><div class="cx-h">Servicios del día</div><div class="cx-wrap" id="cxServicios"></div></div>
-          <div class="cx-row2">
-            <div class="cx-card"><div class="cx-h">Por técnica</div><div class="cx-wrap" id="cxPorTecnica"></div></div>
-            <div class="cx-card">
-              <div class="cx-h">Egresos del día</div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-                <input id="cxEgConcepto" class="cx-in" placeholder="Concepto (ej. basura)" style="flex:2;min-width:140px">
-                <input id="cxEgCantidad" class="cx-in" type="number" inputmode="decimal" placeholder="$" style="width:90px">
-                <select id="cxEgTipo" class="cx-in"><option>Efectivo</option><option>Transferencia</option></select>
-                <button class="cx-btn" onclick="corteAgregarEgreso()">Agregar</button>
+
+          <!-- ===== VISTA DIA ===== -->
+          <div id="cxDia">
+            <div class="cx-kpis" id="cxKpis"></div>
+            <div class="cx-row2">
+              <div class="cx-card"><div class="cx-h">Ingresos del día</div><div id="cxIngresos"></div></div>
+              <div class="cx-card"><div class="cx-h">Cuadre de caja</div><div id="cxCuadre"></div></div>
+            </div>
+            <div class="cx-card"><div class="cx-h">Servicios del día</div><div class="cx-wrap" id="cxServicios"></div></div>
+            <div class="cx-row2">
+              <div class="cx-card"><div class="cx-h">Por técnica</div><div class="cx-wrap" id="cxPorTecnica"></div></div>
+              <div class="cx-card">
+                <div class="cx-h">Egresos del día</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+                  <input id="cxEgConcepto" class="cx-in" placeholder="Concepto (ej. basura)" style="flex:2;min-width:140px">
+                  <input id="cxEgCantidad" class="cx-in" type="number" inputmode="decimal" placeholder="$" style="width:90px">
+                  <select id="cxEgTipo" class="cx-in"><option>Efectivo</option><option>Transferencia</option></select>
+                  <button class="cx-btn" onclick="corteAgregarEgreso()">Agregar</button>
+                </div>
+                <div id="cxEgresos"></div>
               </div>
-              <div id="cxEgresos"></div>
+            </div>
+            <div class="cx-card">
+              <div class="cx-h">Cerrar corte</div>
+              <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end">
+                <div><div style="font-size:12px;color:#667781;margin-bottom:4px">Efectivo que debe haber</div><div id="cxEsperado" style="font-size:20px;font-weight:700;font-variant-numeric:tabular-nums">—</div></div>
+                <div><div style="font-size:12px;color:#667781;margin-bottom:4px">Efectivo contado en caja</div><input id="cxContado" class="cx-in" type="number" inputmode="decimal" placeholder="0.00" oninput="corteDifLive()" style="width:150px"></div>
+                <div><div style="font-size:12px;color:#667781;margin-bottom:4px">Diferencia</div><div id="cxDif" style="font-size:20px;font-weight:700;font-variant-numeric:tabular-nums">—</div></div>
+                <input id="cxNotas" class="cx-in" placeholder="Notas (opcional)" style="flex:1;min-width:180px">
+                <button class="cx-btn" id="cxBtnCerrar" onclick="corteCerrar()">Cerrar corte</button>
+              </div>
+              <div id="cxCierreInfo" style="font-size:12px;margin-top:10px;color:#667781"></div>
             </div>
           </div>
-          <div class="cx-card">
-            <div class="cx-h">Cerrar corte</div>
-            <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end">
-              <div><div style="font-size:12px;color:#667781;margin-bottom:4px">Efectivo que debe haber</div><div id="cxEsperado" style="font-size:20px;font-weight:700;font-variant-numeric:tabular-nums">—</div></div>
-              <div><div style="font-size:12px;color:#667781;margin-bottom:4px">Efectivo contado en caja</div><input id="cxContado" class="cx-in" type="number" inputmode="decimal" placeholder="0.00" oninput="corteDifLive()" style="width:150px"></div>
-              <div><div style="font-size:12px;color:#667781;margin-bottom:4px">Diferencia</div><div id="cxDif" style="font-size:20px;font-weight:700;font-variant-numeric:tabular-nums">—</div></div>
-              <input id="cxNotas" class="cx-in" placeholder="Notas (opcional)" style="flex:1;min-width:180px">
-              <button class="cx-btn" id="cxBtnCerrar" onclick="corteCerrar()">Cerrar corte</button>
+
+          <!-- ===== VISTA SEMANA (como "CORTE POR FECHA" de la hoja) ===== -->
+          <div id="cxSem" style="display:none">
+            <div class="cx-kpis" id="cxsKpis"></div>
+            <div class="cx-row2">
+              <div class="cx-card"><div class="cx-h">Corte de la semana</div><div id="cxsCorte"></div></div>
+              <div class="cx-card"><div class="cx-h">Costos y utilidad</div><div id="cxsUtil"></div></div>
             </div>
-            <div id="cxCierreInfo" style="font-size:12px;margin-top:10px;color:#667781"></div>
+            <div class="cx-card">
+              <div class="cx-h">Nómina por colaborador</div>
+              <div class="cx-wrap" id="cxsNomina"></div>
+              <div style="font-size:11px;color:#8696a0;margin-top:8px">Subtotal = comisiones + sueldo + propinas + bonos − retardos − multas − pre-pago. Edita una fila y pulsa Guardar. El bono semanal de la recepcionista se calcula solo con la tabla de bonos de la sucursal.</div>
+            </div>
+            <div class="cx-row2">
+              <div class="cx-card"><div class="cx-h">Efectivo y tarjeta por día</div><div class="cx-wrap" id="cxsDias"></div></div>
+              <div class="cx-card"><div class="cx-h">Pagos a colaboradores</div><div id="cxsPagos"></div></div>
+            </div>
+            <div class="cx-card"><div class="cx-h">Servicios del periodo</div><div class="cx-wrap" id="cxsServicios"></div></div>
+            <div class="cx-card"><div class="cx-h">Gastos del periodo</div><div id="cxsGastos"></div></div>
           </div>
         </div>
       </div>
@@ -1502,16 +1531,151 @@ var cxFecha=null, cxData=null;
 function cxYmd(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function cxMoney(n){ var x=Number(n||0); return (x<0?'-':'')+'$'+Math.abs(x).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function cxEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
-function cxApi(path,opts){ opts=opts||{}; opts.headers=Object.assign({'Authorization':'Bearer '+token,'Content-Type':'application/json'},opts.headers||{}); return fetch(path,opts).then(function(r){return r.json();}); }
+function cxApi(path,opts){ opts=opts||{}; opts.headers=Object.assign({'Authorization':'Bearer '+token,'Content-Type':'application/json'},opts.headers||{});
+  // Timeout + catch: si la red falla, la pantalla muestra un aviso en vez de quedarse en blanco
+  var ctl=(typeof AbortController!=='undefined')?new AbortController():null; if(ctl){ opts.signal=ctl.signal; setTimeout(function(){ ctl.abort(); },15000); }
+  return fetch(path,opts).then(function(r){return r.json();}).catch(function(){ return {ok:false,error:'No se pudo conectar. Vuelve a intentar (botón Hoy o las flechas).'}; }); }
 function cxNumQ(){ var n=numActivo(); return n?('&numero_id='+encodeURIComponent(n)):''; }
 function cxKpi(cls,l,v,s){ return '<div class="cx-kpi '+cls+'"><div class="l">'+l+'</div><div class="v">'+cxMoney(v)+'</div><div class="s">'+s+'</div></div>'; }
 function cxLin(l,v,tot){ return '<div class="cx-linea'+(tot?' tot':'')+'"><span>'+l+'</span><span>'+cxMoney(v)+'</span></div>'; }
 function cxCero(v){ return v ? cxMoney(v) : '<span style="color:#ccc">—</span>'; }
 function cxPrim(n){ return String(n||'—').split(/\s+/)[0]; }
 
-function corteInit(){ if(!cxFecha) cxFecha=cxYmd(new Date()); corteCargar(); }
-function corteMover(d){ var p=cxFecha.split('-').map(Number); cxFecha=cxYmd(new Date(p[0],p[1]-1,p[2]+d)); corteCargar(); }
-function corteHoyR(){ cxFecha=cxYmd(new Date()); corteCargar(); }
+// ----- Modo Día / Semana del corte -----
+var cxModo='dia', cxsDesde=null, cxsHasta=null, cxsData=null;
+function cxSumDias(ymd,n){ var p=ymd.split('-').map(Number); return cxYmd(new Date(p[0],p[1]-1,p[2]+n)); }
+function cxsSemanaActual(){ var h=new Date(); var l=new Date(h.getFullYear(),h.getMonth(),h.getDate()-((h.getDay()+6)%7)); cxsDesde=cxYmd(l); cxsHasta=cxSumDias(cxsDesde,6); }
+function cxFmtCorta(ymd){ var p=ymd.split('-').map(Number); return new Date(p[0],p[1]-1,p[2]).toLocaleDateString('es-MX',{day:'numeric',month:'short'}); }
+function corteModo(m){
+  cxModo=m;
+  document.getElementById('cxModoDia').classList.toggle('on',m==='dia');
+  document.getElementById('cxModoSem').classList.toggle('on',m==='semana');
+  document.getElementById('cxDia').style.display = m==='dia' ? '' : 'none';
+  document.getElementById('cxSem').style.display = m==='semana' ? '' : 'none';
+  document.getElementById('cxFecha').style.display = m==='dia' ? '' : 'none';
+  document.getElementById('cxRango').style.display = m==='semana' ? 'inline-flex' : 'none';
+  document.getElementById('cxEstado').style.display = m==='dia' ? '' : 'none';
+  document.getElementById('cxAyuda').textContent = m==='dia'
+    ? 'Se arma solo con las citas que las técnicas palomean como “Vino” (con su cobro). Tú registras los egresos y cierras la caja.'
+    : 'Corte de la semana: ventas, nómina de cada colaborador (pagado y pendiente), gastos, utilidad y efectivo por día — como el “Corte por fecha” de tu hoja.';
+  if(m==='semana'){ if(!cxsDesde) cxsSemanaActual(); cxsCargar(); } else corteCargar();
+}
+function corteInit(){ if(!cxFecha) cxFecha=cxYmd(new Date()); corteModo(cxModo); }
+function corteMover(d){
+  if(cxModo==='semana'){ cxsDesde=cxSumDias(cxsDesde,7*d); cxsHasta=cxSumDias(cxsHasta,7*d); cxsCargar(); return; }
+  cxFecha=cxSumDias(cxFecha,d); corteCargar();
+}
+function corteHoyR(){ if(cxModo==='semana'){ cxsSemanaActual(); cxsCargar(); } else { cxFecha=cxYmd(new Date()); corteCargar(); } }
+function corteRango(){
+  var a=document.getElementById('cxDesde').value, b=document.getElementById('cxHasta').value;
+  if(a&&b&&a<=b){ cxsDesde=a; cxsHasta=b; cxsCargar(); }
+}
+function cxIn(id,v,i){ return '<input class="cx-num" id="'+id+'" type="number" inputmode="decimal" value="'+(Number(v)||0)+'" oninput="cxsRecalc('+i+')">'; }
+
+function cxsCargar(){
+  document.getElementById('cxTitulo').textContent='Semana del '+cxFmtCorta(cxsDesde)+' al '+cxFmtCorta(cxsHasta)+' '+cxsHasta.slice(0,4);
+  document.getElementById('cxDesde').value=cxsDesde; document.getElementById('cxHasta').value=cxsHasta;
+  cxApi('/api/corte/semana?desde='+cxsDesde+'&hasta='+cxsHasta+cxNumQ()).then(function(d){
+    if(!d||!d.ok){ cxsData=null; document.getElementById('cxsKpis').innerHTML='<div class="cx-card" style="grid-column:1/-1;color:#c62828">'+cxEsc((d&&d.error)||'No se pudo cargar el corte semanal')+'</div>'; return; }
+    cxsData=d; var t=d.totales, f=d.fijos;
+    document.getElementById('cxsKpis').innerHTML=
+      cxKpi('tot','Total semana',t.total_semana,d.servicios.length+' servicio(s)')+
+      cxKpi('tar','Total comisiones',t.comisiones,'de las técnicas')+
+      cxKpi('tra','Nómina total',t.total_nomina,'pagado '+cxMoney(t.pagado)+' · pendiente '+cxMoney(t.pendiente))+
+      '<div class="cx-kpi efe"><div class="l">Utilidad</div><div class="v" style="color:'+(t.utilidad>=0?'#2e7d32':'#c62828')+'">'+cxMoney(t.utilidad)+'</div><div class="s">después de nómina, gastos y fijos</div></div>';
+    document.getElementById('cxsCorte').innerHTML=
+      cxLin('Total semana',t.total_semana,true)+
+      cxLin('Efectivo en sucursal',t.efectivo)+cxLin('Total tarjeta',t.tarjeta)+cxLin('Total anticipos',t.anticipos)+cxLin('Transferencias',t.transferencias)+
+      cxLin('Sueldos',t.sueldos)+cxLin('Total gastos',t.gastos)+cxLin('Total bonos',t.bonos)+cxLin('Total comisiones',t.comisiones)+
+      cxLin('Ant. futuro transferencia',t.af_transfer)+cxLin('Ant. futuro tarjeta',t.af_tarjeta)+
+      cxLin('Propinas tarjeta',t.propina_tarjeta)+cxLin('Propinas transferencia',t.propina_transfer)+
+      '<div style="font-size:11px;color:#8696a0;margin-top:8px">Bono de la sucursal esta semana: <b>'+cxMoney(d.bono_sucursal)+'</b> (grupo '+d.grupo+', según la venta).</div>';
+    var fi=function(id,v){ return '<input class="cx-num" id="'+id+'" type="number" inputmode="decimal" value="'+(Number(v)||0)+'" style="width:100px">'; };
+    document.getElementById('cxsUtil').innerHTML=
+      '<div style="display:grid;grid-template-columns:1fr auto;gap:6px 10px;align-items:center;font-size:13px;margin-bottom:10px">'+
+        '<span>Materia prima</span>'+fi('cxfMat',f.materia_prima)+
+        '<span>Impulso</span>'+fi('cxfImp',f.impulso)+
+        '<span>Renta</span>'+fi('cxfRen',f.renta)+
+        '<span>Corporativo</span>'+fi('cxfCor',f.corporativo)+
+        '<span>Comisión bancaria (% de tarjeta)</span><input class="cx-num" id="cxfBanco" type="number" step="0.1" value="'+(Math.round(d.tasa_banco*1000)/10)+'" style="width:100px">'+
+      '</div>'+
+      '<button class="cx-btn" onclick="cxsGuardarFijos()" style="margin-bottom:12px">Guardar costos</button>'+
+      cxLin('Total semana',t.total_semana)+cxLin('− Comisiones',-t.comisiones)+cxLin('− Sueldos',-t.sueldos)+cxLin('− Bonos',-t.bonos)+
+      cxLin('− Gastos',-t.gastos)+cxLin('− Gastos fijos',-t.fijos)+cxLin('− Comisión bancaria ('+(Math.round(d.tasa_banco*1000)/10)+'%)',-t.comision_banco)+
+      cxLin('= Utilidad',t.utilidad,true);
+    var nom=d.nomina;
+    document.getElementById('cxsNomina').innerHTML = nom.length ?
+      '<table class="cx-tabla"><thead><tr><th>Colaborador</th><th class="n">Serv.</th><th class="n">Comisiones</th><th class="n">Propinas</th><th class="n">Sueldo</th><th class="n">Prop. extra</th><th class="n">Bono sem.</th><th class="n">Bono mens.</th><th class="n">Retardos</th><th class="n">Multas</th><th class="n">Pre-pago</th><th class="n">Subtotal</th><th class="n">Pagado</th><th class="n">Pendiente</th><th></th></tr></thead><tbody>'+
+      nom.map(function(n,i){
+        return '<tr id="cxsRow'+i+'"><td><b>'+cxEsc(String(n.nombre||'').split(/\s+/).slice(0,2).join(' '))+'</b><div style="font-size:11px;color:#8696a0">'+cxEsc(n.rol)+(n.guardado?' · guardado':'')+'</div></td>'+
+          '<td class="n">'+n.servicios+'</td><td class="n">'+cxMoney(n.comisiones)+'</td><td class="n">'+cxMoney(n.propinas_servicios)+'</td>'+
+          '<td class="n">'+cxIn('cxsSue'+i,n.sueldo,i)+'</td><td class="n">'+cxIn('cxsPro'+i,n.propinas_extra,i)+'</td>'+
+          '<td class="n">'+cxIn('cxsBs'+i,n.bono_semanal,i)+'</td><td class="n">'+cxIn('cxsBm'+i,n.bono_mensual,i)+'</td>'+
+          '<td class="n">'+cxIn('cxsRet'+i,n.retardos,i)+'</td><td class="n">'+cxIn('cxsMul'+i,n.multas,i)+'</td><td class="n">'+cxIn('cxsPre'+i,n.pre_pago,i)+'</td>'+
+          '<td class="n"><b id="cxsSub'+i+'">'+cxMoney(n.subtotal)+'</b></td><td class="n">'+cxMoney(n.pagado)+'</td><td class="n" id="cxsPen'+i+'" style="color:'+(n.pendiente>0.009?'#b25e00':'#2e7d32')+';font-weight:600">'+cxMoney(n.pendiente)+'</td>'+
+          '<td style="white-space:nowrap"><button class="cx-mini" onclick="cxsGuardarAjuste('+i+')">Guardar</button> <button class="cx-mini pay" onclick="cxsTogglePago('+i+')">Pagar</button></td></tr>'+
+          '<tr id="cxsPay'+i+'" style="display:none;background:#f8faf9"><td colspan="15"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:4px 0">'+
+            '<span style="font-size:12px;color:#667781">Registrar pago a '+cxEsc(String(n.nombre||'').split(/\s+/)[0])+':</span>'+
+            '<input class="cx-in" id="cxsPayCant'+i+'" type="number" inputmode="decimal" value="'+Math.max(0,n.pendiente)+'" style="width:110px">'+
+            '<select class="cx-in" id="cxsPayTipo'+i+'"><option>Comisión</option><option>Sueldo</option><option>Bono Semanal</option><option>Bono Mensual</option><option>Propinas</option><option>Pagado</option></select>'+
+            '<select class="cx-in" id="cxsPayMet'+i+'"><option>Efectivo</option><option>Transferencia</option></select>'+
+            '<button class="cx-btn" onclick="cxsPagar('+i+')">Registrar pago</button></div></td></tr>';
+      }).join('')+
+      '<tr><td><b>Total</b></td><td></td><td class="n"><b>'+cxMoney(t.comisiones)+'</b></td><td colspan="8"></td><td class="n"><b>'+cxMoney(t.total_nomina)+'</b></td><td class="n"><b>'+cxMoney(t.pagado)+'</b></td><td class="n"><b>'+cxMoney(t.pendiente)+'</b></td><td></td></tr>'+
+      '</tbody></table>' : '<p style="color:#999;font-size:13px;margin:0">Sin colaboradores en este periodo.</p>';
+    var pd=d.por_dia;
+    document.getElementById('cxsDias').innerHTML='<table class="cx-tabla"><thead><tr><th>Día</th><th class="n">Vendido</th><th class="n">Efectivo</th><th class="n">Tarjeta</th><th class="n">Transfer</th></tr></thead><tbody>'+
+      pd.map(function(x){ return '<tr><td>'+cxEsc(x.dia)+' <span style="color:#8696a0;font-size:11px">'+x.fecha.slice(8)+'</span></td><td class="n">'+cxCero(x.vendido)+'</td><td class="n">'+cxCero(x.efectivo)+'</td><td class="n">'+cxCero(x.tarjeta)+'</td><td class="n">'+cxCero(x.transferencias)+'</td></tr>'; }).join('')+
+      '<tr><td><b>Total</b></td><td class="n"><b>'+cxMoney(t.total_semana)+'</b></td><td class="n"><b>'+cxMoney(t.efectivo)+'</b></td><td class="n"><b>'+cxMoney(t.tarjeta)+'</b></td><td class="n"><b>'+cxMoney(t.transferencias)+'</b></td></tr></tbody></table>'+
+      '<div style="margin-top:10px">'+cxLin('Efectivo cobrado',t.efectivo)+cxLin('− Gastos en efectivo',-t.gastos_efectivo)+cxLin('− Pagos en efectivo',-t.pagos_efectivo)+cxLin('= Sobrante de efectivo',t.sobrante_efectivo,true)+'</div>';
+    var pg=d.pagos;
+    document.getElementById('cxsPagos').innerHTML = pg.length ?
+      pg.map(function(p){ return '<div class="cx-linea"><span>'+cxEsc((p.fecha||'').slice(5,10))+' · <b>'+cxEsc(String(p.colaborador_nombre||'').split(/\s+/)[0])+'</b> <span style="color:#8696a0;font-size:11px">· '+cxEsc(p.tipo||'')+' · '+cxEsc(p.metodo||'')+'</span></span><span>'+cxMoney(p.cantidad)+' <button onclick="cxsBorrarPago('+p.id+')" title="Borrar" style="border:none;background:none;color:#c62828;cursor:pointer;font-size:14px">✕</button></span></div>'; }).join('')+
+      cxLin('Total pagado',t.pagado,true) : '<p style="color:#999;font-size:13px;margin:0">Aún no hay pagos registrados. Usa “Pagar” en la nómina.</p>';
+    var sv=d.servicios;
+    document.getElementById('cxsServicios').innerHTML = sv.length ?
+      '<table class="cx-tabla"><thead><tr><th>Fecha</th><th>Colaborador</th><th>Servicio</th><th class="n">Costo</th><th class="n">Efectivo</th><th class="n">Tarjeta</th><th class="n">Anticipo</th><th class="n">Transfer</th><th>Clienta</th><th class="n">Comisión</th></tr></thead><tbody>'+
+      sv.map(function(s){ return '<tr><td>'+cxEsc((s.fecha||'').slice(5,16).replace(' ',' · '))+'</td><td>'+cxEsc(cxPrim(s.tecnica_nombre))+'</td><td>'+cxEsc(s.servicio||s.tipo_servicio||'')+'</td><td class="n">'+cxMoney(s.precio)+'</td><td class="n">'+cxCero(s.pago_efectivo)+'</td><td class="n">'+cxCero(s.pago_tarjeta)+'</td><td class="n">'+cxCero(s.pago_anticipo)+'</td><td class="n">'+cxCero(s.pago_transfer)+'</td><td>'+cxEsc(s.cliente||'—')+'</td><td class="n">'+cxMoney(s.comision)+'</td></tr>'; }).join('')+
+      '<tr><td colspan="3"><b>Total</b></td><td class="n"><b>'+cxMoney(t.total_semana)+'</b></td><td class="n"><b>'+cxMoney(t.efectivo)+'</b></td><td class="n"><b>'+cxMoney(t.tarjeta)+'</b></td><td class="n"><b>'+cxMoney(t.anticipos)+'</b></td><td class="n"><b>'+cxMoney(t.transferencias)+'</b></td><td></td><td class="n"><b>'+cxMoney(t.comisiones)+'</b></td></tr></tbody></table>'
+      : '<p style="color:#999;font-size:13px;margin:0">Sin servicios palomeados en este periodo.</p>';
+    var eg=d.egresos;
+    document.getElementById('cxsGastos').innerHTML = eg.length ?
+      eg.map(function(e){ return '<div class="cx-linea"><span>'+cxEsc((e.fecha||'').slice(5,10))+' · '+cxEsc(e.concepto||'—')+' <span style="color:#8696a0;font-size:11px">· '+cxEsc(e.tipo||'Efectivo')+'</span></span><span>'+cxMoney(e.cantidad)+'</span></div>'; }).join('')+
+      cxLin('Total gastos',t.gastos,true)+'<div style="font-size:11px;color:#8696a0;margin-top:6px">Los gastos se registran en la vista Día.</div>' : '<p style="color:#999;font-size:13px;margin:0">Sin gastos en este periodo (se registran en la vista Día).</p>';
+  });
+}
+function cxsVal(id){ var e=document.getElementById(id); return e ? (parseFloat(e.value)||0) : 0; }
+function cxsRecalc(i){
+  var n=cxsData && cxsData.nomina[i]; if(!n) return;
+  var sub=Math.round((n.comisiones+cxsVal('cxsSue'+i)+n.propinas_servicios+cxsVal('cxsPro'+i)+cxsVal('cxsBs'+i)+cxsVal('cxsBm'+i)-cxsVal('cxsRet'+i)-cxsVal('cxsMul'+i)-cxsVal('cxsPre'+i))*100)/100;
+  var pen=Math.round((sub-n.pagado)*100)/100;
+  document.getElementById('cxsSub'+i).textContent=cxMoney(sub);
+  var pe=document.getElementById('cxsPen'+i); pe.textContent=cxMoney(pen); pe.style.color = pen>0.009 ? '#b25e00' : '#2e7d32';
+}
+function cxsGuardarAjuste(i){
+  var n=cxsData.nomina[i];
+  cxApi('/api/corte/ajustes',{method:'POST',body:JSON.stringify({desde:cxsDesde,hasta:cxsHasta,colaborador_id:n.colaborador_id,numero_id:numActivo()||undefined,
+    sueldo:cxsVal('cxsSue'+i),propinas:cxsVal('cxsPro'+i),bono_semanal:cxsVal('cxsBs'+i),bono_mensual:cxsVal('cxsBm'+i),retardos:cxsVal('cxsRet'+i),multas:cxsVal('cxsMul'+i),pre_pago:cxsVal('cxsPre'+i)})})
+  .then(function(r){ if(r&&r.ok) cxsCargar(); else alert((r&&r.error)||'No se pudo guardar'); });
+}
+function cxsTogglePago(i){ var r=document.getElementById('cxsPay'+i); r.style.display = r.style.display==='none' ? '' : 'none'; }
+function cxsPagar(i){
+  var n=cxsData.nomina[i], cant=cxsVal('cxsPayCant'+i);
+  if(cant<=0){ alert('Pon la cantidad pagada'); return; }
+  var fecha = (cxYmd(new Date())>=cxsDesde && cxYmd(new Date())<=cxsHasta) ? cxYmd(new Date()) : cxsHasta;
+  cxApi('/api/corte/pagos',{method:'POST',body:JSON.stringify({colaborador_id:n.colaborador_id,cantidad:cant,tipo:document.getElementById('cxsPayTipo'+i).value,metodo:document.getElementById('cxsPayMet'+i).value,fecha:fecha,numero_id:numActivo()||undefined})})
+  .then(function(r){ if(r&&r.ok) cxsCargar(); else alert((r&&r.error)||'No se pudo registrar el pago'); });
+}
+function cxsBorrarPago(id){
+  if(!confirm('¿Borrar este pago?')) return;
+  cxApi('/api/corte/pagos/'+id+'/borrar',{method:'POST'}).then(function(){ cxsCargar(); });
+}
+function cxsGuardarFijos(){
+  cxApi('/api/corte/fijos',{method:'POST',body:JSON.stringify({desde:cxsDesde,hasta:cxsHasta,numero_id:numActivo()||undefined,
+    materia_prima:cxsVal('cxfMat'),impulso:cxsVal('cxfImp'),renta:cxsVal('cxfRen'),corporativo:cxsVal('cxfCor'),tasa_banco:cxsVal('cxfBanco')/100})})
+  .then(function(r){ if(r&&r.ok) cxsCargar(); else alert((r&&r.error)||'No se pudo guardar'); });
+}
+
 function corteIrFecha(){ var v=document.getElementById('cxFecha').value; if(v){ cxFecha=v; corteCargar(); } }
 
 function corteCargar(){

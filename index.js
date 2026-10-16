@@ -127,6 +127,15 @@ db.serialize(() => {
     tarjeta REAL DEFAULT 0, transferencias REAL DEFAULT 0, egresos REAL DEFAULT 0, notas TEXT,
     cerrado_por INTEGER, cerrado_por_nombre TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(numero_id, fecha))`);
+  // pagos hechos a colaboradores (comision, sueldo, bono...) -> "Pagado" / "Pendiente" de la nomina.
+  db.run(`CREATE TABLE IF NOT EXISTS corte_pagos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, sucursal TEXT, numero_id TEXT, fecha TEXT, colaborador_id INTEGER, colaborador_nombre TEXT,
+    cantidad REAL DEFAULT 0, tipo TEXT, metodo TEXT DEFAULT 'Efectivo', notas TEXT, creado_por INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  // gastos fijos del periodo (como la hoja "Egresos Fijos"): materia prima, impulso, renta, corporativo.
+  db.run(`CREATE TABLE IF NOT EXISTS corte_fijos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, numero_id TEXT, periodo_inicio TEXT, periodo_fin TEXT,
+    materia_prima REAL DEFAULT 0, impulso REAL DEFAULT 0, renta REAL DEFAULT 0, corporativo REAL DEFAULT 0,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(numero_id, periodo_inicio, periodo_fin))`);
   setTimeout(seedCorteDefaults, 1500);
 
   // Tarifas de Meta por pais y categoria (USD por mensaje entregado).
@@ -2290,6 +2299,165 @@ app.post('/api/corte/cerrar', auth, requireRole('recepcionista', 'admin', 'super
       [sucursal, numero_id, fecha, t.total_vendido, t.efectivo_neto, contado, diferencia, t.tarjeta_neto, t.transfer_neto, t.egresos_total, req.body.notas || null, req.user.id, req.user.nombre || null],
       e => e ? res.status(500).json({ error: e.message }) : res.json({ ok: true, fecha, efectivo_esperado: t.efectivo_neto, efectivo_contado: contado, diferencia }));
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ==================== CORTE SEMANAL (como "CORTE POR FECHA" de la hoja) ====================
+// Totales del periodo, nomina por colaborador (comisiones + sueldo + propinas + bonos
+// - retardos - multas - pre-pago, con pagado/pendiente), gastos fijos, comision bancaria,
+// utilidad y efectivo/tarjeta por dia.
+const DIAS_ES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+app.get('/api/corte/semana', auth, requireRole('recepcionista', 'admin', 'supervisor'), async (req, res) => {
+  try {
+    const { numero_id, sucursal } = await numeroCorte(req);
+    if (!numero_id) return res.status(400).json({ error: 'Selecciona un número/sucursal' });
+    const { desde, hasta } = req.query;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(desde || '') || !/^\d{4}-\d{2}-\d{2}$/.test(hasta || '')) return res.status(400).json({ error: 'Fechas inválidas' });
+    const q = (sql, p) => new Promise(r => db.all(sql, p, (e, x) => r(x || [])));
+    const g = (sql, p) => new Promise(r => db.get(sql, p, (e, x) => r(x || null)));
+    const r2 = n => Math.round(n * 100) / 100;
+    const sum = (arr, f) => r2(arr.reduce((a, x) => a + nz(f(x)), 0));
+    const rango = [numero_id, desde, hasta];
+    const servicios = await q('SELECT * FROM servicios WHERE anulado=0 AND numero_id=? AND date(fecha) BETWEEN date(?) AND date(?) ORDER BY fecha', rango);
+    const egresos = await q('SELECT * FROM corte_egresos WHERE numero_id=? AND date(fecha) BETWEEN date(?) AND date(?) ORDER BY fecha', rango);
+    const pagos = await q('SELECT * FROM corte_pagos WHERE numero_id=? AND date(fecha) BETWEEN date(?) AND date(?) ORDER BY fecha', rango);
+    const fijos = (await g('SELECT * FROM corte_fijos WHERE numero_id=? AND periodo_inicio=? AND periodo_fin=?', rango)) || { materia_prima: 0, impulso: 0, renta: 0, corporativo: 0 };
+    const tbRaw = parseFloat(await configGet('corte_tasa_banco'));
+    const tasa_banco = isNaN(tbRaw) ? 0.025 : tbRaw;
+
+    const t = {
+      total_semana: sum(servicios, s => s.precio),
+      efectivo: sum(servicios, s => s.pago_efectivo),
+      tarjeta: sum(servicios, s => s.pago_tarjeta),
+      anticipos: sum(servicios, s => s.pago_anticipo),
+      transferencias: sum(servicios, s => s.pago_transfer),
+      af_tarjeta: sum(servicios, s => s.af_tarjeta),
+      af_transfer: sum(servicios, s => s.af_transfer),
+      propina_tarjeta: sum(servicios, s => s.propina_tarjeta),
+      propina_transfer: sum(servicios, s => s.propina_transfer),
+      comisiones: sum(servicios, s => s.comision),
+      gastos: sum(egresos, e => e.cantidad),
+      gastos_efectivo: sum(egresos.filter(e => (e.tipo || 'Efectivo') === 'Efectivo'), e => e.cantidad)
+    };
+
+    // Bono de la sucursal segun la venta del periodo (tabla de bonos por grupo). Va a la(s) recepcionista(s).
+    const gr = await g('SELECT grupo FROM corte_sucursal_grupo WHERE sucursal=?', [sucursal]);
+    const grupo = gr ? gr.grupo : 1;
+    const br = await g('SELECT bono FROM corte_bonos WHERE grupo=? AND venta_min<=? ORDER BY venta_min DESC LIMIT 1', [grupo, t.total_semana]);
+    const bono_sucursal = br ? nz(br.bono) : 0;
+
+    // Colaboradores: usuarios de la sucursal (tecnicas y recepcionistas) + quien tenga servicios en el periodo
+    const usuarios = await q("SELECT id, nombre, rol, sueldo_base FROM usuarios WHERE (numero_id=? OR sucursal=?) AND rol IN ('tecnica','recepcionista')", [numero_id, sucursal]);
+    const cols = new Map(usuarios.map(u => [u.id, u]));
+    servicios.forEach(s => { if (s.tecnica_id && !cols.has(s.tecnica_id)) cols.set(s.tecnica_id, { id: s.tecnica_id, nombre: s.tecnica_nombre, rol: 'tecnica', sueldo_base: 0 }); });
+    const ajustes = await q('SELECT * FROM corte_ajustes WHERE periodo_inicio=? AND periodo_fin=?', [desde, hasta]);
+    const ajMap = new Map(ajustes.map(a => [a.colaborador_id, a]));
+
+    const nomina = [...cols.values()].map(u => {
+      const sv = servicios.filter(s => s.tecnica_id === u.id);
+      const aj = ajMap.get(u.id);
+      const bonoAuto = u.rol === 'recepcionista' ? bono_sucursal : 0;
+      const n = {
+        colaborador_id: u.id, nombre: u.nombre, rol: u.rol, servicios: sv.length, vendido: sum(sv, s => s.precio),
+        comisiones: sum(sv, s => s.comision),
+        propinas_servicios: sum(sv, s => nz(s.propina_tarjeta) + nz(s.propina_transfer)),
+        sueldo: aj ? nz(aj.sueldo) : nz(u.sueldo_base),
+        retardos: aj ? nz(aj.retardos) : 0, multas: aj ? nz(aj.multas) : 0,
+        propinas_extra: aj ? nz(aj.propinas) : 0,
+        bono_semanal: aj ? nz(aj.bono_semanal) : bonoAuto, bono_semanal_auto: bonoAuto,
+        bono_mensual: aj ? nz(aj.bono_mensual) : 0, pre_pago: aj ? nz(aj.pre_pago) : 0,
+        guardado: !!aj, notas: aj ? aj.notas : null
+      };
+      n.propinas = r2(n.propinas_servicios + n.propinas_extra);
+      n.subtotal = r2(n.comisiones + n.sueldo + n.propinas + n.bono_semanal + n.bono_mensual - n.retardos - n.multas - n.pre_pago);
+      n.pagado = sum(pagos.filter(p => p.colaborador_id === u.id), p => p.cantidad);
+      n.pendiente = r2(n.subtotal - n.pagado);
+      return n;
+    }).sort((a, b) => (b.subtotal - a.subtotal) || String(a.nombre).localeCompare(String(b.nombre)));
+
+    t.sueldos = sum(nomina, n => n.sueldo);
+    t.bonos = sum(nomina, n => n.bono_semanal + n.bono_mensual);
+    t.total_nomina = sum(nomina, n => n.subtotal);
+    t.pagado = sum(nomina, n => n.pagado);
+    t.pendiente = r2(t.total_nomina - t.pagado);
+    t.fijos = r2(nz(fijos.materia_prima) + nz(fijos.impulso) + nz(fijos.renta) + nz(fijos.corporativo));
+    t.comision_banco = r2((t.tarjeta + t.af_tarjeta + t.propina_tarjeta) * tasa_banco);   // lo que pasa por la terminal
+    t.utilidad = r2(t.total_semana - t.comisiones - t.sueldos - t.bonos - t.gastos - t.fijos - t.comision_banco);
+    t.pagos_efectivo = sum(pagos.filter(p => (p.metodo || 'Efectivo') === 'Efectivo'), p => p.cantidad);
+    t.sobrante_efectivo = r2(t.efectivo - t.gastos_efectivo - t.pagos_efectivo);
+
+    // Efectivo / tarjeta / transferencia por dia del periodo
+    const por_dia = [];
+    const d0 = new Date(desde + 'T12:00:00Z'), d1 = new Date(hasta + 'T12:00:00Z');
+    for (let d = new Date(d0), i = 0; d <= d1 && i < 62; d.setUTCDate(d.getUTCDate() + 1), i++) {
+      const f = d.toISOString().slice(0, 10);
+      const sd = servicios.filter(s => String(s.fecha).slice(0, 10) === f);
+      por_dia.push({ fecha: f, dia: DIAS_ES[d.getUTCDay()], efectivo: sum(sd, s => s.pago_efectivo), tarjeta: sum(sd, s => s.pago_tarjeta), transferencias: sum(sd, s => s.pago_transfer), vendido: sum(sd, s => s.precio) });
+    }
+    res.json({ ok: true, desde, hasta, numero_id, sucursal, grupo, bono_sucursal, tasa_banco, totales: t, fijos, nomina, por_dia, servicios, egresos, pagos });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// El colaborador debe ser de la sucursal/numero sobre el que opera quien edita.
+async function colaboradorDelNumero(colabId, numero_id, sucursal) {
+  const u = await new Promise(r => db.get("SELECT id, nombre FROM usuarios WHERE id=? AND (numero_id=? OR sucursal=?)", [colabId, numero_id, sucursal], (e, x) => r(x)));
+  if (u) return u;
+  const s = await new Promise(r => db.get('SELECT tecnica_id id, tecnica_nombre nombre FROM servicios WHERE tecnica_id=? AND numero_id=? LIMIT 1', [colabId, numero_id], (e, x) => r(x)));
+  return s || null;
+}
+
+// Guardar ajustes de nomina de un colaborador para el periodo (sueldo, retardos, multas, propinas extra, bonos, pre-pago)
+app.post('/api/corte/ajustes', auth, requireRole('recepcionista', 'admin', 'supervisor'), async (req, res) => {
+  try {
+    const b = req.body || {};
+    const { numero_id, sucursal } = await numeroCorte(req);
+    const u = await colaboradorDelNumero(b.colaborador_id, numero_id, sucursal);
+    if (!u) return res.status(403).json({ error: 'Ese colaborador no es de tu sucursal' });
+    db.run(`INSERT INTO corte_ajustes (sucursal, colaborador_id, colaborador_nombre, periodo_inicio, periodo_fin, sueldo, retardos, multas, propinas, bono_semanal, bono_mensual, pre_pago, notas)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(colaborador_id, periodo_inicio, periodo_fin) DO UPDATE SET sueldo=excluded.sueldo, retardos=excluded.retardos, multas=excluded.multas,
+              propinas=excluded.propinas, bono_semanal=excluded.bono_semanal, bono_mensual=excluded.bono_mensual, pre_pago=excluded.pre_pago,
+              notas=excluded.notas, updated_at=CURRENT_TIMESTAMP`,
+      [sucursal, u.id, u.nombre, b.desde, b.hasta, nz(b.sueldo), nz(b.retardos), nz(b.multas), nz(b.propinas), nz(b.bono_semanal), nz(b.bono_mensual), nz(b.pre_pago), b.notas || null],
+      e => e ? res.status(500).json({ error: e.message }) : res.json({ ok: true }));
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Gastos fijos del periodo + tasa de comision bancaria
+app.post('/api/corte/fijos', auth, requireRole('recepcionista', 'admin', 'supervisor'), async (req, res) => {
+  try {
+    const b = req.body || {};
+    const { numero_id } = await numeroCorte(req);
+    if (!numero_id) return res.status(400).json({ error: 'Selecciona un número/sucursal' });
+    if (b.tasa_banco !== undefined && b.tasa_banco !== null && b.tasa_banco !== '') {
+      const tb = Math.max(0, Math.min(0.2, nz(b.tasa_banco)));
+      db.run('INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?,?)', ['corte_tasa_banco', String(tb)]);
+    }
+    db.run(`INSERT INTO corte_fijos (numero_id, periodo_inicio, periodo_fin, materia_prima, impulso, renta, corporativo) VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(numero_id, periodo_inicio, periodo_fin) DO UPDATE SET materia_prima=excluded.materia_prima, impulso=excluded.impulso,
+              renta=excluded.renta, corporativo=excluded.corporativo, updated_at=CURRENT_TIMESTAMP`,
+      [numero_id, b.desde, b.hasta, nz(b.materia_prima), nz(b.impulso), nz(b.renta), nz(b.corporativo)],
+      e => e ? res.status(500).json({ error: e.message }) : res.json({ ok: true }));
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Registrar / borrar pagos a colaboradores
+app.post('/api/corte/pagos', auth, requireRole('recepcionista', 'admin', 'supervisor'), async (req, res) => {
+  try {
+    const b = req.body || {};
+    const { numero_id, sucursal } = await numeroCorte(req);
+    const u = await colaboradorDelNumero(b.colaborador_id, numero_id, sucursal);
+    if (!u) return res.status(403).json({ error: 'Ese colaborador no es de tu sucursal' });
+    if (nz(b.cantidad) <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
+    const fecha = b.fecha ? (String(b.fecha).length === 10 ? b.fecha + ' ' + ahoraMX().slice(11) : b.fecha) : ahoraMX();
+    db.run('INSERT INTO corte_pagos (sucursal, numero_id, fecha, colaborador_id, colaborador_nombre, cantidad, tipo, metodo, notas, creado_por) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      [sucursal, numero_id, fecha, u.id, u.nombre, nz(b.cantidad), b.tipo || 'Pagado', b.metodo || 'Efectivo', b.notas || null, req.user.id],
+      function (e) { e ? res.status(500).json({ error: e.message }) : res.json({ ok: true, id: this.lastID }); });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+app.post('/api/corte/pagos/:id/borrar', auth, requireRole('recepcionista', 'admin', 'supervisor'), (req, res) => {
+  const soloSuyo = req.user.rol === 'recepcionista';
+  db.run('DELETE FROM corte_pagos WHERE id=?' + (soloSuyo ? ' AND numero_id=?' : ''), soloSuyo ? [req.params.id, req.user.numero_id] : [req.params.id],
+    function (e) { e ? res.status(500).json({ error: e.message }) : res.json({ ok: true, borrados: this.changes }); });
 });
 
 // app.listen moved to end

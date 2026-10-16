@@ -239,6 +239,8 @@ db.serialize(() => {
     ['sueldo_base', 'REAL DEFAULT 0'],          // sueldo fijo por periodo (ej. recepcionista)
     ['tipo_pago', "TEXT DEFAULT 'comision'"]     // comision | sueldo | mixto
   ]);
+  // servicios creados desde el palomeo de la tecnica quedan ligados a la cita (event_id)
+  ensureColumns('servicios', [['event_id', 'TEXT']]);
   ensureColumns('numeros', [
     ['waba_id', 'TEXT'],
     ['pixel_id', 'TEXT'], ['capi_token', 'TEXT'], ['capi_version', "TEXT DEFAULT 'v21.0'"],
@@ -2938,29 +2940,72 @@ async function procesarVinoCapi(asis, rol) {
   } catch (e) { console.error('[VINO]', e.message || e); }
 }
 
+// Crea o actualiza el servicio (del corte) ligado a una cita cuando la tecnica
+// palomea "Vino" y captura el cobro. La comision se calcula sola. Un servicio por
+// cita (event_id): si re-palomea, se actualiza en vez de duplicar.
+async function upsertServicioPalomeo(eventId, b, req, ctx) {
+  const tasa = await tasaComision(b.tipo_servicio, ctx.sucursal);
+  const precio = nz(b.precio);
+  const comision = Math.round(precio * tasa * 100) / 100;
+  const numero_id = req.user.numero_id || null;
+  const tecnicaNombre = req.user.rol === 'tecnica' ? req.user.nombre : (b.tecnica_nombre || null);
+  const cliente = ctx.cliente || b.cliente || null;
+  const servicio = b.servicio || ctx.servicio || null;
+  const vals = [ctx.sucursal, numero_id, ctx.tecnicaId, tecnicaNombre, cliente, servicio, b.tipo_servicio || null,
+    precio, nz(b.pago_efectivo), nz(b.pago_tarjeta), nz(b.pago_transfer), nz(b.pago_anticipo),
+    nz(b.propina_tarjeta), nz(b.propina_transfer), b.observaciones || null, comision, tasa];
+  const existente = await new Promise(r => db.get('SELECT id FROM servicios WHERE event_id=?', [eventId], (e, x) => r(x)));
+  if (existente) {
+    await new Promise((resolve, reject) => db.run(
+      `UPDATE servicios SET sucursal=?, numero_id=?, tecnica_id=?, tecnica_nombre=?, cliente=?, servicio=?, tipo_servicio=?,
+         precio=?, pago_efectivo=?, pago_tarjeta=?, pago_transfer=?, pago_anticipo=?, propina_tarjeta=?, propina_transfer=?,
+         observaciones=?, comision=?, comision_tasa=?, anulado=0, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+      [...vals, existente.id], e => e ? reject(e) : resolve()));
+    return { id: existente.id, comision, tasa, actualizado: true };
+  }
+  const id = await new Promise((resolve, reject) => db.run(
+    `INSERT INTO servicios (sucursal, numero_id, tecnica_id, tecnica_nombre, cliente, servicio, tipo_servicio,
+       precio, pago_efectivo, pago_tarjeta, pago_transfer, pago_anticipo, propina_tarjeta, propina_transfer,
+       observaciones, comision, comision_tasa, event_id, creado_por, fecha)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(?,CURRENT_TIMESTAMP))`,
+    [...vals, eventId, req.user.id, ctx.fecha || null], function (e) { e ? reject(e) : resolve(this.lastID); }));
+  return { id, comision, tasa, creado: true };
+}
+
 app.post('/api/asistencias', auth, requireRole('tecnica', 'recepcionista', 'admin', 'supervisor'), (req, res) => {
   const { event_id, fecha, cliente, servicio, hora, estado } = req.body;
   if (!event_id) return res.status(400).json({ error: 'event_id requerido' });
   const sucursal = (req.user.rol === 'tecnica' || req.user.rol === 'recepcionista')
     ? req.user.sucursal : (req.body.sucursal || null);
-  // Estado vacio = des-marcar (borrar la fila)
+  // Estado vacio = des-marcar (borrar la fila) + anular el servicio ligado (sale del corte)
   if (!estado) {
+    db.run('UPDATE servicios SET anulado=1, updated_at=CURRENT_TIMESTAMP WHERE event_id = ?', [event_id]);
     return db.run('DELETE FROM asistencias WHERE event_id = ?', [event_id],
       err => err ? res.status(500).json({ error: err.message }) : res.json({ ok: true, estado: null }));
   }
   if (!['asistio', 'no_asistio'].includes(estado)) return res.status(400).json({ error: 'Estado invalido' });
-  const tecnicaId = req.user.rol === 'tecnica' ? req.user.id : null;
+  const tecnicaId = req.user.rol === 'tecnica' ? req.user.id : (req.body.tecnica_id || null);
   db.run(
     `INSERT INTO asistencias (event_id, sucursal, fecha, cliente, servicio, hora, estado, tecnica_id, marcado_por, updated_at)
      VALUES (?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
      ON CONFLICT(event_id) DO UPDATE SET estado=excluded.estado, fecha=excluded.fecha, cliente=excluded.cliente,
        servicio=excluded.servicio, hora=excluded.hora, marcado_por=excluded.marcado_por, updated_at=CURRENT_TIMESTAMP`,
     [event_id, sucursal, fecha || null, cliente || null, servicio || null, hora || null, estado, tecnicaId, req.user.id],
-    err => {
+    async err => {
       if (err) return res.status(500).json({ error: err.message });
-      res.json({ ok: true, estado });
-      // "Vino" marcado por la tecnica -> cruzar por nombre, disparar Purchase y mover a Cerrado
-      if (estado === 'asistio') procesarVinoCapi({ cliente, sucursal }, req.user.rol).catch(e => console.error('[VINO]', e.message));
+      // "No vino": anular cualquier servicio ligado a esta cita (sale del corte)
+      if (estado === 'no_asistio') {
+        db.run('UPDATE servicios SET anulado=1, updated_at=CURRENT_TIMESTAMP WHERE event_id=?', [event_id]);
+        return res.json({ ok: true, estado });
+      }
+      // "Vino" con cobro: crear/actualizar el servicio del corte
+      let svc = null;
+      try {
+        if (nz(req.body.precio) > 0) svc = await upsertServicioPalomeo(event_id, req.body, req, { sucursal, cliente, servicio, hora, fecha, tecnicaId });
+      } catch (e) { console.error('[CORTE palomeo]', e.message); }
+      res.json({ ok: true, estado, servicio: svc });
+      // "Vino" -> cruzar por nombre, disparar Purchase y mover a Cerrado
+      procesarVinoCapi({ cliente, sucursal }, req.user.rol).catch(e => console.error('[VINO]', e.message));
     }
   );
 });

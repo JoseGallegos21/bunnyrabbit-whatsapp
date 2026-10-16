@@ -245,64 +245,16 @@
     </div>
   </div>
 
-  <!-- TAB MI CORTE -->
+  <!-- TAB MI CORTE (solo lectura: las comisiones de la semana de la técnica) -->
   <div class="tab-panel" id="tab-corte">
-    <div class="section-title">Registrar servicio</div>
-    <div style="background:#1f2c34;border:1px solid #2a3942;border-radius:12px;padding:16px;margin-bottom:24px">
-      <div class="cf-row">
-        <div class="cf-field"><label>Clienta</label><input id="sv_cliente" class="cf-input" placeholder="Nombre de la clienta"></div>
-        <div class="cf-field"><label>Tipo de servicio</label>
-          <select id="sv_tipo" class="cf-input">
-            <option value="Micropigmentación">Micropigmentación</option>
-            <option value="Pestañas">Pestañas</option>
-            <option value="Otro">Otro</option>
-          </select>
-        </div>
-        <div class="cf-field"><label>Servicio</label>
-          <input id="sv_servicio" class="cf-input" list="sv_servicios" placeholder="Ej: Microshading, Latin Brows...">
-          <datalist id="sv_servicios">
-            <option>Microblading</option><option>Microshading</option><option>Efecto Polvo</option>
-            <option>Latin Brows</option><option>Delineado</option><option>Eye Liner</option>
-            <option>Pestañas Mink</option><option>Pestañas Volumen</option><option>Pestañas Híbrida</option>
-            <option>Retoque Microshading</option><option>Retoque Latin Brows</option><option>Retoque</option>
-            <option>Pomada</option><option>Remoción láser</option>
-          </datalist>
-        </div>
-      </div>
-      <div class="cf-row">
-        <div class="cf-field"><label>Precio $</label><input id="sv_precio" type="number" inputmode="decimal" class="cf-input" placeholder="0"></div>
-        <div class="cf-field"><label>¿Cómo pagó?</label>
-          <select id="sv_metodo" class="cf-input" onchange="toggleMixto()">
-            <option value="Efectivo">Efectivo</option>
-            <option value="Tarjeta">Tarjeta</option>
-            <option value="Transferencia">Transferencia</option>
-            <option value="Anticipo">Anticipo</option>
-            <option value="Mixto">Mixto (dividir)</option>
-          </select>
-        </div>
-        <div class="cf-field"><label>Propina $</label><input id="sv_propina" type="number" inputmode="decimal" class="cf-input" placeholder="0"></div>
-        <div class="cf-field"><label>Propina por</label>
-          <select id="sv_propina_metodo" class="cf-input">
-            <option value="Tarjeta">Tarjeta</option>
-            <option value="Transferencia">Transferencia</option>
-          </select>
-        </div>
-      </div>
-      <div class="cf-row" id="sv_mixto" style="display:none">
-        <div class="cf-field"><label>Efectivo $</label><input id="sv_efectivo" type="number" inputmode="decimal" class="cf-input" placeholder="0"></div>
-        <div class="cf-field"><label>Tarjeta $</label><input id="sv_tarjeta" type="number" inputmode="decimal" class="cf-input" placeholder="0"></div>
-        <div class="cf-field"><label>Transferencia $</label><input id="sv_transfer" type="number" inputmode="decimal" class="cf-input" placeholder="0"></div>
-        <div class="cf-field"><label>Anticipo $</label><input id="sv_anticipo" type="number" inputmode="decimal" class="cf-input" placeholder="0"></div>
-      </div>
-      <div class="cf-row">
-        <div class="cf-field" style="flex:3;min-width:220px"><label>Observaciones (opcional)</label><input id="sv_obs" class="cf-input" placeholder="Pigmento, notas..."></div>
-      </div>
-      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-        <button id="sv_btn" class="btn-corte" onclick="registrarServicio()">Registrar servicio</button>
-        <span id="sv_msg" style="font-size:13px"></span>
-      </div>
-    </div>
-
+    <!-- lista de sugerencias de servicio, reutilizada por el modal de cobro del palomeo -->
+    <datalist id="sv_servicios">
+      <option>Microblading</option><option>Microshading</option><option>Efecto Polvo</option>
+      <option>Latin Brows</option><option>Delineado</option><option>Eye Liner</option>
+      <option>Pestañas Mink</option><option>Pestañas Volumen</option><option>Pestañas Híbrida</option>
+      <option>Retoque Microshading</option><option>Retoque Latin Brows</option><option>Retoque</option>
+      <option>Pomada</option><option>Remoción láser</option>
+    </datalist>
     <div class="semana-nav">
       <div class="nav-btns">
         <button class="btn-nav" onclick="navCorte(-1)">‹</button>
@@ -312,7 +264,8 @@
       <button class="btn-hoy" onclick="corteHoy()">Esta semana</button>
     </div>
     <div class="corte-cards" id="corteResumen"></div>
-    <div class="section-title">Servicios de la semana</div>
+    <div style="font-size:12px;color:#8696a0;margin:-8px 0 16px">Tus comisiones salen de las citas que palomeas como “Vino”. El corte lo cierra recepción.</div>
+    <div class="section-title">Mis servicios de la semana</div>
     <div id="corteLista"><div class="loading">Cargando...</div></div>
   </div>
 
@@ -326,6 +279,53 @@
       <button class="dia-modal-close" onclick="cerrarDiaModal()">×</button>
     </div>
     <div id="diaModalLista"></div>
+  </div>
+</div>
+
+<!-- Modal de cobro al palomear "Vino" -->
+<div class="dia-modal-overlay" id="cobroModal" onclick="if(event.target===this)cerrarCobroModal()">
+  <div class="dia-modal" style="width:460px">
+    <div class="dia-modal-head">
+      <h3>✓ Vino — registrar cobro</h3>
+      <button class="dia-modal-close" onclick="cerrarCobroModal()">×</button>
+    </div>
+    <input type="hidden" id="cb_event"><input type="hidden" id="cb_fecha">
+    <div class="cf-row">
+      <div class="cf-field"><label>Clienta</label><input id="cb_cliente" class="cf-input" placeholder="Nombre"></div>
+    </div>
+    <div class="cf-row">
+      <div class="cf-field"><label>Tipo</label>
+        <select id="cb_tipo" class="cf-input"><option>Micropigmentación</option><option>Pestañas</option><option>Otro</option></select>
+      </div>
+      <div class="cf-field"><label>Servicio</label><input id="cb_servicio" class="cf-input" list="sv_servicios" placeholder="Ej: Latin Brows"></div>
+    </div>
+    <div class="cf-row">
+      <div class="cf-field"><label>Precio cobrado $</label><input id="cb_precio" type="number" inputmode="decimal" class="cf-input" placeholder="0"></div>
+      <div class="cf-field"><label>¿Cómo pagó?</label>
+        <select id="cb_metodo" class="cf-input" onchange="toggleMixtoCobro()">
+          <option value="Efectivo">Efectivo</option><option value="Tarjeta">Tarjeta</option>
+          <option value="Transferencia">Transferencia</option><option value="Anticipo">Anticipo</option>
+          <option value="Mixto">Mixto (dividir)</option>
+        </select>
+      </div>
+    </div>
+    <div class="cf-row" id="cb_mixto" style="display:none">
+      <div class="cf-field"><label>Efectivo $</label><input id="cb_efectivo" type="number" class="cf-input" placeholder="0"></div>
+      <div class="cf-field"><label>Tarjeta $</label><input id="cb_tarjeta" type="number" class="cf-input" placeholder="0"></div>
+      <div class="cf-field"><label>Transfer $</label><input id="cb_transfer" type="number" class="cf-input" placeholder="0"></div>
+      <div class="cf-field"><label>Anticipo $</label><input id="cb_anticipo" type="number" class="cf-input" placeholder="0"></div>
+    </div>
+    <div class="cf-row">
+      <div class="cf-field"><label>Propina $</label><input id="cb_propina" type="number" inputmode="decimal" class="cf-input" placeholder="0"></div>
+      <div class="cf-field"><label>Propina por</label>
+        <select id="cb_propina_metodo" class="cf-input"><option value="Tarjeta">Tarjeta</option><option value="Transferencia">Transferencia</option></select>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;margin-top:6px">
+      <button id="cb_btn" class="btn-corte" onclick="guardarCobro()">✓ Guardar cobro</button>
+      <button class="asis-btn" onclick="cerrarCobroModal()">Cancelar</button>
+      <span id="cb_msg" style="font-size:13px"></span>
+    </div>
   </div>
 </div>
 
@@ -554,13 +554,65 @@ async function cargarGoogleCalendar(fi, ff) {
 async function marcarAsistencia(eventId, estado) {
   const info = (window._gcalHoy || {})[eventId] || {};
   const actual = (window._asisMapa || {})[eventId] || '';
-  const nuevo = actual === estado ? '' : estado; // volver a tocar el mismo = limpiar
+  // "Vino": abrir el formulario de cobro (esta info alimenta el corte de la recepcionista).
+  if (estado === 'asistio') { abrirCobroModal(eventId, info); return; }
+  // "No vino": toggle directo (re-tocar limpia). Anula el servicio ligado en el backend.
+  const nuevo = actual === estado ? '' : estado;
   const r = await api('/api/asistencias', {
     method: 'POST',
     body: JSON.stringify({ event_id: eventId, fecha: info.fecha, cliente: info.cliente, servicio: info.servicio, hora: info.hora, estado: nuevo })
   });
   if (r && r.ok) cargarHoy();
   else alert('No se pudo guardar: ' + (r && r.error ? r.error : 'error'));
+}
+
+// ── Modal de cobro al palomear "Vino" ──
+function toggleMixtoCobro(){ document.getElementById('cb_mixto').style.display = document.getElementById('cb_metodo').value === 'Mixto' ? 'flex' : 'none'; }
+function abrirCobroModal(eventId, info){
+  const g = id => document.getElementById(id);
+  g('cb_event').value = eventId;
+  g('cb_fecha').value = info.fecha || '';
+  g('cb_cliente').value = info.cliente || '';
+  g('cb_servicio').value = '';
+  g('cb_tipo').value = 'Micropigmentación';
+  g('cb_precio').value = '';
+  g('cb_metodo').value = 'Efectivo';
+  g('cb_propina').value = '';
+  g('cb_propina_metodo').value = 'Tarjeta';
+  ['cb_efectivo','cb_tarjeta','cb_transfer','cb_anticipo'].forEach(id => g(id).value = '');
+  toggleMixtoCobro();
+  g('cb_msg').textContent = '';
+  document.getElementById('cobroModal').classList.add('open');
+  setTimeout(() => g('cb_precio').focus(), 100);
+}
+function cerrarCobroModal(){ document.getElementById('cobroModal').classList.remove('open'); }
+async function guardarCobro(){
+  const g = id => document.getElementById(id);
+  const precio = parseFloat(g('cb_precio').value) || 0;
+  if (precio <= 0) { g('cb_msg').innerHTML = '<span style="color:#e74c3c">Pon el precio cobrado</span>'; return; }
+  const metodo = g('cb_metodo').value;
+  const pago = { pago_efectivo: 0, pago_tarjeta: 0, pago_transfer: 0, pago_anticipo: 0 };
+  if (metodo === 'Mixto') {
+    pago.pago_efectivo = parseFloat(g('cb_efectivo').value) || 0;
+    pago.pago_tarjeta = parseFloat(g('cb_tarjeta').value) || 0;
+    pago.pago_transfer = parseFloat(g('cb_transfer').value) || 0;
+    pago.pago_anticipo = parseFloat(g('cb_anticipo').value) || 0;
+  } else {
+    const map = { 'Efectivo': 'pago_efectivo', 'Tarjeta': 'pago_tarjeta', 'Transferencia': 'pago_transfer', 'Anticipo': 'pago_anticipo' };
+    pago[map[metodo]] = precio;
+  }
+  const prop = parseFloat(g('cb_propina').value) || 0;
+  const propMet = g('cb_propina_metodo').value;
+  const body = {
+    event_id: g('cb_event').value, fecha: g('cb_fecha').value || null, hora: '', estado: 'asistio',
+    cliente: g('cb_cliente').value.trim() || null, tipo_servicio: g('cb_tipo').value, servicio: g('cb_servicio').value.trim() || null,
+    precio, ...pago, propina_tarjeta: propMet === 'Tarjeta' ? prop : 0, propina_transfer: propMet === 'Transferencia' ? prop : 0
+  };
+  const btn = g('cb_btn'); btn.disabled = true; btn.textContent = 'Guardando...';
+  const r = await api('/api/asistencias', { method: 'POST', body: JSON.stringify(body) });
+  btn.disabled = false; btn.textContent = '✓ Guardar cobro';
+  if (r && r.ok) { cerrarCobroModal(); cargarHoy(); }
+  else g('cb_msg').innerHTML = '<span style="color:#e74c3c">' + ((r && r.error) || 'Error al guardar') + '</span>';
 }
 
 // ── SEMANA ──
@@ -741,9 +793,7 @@ function corteSemanaFechas(){
 }
 function navCorte(dir){ corteOffset += dir; cargarCorte(); }
 function corteHoy(){ corteOffset = 0; cargarCorte(); }
-function toggleMixto(){ document.getElementById('sv_mixto').style.display = document.getElementById('sv_metodo').value === 'Mixto' ? 'flex' : 'none'; }
-function corteCard(label, val, dest){ return `<div class="corte-card ${dest ? 'destacada' : ''}"><div class="cc-label">${label}</div><div class="cc-val">${val}</div></div>`; }
-
+// Mi corte (técnica) = SOLO LECTURA: sus comisiones de la semana (vienen del palomeo "Vino").
 async function cargarCorte(){
   const [lunes, dom] = corteSemanaFechas();
   const fi = ymd(lunes), ff = ymd(dom);
@@ -755,12 +805,12 @@ async function cargarCorte(){
   const d = await api(`/api/corte/mi-corte?desde=${fi}&hasta=${ff}`);
   if (!d || !d.ok) { document.getElementById('corteResumen').innerHTML = ''; lista.innerHTML = '<div class="empty-state">No se pudo cargar tu corte</div>'; return; }
   document.getElementById('corteResumen').innerHTML =
-    corteCard('Vendido', money(d.vendido)) +
-    corteCard('Comisiones', money(d.comisiones)) +
-    corteCard('Propinas', money(d.propinas)) +
-    corteCard('A cobrar', money(d.subtotal), true);
+    `<div class="corte-card destacada" style="grid-column:1/-1">
+       <div class="cc-label">Comisiones de la semana · ${d.num_servicios || 0} servicio(s)</div>
+       <div class="cc-val" style="font-size:30px">${money(d.comisiones)}</div>
+     </div>`;
   const serv = d.servicios || [];
-  if (!serv.length) { lista.innerHTML = '<div class="empty-state">Sin servicios esta semana. Registra uno arriba ⬆️</div>'; return; }
+  if (!serv.length) { lista.innerHTML = '<div class="empty-state">Sin servicios esta semana. Palomea tus citas como “Vino” para que cuenten.</div>'; return; }
   lista.innerHTML = serv.slice().reverse().map(s => {
     const f = (s.fecha || '').slice(5, 10);
     return `<div class="serv-row">
@@ -769,54 +819,8 @@ async function cargarCorte(){
         <div style="font-size:12px;color:#8696a0">${f} · ${s.cliente || '—'}${s.tipo_servicio ? ' · ' + s.tipo_servicio : ''}</div>
       </div>
       <div class="sr-com">+${money(s.comision)}</div>
-      <button class="btn-anular" onclick="anularServicio(${s.id})">Anular</button>
     </div>`;
   }).join('');
-}
-
-async function anularServicio(id){
-  if (!confirm('¿Anular este servicio? Dejará de contar en tu corte.')) return;
-  const r = await api(`/api/servicios/${id}/anular`, { method: 'POST' });
-  if (r && r.ok) cargarCorte(); else alert('No se pudo anular');
-}
-
-async function registrarServicio(){
-  const g = id => document.getElementById(id);
-  const tipo = g('sv_tipo').value;
-  const servicio = g('sv_servicio').value.trim();
-  const precio = parseFloat(g('sv_precio').value) || 0;
-  if (!servicio) { alert('Escribe el servicio realizado'); return; }
-  if (precio <= 0) { alert('Pon el precio del servicio'); return; }
-  const metodo = g('sv_metodo').value;
-  const pago = { pago_efectivo: 0, pago_tarjeta: 0, pago_transfer: 0, pago_anticipo: 0 };
-  if (metodo === 'Mixto') {
-    pago.pago_efectivo = parseFloat(g('sv_efectivo').value) || 0;
-    pago.pago_tarjeta = parseFloat(g('sv_tarjeta').value) || 0;
-    pago.pago_transfer = parseFloat(g('sv_transfer').value) || 0;
-    pago.pago_anticipo = parseFloat(g('sv_anticipo').value) || 0;
-  } else {
-    const map = { 'Efectivo': 'pago_efectivo', 'Tarjeta': 'pago_tarjeta', 'Transferencia': 'pago_transfer', 'Anticipo': 'pago_anticipo' };
-    pago[map[metodo]] = precio;
-  }
-  const prop = parseFloat(g('sv_propina').value) || 0;
-  const propMet = g('sv_propina_metodo').value;
-  const body = {
-    cliente: g('sv_cliente').value.trim() || null, tipo_servicio: tipo, servicio, precio, ...pago,
-    propina_tarjeta: propMet === 'Tarjeta' ? prop : 0, propina_transfer: propMet === 'Transferencia' ? prop : 0,
-    observaciones: g('sv_obs').value.trim() || null
-  };
-  const btn = g('sv_btn'); btn.disabled = true; btn.textContent = 'Guardando...';
-  const r = await api('/api/servicios', { method: 'POST', body: JSON.stringify(body) });
-  btn.disabled = false; btn.textContent = 'Registrar servicio';
-  if (r && r.ok) {
-    g('sv_msg').innerHTML = '<span style="color:#25d366">✓ Registrado · comisión ' + money(r.comision) + '</span>';
-    ['sv_cliente','sv_servicio','sv_precio','sv_efectivo','sv_tarjeta','sv_transfer','sv_anticipo','sv_propina','sv_obs'].forEach(id => { const e = g(id); if (e) e.value = ''; });
-    g('sv_metodo').value = 'Efectivo'; toggleMixto();
-    cargarCorte();
-    setTimeout(() => { g('sv_msg').textContent = ''; }, 5000);
-  } else {
-    g('sv_msg').innerHTML = '<span style="color:#e74c3c">' + ((r && r.error) || 'Error al guardar') + '</span>';
-  }
 }
 
 // Init

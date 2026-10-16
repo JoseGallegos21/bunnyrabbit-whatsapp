@@ -2467,7 +2467,12 @@ app.post('/api/corte/pagos', auth, requireRole('recepcionista', 'admin', 'superv
   try {
     const b = req.body || {};
     const { numero_id, sucursal } = await numeroCorte(req);
-    const u = await colaboradorDelNumero(b.colaborador_id, numero_id, sucursal);
+    let u = b.colaborador_id ? await colaboradorDelNumero(b.colaborador_id, numero_id, sucursal) : null;
+    if (!u && !b.colaborador_id && b.colaborador_nombre) {
+      // colaborador sin usuario en la app (p. ej. importado del Excel): se identifica por su nombre en los servicios de este numero
+      const s = await new Promise(r => db.get('SELECT tecnica_nombre nombre FROM servicios WHERE tecnica_id IS NULL AND tecnica_nombre=? AND numero_id=? LIMIT 1', [b.colaborador_nombre, numero_id], (e, x) => r(x)));
+      if (s) u = { id: null, nombre: s.nombre };
+    }
     if (!u) return res.status(403).json({ error: 'Ese colaborador no es de tu sucursal' });
     if (nz(b.cantidad) <= 0) return res.status(400).json({ error: 'Cantidad inválida' });
     const fecha = b.fecha ? (String(b.fecha).length === 10 ? b.fecha + ' ' + ahoraMX().slice(11) : b.fecha) : ahoraMX();

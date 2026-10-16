@@ -1619,12 +1619,12 @@ function cxsCargar(){
         var pend = liquidado ? '<span class="cx-chip ce">✓ Pagado</span>' : (n.subtotal<=0.009 ? '<span style="color:#ccc">—</span>' : '<b style="color:#b25e00">'+cxMoney(n.pendiente)+'</b>');
         var tipoDef = n.rol==='recepcionista' ? 'Sueldo' : 'Comisión';
         var tipos=['Comisión','Sueldo','Bono Semanal','Bono Mensual','Propinas','Pagado'].map(function(t){ return '<option'+(t===tipoDef?' selected':'')+'>'+t+'</option>'; }).join('');
-        var btnPagar = (liquidado||n.subtotal<=0.009||n.sin_usuario) ? '' : '<button class="cx-mini pay" onclick="cxsToggle(&quot;Pay&quot;,'+i+')">💵 Pagar</button> ';
-        return '<tr><td><b>'+nombre+'</b><div style="font-size:11px;color:#8696a0">'+cxEsc(n.rol)+(n.guardado?' · ajustado':'')+'</div></td>'+
+        var btnPagar = '<button class="cx-mini pay" onclick="cxsToggle(&quot;Pay&quot;,'+i+')">💵 Pagar</button> ';
+        return '<tr><td><b>'+nombre+'</b><div style="font-size:11px;color:#8696a0">'+cxEsc(n.rol)+(n.guardado?' · ajustado':'')+(n.sin_usuario?' · sin usuario en la app':'')+'</div></td>'+
           '<td class="n">'+n.servicios+'</td><td class="n">'+cxMoney(n.comisiones)+'</td><td class="n">'+cxCero(n.propinas)+'</td>'+
           '<td class="n">'+cxCero(n.sueldo)+'</td><td class="n">'+cxCero(bonos)+'</td><td class="n">'+(desc>0.009?'<span style="color:#c62828">-'+cxMoney(desc)+'</span>':cxCero(0))+'</td>'+
           '<td class="n"><b>'+cxMoney(n.subtotal)+'</b></td><td class="n">'+cxCero(n.pagado)+'</td><td class="n">'+pend+'</td>'+
-          '<td class="n" style="white-space:nowrap">'+(n.sin_usuario?'<span style="font-size:11px;color:#8696a0">sin usuario en la app</span>':btnPagar+'<button class="cx-mini" onclick="cxsToggle(&quot;Aj&quot;,'+i+')">Ajustar</button>')+'</td></tr>'+
+          '<td class="n" style="white-space:nowrap">'+btnPagar+(n.sin_usuario?'':'<button class="cx-mini" onclick="cxsToggle(&quot;Aj&quot;,'+i+')">Ajustar</button>')+'</td></tr>'+
           '<tr id="cxsPay'+i+'" class="cx-exp" style="display:none"><td colspan="11"><div class="cx-expbox">'+
             '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'+
               '<span style="font-size:13px">Pago a <b>'+primer+'</b> · pendiente <b>'+cxMoney(n.pendiente)+'</b></span>'+
@@ -1686,7 +1686,7 @@ function cxsPagar(i){
   var n=cxsData.nomina[i], cant=cxsVal('cxsPayCant'+i);
   if(cant<=0){ alert('Pon la cantidad pagada'); return; }
   var fecha = (cxYmd(new Date())>=cxsDesde && cxYmd(new Date())<=cxsHasta) ? cxYmd(new Date()) : cxsHasta;
-  cxApi('/api/corte/pagos',{method:'POST',body:JSON.stringify({colaborador_id:n.colaborador_id,cantidad:cant,tipo:'Pagado',metodo:document.getElementById('cxsPayMet'+i).value,fecha:fecha,numero_id:numActivo()||undefined})})
+  cxApi('/api/corte/pagos',{method:'POST',body:JSON.stringify({colaborador_id:n.colaborador_id,colaborador_nombre:n.nombre,cantidad:cant,tipo:'Pagado',metodo:document.getElementById('cxsPayMet'+i).value,fecha:fecha,numero_id:numActivo()||undefined})})
   .then(function(r){ if(r&&r.ok) cxsCargar(); else alert((r&&r.error)||'No se pudo registrar el pago'); });
 }
 function cxsBorrarPago(id){
